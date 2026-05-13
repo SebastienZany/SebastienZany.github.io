@@ -60,11 +60,79 @@ select {
   cursor: grabbing;
 }
 
+.annotation-tethers,
+.annotation-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.annotation-tethers {
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.annotation-layer {
+  z-index: 2;
+  overflow: hidden;
+}
+
+.observation-callout {
+  position: absolute;
+  width: min(230px, calc(100vw - 28px));
+  min-height: 74px;
+  padding: 10px 12px 11px;
+  border: 1px solid rgba(255, 219, 110, 0.42);
+  border-radius: 7px;
+  background: rgba(9, 12, 13, 0.84);
+  box-shadow:
+    0 18px 42px rgba(0, 0, 0, 0.35),
+    0 0 28px rgba(255, 207, 80, 0.08);
+  opacity: 0;
+  transform: translateZ(0);
+  transition: opacity 160ms ease;
+  backdrop-filter: blur(14px);
+}
+
+.observation-callout.is-visible {
+  opacity: 1;
+}
+
+.observation-callout strong {
+  display: block;
+  overflow: hidden;
+  color: #fff5bd;
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.observation-callout p {
+  margin-top: 7px;
+  color: rgba(238, 245, 242, 0.88);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.observation-stem {
+  fill: none;
+  stroke: rgba(255, 218, 84, 0.92);
+  stroke-linecap: round;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
 .panel {
   position: absolute;
+  z-index: 4;
   top: 16px;
   left: 16px;
-  width: min(400px, calc(100vw - 32px));
+  width: min(460px, calc(100vw - 32px));
   max-height: calc(100vh - 32px);
   overflow: auto;
   padding: 14px;
@@ -138,6 +206,73 @@ button:active {
   margin: 14px 0;
 }
 
+.preset-stack {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 14px;
+}
+
+.preset-control {
+  display: grid;
+  grid-template-columns: minmax(88px, 0.55fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.preset-control label {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.preset-control select {
+  min-width: 0;
+  width: 100%;
+}
+
+.agent-history {
+  margin: -4px 0 14px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: rgba(8, 11, 12, 0.54);
+}
+
+.agent-history-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 7px;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.agent-history-head output {
+  color: var(--cyan);
+  font-variant-numeric: tabular-nums;
+}
+
+.history-chart {
+  display: block;
+  width: 100%;
+  height: 76px;
+}
+
+#agentGrowthChart {
+  height: 54px;
+  margin-top: 8px;
+}
+
+#agentAccelerationChart {
+  height: 54px;
+  margin-top: 8px;
+}
+
 .stats > div {
   min-width: 0;
   padding: 10px;
@@ -198,7 +333,7 @@ button:active {
 
 .control-row {
   display: grid;
-  grid-template-columns: 88px minmax(96px, 1fr) 48px;
+  grid-template-columns: 124px minmax(112px, 1fr) 56px;
   align-items: center;
   gap: 10px;
   min-height: 30px;
@@ -216,11 +351,12 @@ button:active {
 
 .control-copy strong {
   min-width: 0;
-  overflow: hidden;
+  overflow: visible;
   color: var(--muted);
   font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.15;
+  text-overflow: clip;
+  white-space: normal;
 }
 
 .help-tip {
@@ -350,7 +486,7 @@ input[type="color"] {
   }
 
   .control-row {
-    grid-template-columns: 82px minmax(72px, 1fr) 42px;
+    grid-template-columns: 108px minmax(72px, 1fr) 48px;
     gap: 8px;
   }
 
@@ -371,6 +507,8 @@ input[type="color"] {
   <body>
     <main id="app">
       <canvas id="sim" aria-label="Slime mold on cuttlefish skin"></canvas>
+      <svg id="annotationTethers" class="annotation-tethers" aria-hidden="true"></svg>
+      <div id="annotationLayer" class="annotation-layer" aria-hidden="true"></div>
 
       <section class="panel is-collapsed" aria-label="Simulation controls">
         <div class="panel-head">
@@ -401,6 +539,27 @@ input[type="color"] {
             <div>
               <strong id="fps">0</strong>
               <span>fps</span>
+            </div>
+          </div>
+
+          <div class="agent-history" aria-label="Agent count history">
+            <div class="agent-history-head">
+              <span>Population</span>
+              <output id="agentHistoryRange">waiting</output>
+            </div>
+            <canvas id="agentHistoryChart" class="history-chart" width="640" height="152"></canvas>
+            <canvas id="agentGrowthChart" class="history-chart" width="640" height="108"></canvas>
+            <canvas id="agentAccelerationChart" class="history-chart" width="640" height="108"></canvas>
+          </div>
+
+          <div class="preset-stack">
+            <div class="preset-control">
+              <label for="simulationPreset">Simulation</label>
+              <select id="simulationPreset" aria-label="Simulation parameter preset"></select>
+            </div>
+            <div class="preset-control">
+              <label for="renderPreset">Render</label>
+              <select id="renderPreset" aria-label="Render and display parameter preset"></select>
             </div>
           </div>
 
@@ -471,6 +630,14 @@ input[type="color"] {
               </label>
               <label class="control-row">
                 <span class="control-copy">
+                  <strong>Crowd curve</strong>
+                  <span class="help-tip" tabindex="0" aria-label="Exponent for above-ideal density penalty.">?<span role="tooltip">Exponent for above-ideal density penalty.</span></span>
+                </span>
+                <input id="crowdCurve" type="range" min="1" max="8" step="0.05" value="1" data-digits="2">
+                <output for="crowdCurve"></output>
+              </label>
+              <label class="control-row">
+                <span class="control-copy">
                   <strong>Crowd blur</strong>
                   <span class="help-tip" tabindex="0" aria-label="Neighborhood radius for sensing agents.">?<span role="tooltip">Neighborhood radius for sensing agents.</span></span>
                 </span>
@@ -521,6 +688,18 @@ input[type="color"] {
                 </span>
                 <input id="oatPower" type="range" min="0" max="4" step="0.05" value="1.55">
                 <output for="oatPower"></output>
+              </label>
+              <label class="control-row">
+                <span class="control-copy">
+                  <strong>Oat supply</strong>
+                  <span class="help-tip" tabindex="0" aria-label="Shared oat uptake budget per local crowd each tick.">?<span role="tooltip">Shared oat uptake budget per local crowd each tick.</span></span>
+                </span>
+                <input id="oatSupply" type="range" min="0.02" max="1" step="0.005" value="0.5" data-digits="3">
+                <output for="oatSupply"></output>
+              </label>
+              <label class="toggle-control">
+                <span>Ration oats</span>
+                <input id="useOatRationing" type="checkbox" checked>
               </label>
             </section>
 
@@ -683,11 +862,17 @@ const agentCountEl = document.getElementById('agentCount');
 const oatCountEl = document.getElementById('oatCount');
 const slimeCoverageEl = document.getElementById('slimeCoverage');
 const fpsEl = document.getElementById('fps');
+const agentHistoryCanvas = document.getElementById('agentHistoryChart');
+const agentGrowthCanvas = document.getElementById('agentGrowthChart');
+const agentAccelerationCanvas = document.getElementById('agentAccelerationChart');
+const agentHistoryRangeEl = document.getElementById('agentHistoryRange');
+const annotationLayer = document.getElementById('annotationLayer');
+const annotationTethers = document.getElementById('annotationTethers');
 
 const FIELD_SIZE = 1024;
 const AGENT_SIDE = 512;
 const AGENT_CAPACITY = AGENT_SIDE * AGENT_SIDE;
-const AGENT_RECORD_STRIDE = 3; // updated parent, left child, right child
+const AGENT_RECORD_STRIDE = 3; // updated parent plus two child proposal slots
 const AGENT_CANDIDATE_HEIGHT = AGENT_SIDE * AGENT_RECORD_STRIDE;
 const AGENT_CANDIDATE_COUNT = AGENT_CAPACITY * AGENT_RECORD_STRIDE;
 const AGENT_SCAN_PASS_COUNT = Math.ceil(Math.log2(AGENT_CANDIDATE_COUNT));
@@ -703,6 +888,7 @@ const OAT_SUPPORT_SIGMAS = Math.sqrt(-2 * Math.log(OAT_EPSILON));
 const INITIAL_AGENT_SPAWN_SIGMA = DEFAULT_OAT_RADIUS * 0.45;
 const GLB_PATH = 'vceyxz-xxfsxx.glb';
 const STATS_UPDATE_INTERVAL_MS = 650;
+const AGENT_HISTORY_SAMPLE_LIMIT = 180;
 const SLIME_COVERAGE_THRESHOLD = 0.006;
 const FRAME_DT_CLAMP = 2.2;
 const MAX_SIMULATION_STEPS = 8;
@@ -747,18 +933,16 @@ const PERFORMANCE_MODE_NAMES = Object.freeze(Object.keys(PERFORMANCE_MODES));
 // Back-center mantle UV, tuned from a live raycast click on the loaded cuttlefish.
 const INITIAL_OAT_UV = { x: 0.65, y: 0.1 };
 
-const params = {
+const BASE_SIMULATION_PARAMS = Object.freeze({
   uptakeRate: 0.035,
   depositRate: 0.005,
   burnRate: 0.005,
   reproThreshold: 3.0,
   foodWeight: 1.5,
   crowdWeight: 1.0,
+  crowdExponent: 1.0,
   densityBlur: 18.0,
   densityTarget: 0.02,
-  showAgentDots: false,
-  showOats: true,
-  meshOutlineEnabled: true,
   simulationSteps: 1,
   minMoveScale: 0.18,
   stepSize: 0.0016 / WORLD_LINEAR_SCALE,
@@ -774,6 +958,102 @@ const params = {
   deltaScale: 1.35,
   foodClamp: 0.45,
   oatPower: DEFAULT_OAT_POWER,
+  oatSupplyRate: 0.5,
+  useOatRationing: false,
+});
+
+function makeSimulationPreset(id, label, note, overrides = {}) {
+  return Object.freeze({
+    id,
+    label,
+    note,
+    values: Object.freeze({ ...BASE_SIMULATION_PARAMS, ...overrides }),
+  });
+}
+
+const DEFAULT_SIMULATION_PRESET_ID = 'default-current';
+const SIMULATION_PRESETS = Object.freeze([
+  makeSimulationPreset(
+    'default-current',
+    'Default',
+    'Original defaults plus requested current defaults: rationed oats, crowd blur 30.0, oat supply 0.140.',
+    {
+      densityBlur: 30.0,
+      oatSupplyRate: 0.14,
+      useOatRationing: true,
+    },
+  ),
+  makeSimulationPreset(
+    'stable-medium',
+    'Stable ~9k',
+    '2400-step sweep: 8.4k-10.3k tail, no capacity runaway.',
+    {
+      oatPower: 1.0,
+      burnRate: 0.018,
+      crowdWeight: 1.5,
+      densityTarget: 0.28,
+      reproThreshold: 4.0,
+      maxReserve: 4.2,
+      oatSupplyRate: 1.0,
+      useOatRationing: true,
+    },
+  ),
+  makeSimulationPreset(
+    'stable-compact',
+    'Compact ~7k',
+    '2400-step sweep: compact colony around 6.7k-7.4k.',
+    {
+      oatPower: 1.0,
+      burnRate: 0.018,
+      crowdWeight: 1.65,
+      densityTarget: 0.28,
+      reproThreshold: 4.0,
+      maxReserve: 4.2,
+      useOatRationing: true,
+    },
+  ),
+  makeSimulationPreset(
+    'stable-loose',
+    'Loose ~10k',
+    '2400-step sweep: looser colony around 7.8k-10.2k.',
+    {
+      oatPower: 1.0,
+      burnRate: 0.018,
+      crowdWeight: 1.35,
+      densityTarget: 0.28,
+      reproThreshold: 4.0,
+      maxReserve: 4.2,
+      useOatRationing: true,
+    },
+  ),
+  makeSimulationPreset(
+    'slow-growth',
+    'Slow growth ~20k',
+    'Conservative food and stronger birth gate; grows slowly past 10k.',
+    {
+      oatPower: 0.95,
+      burnRate: 0.016,
+      crowdWeight: 1.1,
+      densityTarget: 0.22,
+      reproThreshold: 4.0,
+      maxReserve: 4.2,
+      useOatRationing: true,
+    },
+  ),
+  makeSimulationPreset(
+    'original-defaults',
+    'Original defaults',
+    'Original simulation tuning retained for comparison; tends to run away.',
+  ),
+]);
+const SIMULATION_PRESET_BY_ID = new Map(SIMULATION_PRESETS.map((preset) => [preset.id, preset]));
+const SIMULATION_PRESET_KEYS = Object.freeze(Object.keys(BASE_SIMULATION_PARAMS));
+const SIMULATION_PRESET_KEY_SET = new Set(SIMULATION_PRESET_KEYS);
+
+const BASE_RENDER_DISPLAY_PARAMS = Object.freeze({
+  showAgentDots: false,
+  showOats: true,
+  meshOutlineEnabled: true,
   surfaceHeight: 1,
   surfaceBump: 10,
   iridescenceStrength: 0.85,
@@ -784,13 +1064,59 @@ const params = {
   lightBrightness: 1,
   spatialSmoothing: 1,
   temporalSmoothing: 0.85,
+  showWireframe: false,
+});
+
+function makeRenderDisplayPreset(id, label, note, overrides = {}) {
+  return Object.freeze({
+    id,
+    label,
+    note,
+    values: Object.freeze({ ...BASE_RENDER_DISPLAY_PARAMS, ...overrides }),
+  });
+}
+
+const DEFAULT_RENDER_DISPLAY_PRESET_ID = 'pearl-bright';
+const RENDER_DISPLAY_PRESETS = Object.freeze([
+  makeRenderDisplayPreset(
+    'render-default',
+    'Original defaults',
+    'Original render/display defaults retained for comparison.',
+  ),
+  makeRenderDisplayPreset(
+    'pearl-bright',
+    'Pearl bright',
+    'Screenshot render look: softer spatial blur, stronger temporal smoothing, white body, thinner film band.',
+    {
+      spatialSmoothing: 0.5,
+      temporalSmoothing: 0.95,
+      surfaceHeight: 1,
+      surfaceBump: 9,
+      iridescenceStrength: 0.8,
+      slimeBaseColor: '#ffffff',
+      iridescenceMinThickness: 375,
+      iridescenceThickness: 565,
+      filmFollowsSlimeHeight: true,
+      lightBrightness: 1,
+    },
+  ),
+]);
+const RENDER_DISPLAY_PRESET_BY_ID = new Map(RENDER_DISPLAY_PRESETS.map((preset) => [preset.id, preset]));
+const RENDER_DISPLAY_PRESET_KEYS = Object.freeze(Object.keys(BASE_RENDER_DISPLAY_PARAMS));
+const RENDER_DISPLAY_PRESET_KEY_SET = new Set(RENDER_DISPLAY_PRESET_KEYS);
+
+const params = {
+  ...SIMULATION_PRESET_BY_ID.get(DEFAULT_SIMULATION_PRESET_ID).values,
+  ...RENDER_DISPLAY_PRESET_BY_ID.get(DEFAULT_RENDER_DISPLAY_PRESET_ID).values,
   useSeamStitching: true,
   useIslandMasking: true,
   useHeadingRotation: true,
-  showWireframe: false,
   debugView: 'slime',
   performanceMode: 'quality',
 };
+let activeSimulationPresetId = DEFAULT_SIMULATION_PRESET_ID;
+let activeRenderDisplayPresetId = DEFAULT_RENDER_DISPLAY_PRESET_ID;
+const boundParamControls = new Map();
 
 function getPerformanceModeConfig(settings = params) {
   return PERFORMANCE_MODES[settings.performanceMode] ?? PERFORMANCE_MODES.quality;
@@ -803,6 +1129,64 @@ function setPerformanceMode(mode) {
   }
   params.performanceMode = mode;
   return params.performanceMode;
+}
+
+function listSimulationPresets() {
+  return SIMULATION_PRESETS.map((preset) => ({
+    id: preset.id,
+    label: preset.label,
+    note: preset.note,
+    values: { ...preset.values },
+  }));
+}
+
+function listRenderDisplayPresets() {
+  return RENDER_DISPLAY_PRESETS.map((preset) => ({
+    id: preset.id,
+    label: preset.label,
+    note: preset.note,
+    values: { ...preset.values },
+  }));
+}
+
+function setActiveSimulationPreset(presetId) {
+  activeSimulationPresetId = presetId;
+  const select = document.getElementById('simulationPreset');
+  if (select && select.value !== presetId) select.value = presetId;
+}
+
+function setActiveRenderDisplayPreset(presetId) {
+  activeRenderDisplayPresetId = presetId;
+  const select = document.getElementById('renderPreset');
+  if (select && select.value !== presetId) select.value = presetId;
+}
+
+function syncBoundParamControls() {
+  for (const sync of boundParamControls.values()) sync();
+}
+
+function applySimulationPreset(presetId, { syncControls = true } = {}) {
+  const preset = SIMULATION_PRESET_BY_ID.get(presetId);
+  if (!preset) {
+    console.warn('unknown simulation preset', presetId, 'available:', SIMULATION_PRESETS.map((item) => item.id));
+    return { ...params };
+  }
+  applyRuntimeParams(preset.values);
+  setActiveSimulationPreset(presetId);
+  if (syncControls) syncBoundParamControls();
+  return { ...params };
+}
+
+function applyRenderDisplayPreset(presetId, { syncControls = true } = {}) {
+  const preset = RENDER_DISPLAY_PRESET_BY_ID.get(presetId);
+  if (!preset) {
+    console.warn('unknown render/display preset', presetId, 'available:', RENDER_DISPLAY_PRESETS.map((item) => item.id));
+    return { ...params };
+  }
+  applyRuntimeParams(preset.values);
+  setActiveRenderDisplayPreset(presetId);
+  if (syncControls) syncBoundParamControls();
+  return { ...params };
 }
 
 function getSimulationStepCount(settings = params) {
@@ -1468,6 +1852,7 @@ class RTPair {
 }
 
 const agentRT = new RTPair(makeAgentRT);
+const agentParentNextRT = makeAgentRT();
 const agentCandidateRT = makeAgentCandidateRT();
 const agentPrefixRT = new RTPair(makeAgentCandidateRT);
 const fieldRT = new RTPair(makeCanonicalFieldRT);
@@ -1653,7 +2038,9 @@ void main() {
     }
     vec2 d = sampleUv - u_oats[i];
     if (dot(d, d) > supportRadius * supportRadius) continue;
-    food += u_oatPower[i] * exp(-dot(d, d) / (2.0 * radius * radius));
+    float peakFood = max(u_oatPower[i], 0.0);
+    float contribution = peakFood * exp(-dot(d, d) / (2.0 * radius * radius));
+    food = max(food, contribution);
   }
   outColor = vec4(food, 0.0, 0.0, 1.0);
 }
@@ -2108,7 +2495,7 @@ void main() {
 }
 `;
 
-const agentUpdateFragment = `#version 300 es
+const agentAllocatorCommonFragment = `#version 300 es
 precision highp float;
 precision highp sampler2D;
 in vec2 v_uv;
@@ -2134,8 +2521,12 @@ uniform float u_reproAngle;
 uniform float u_childStep;
 uniform float u_foodWeight;
 uniform float u_crowdWeight;
+uniform float u_crowdExponent;
 uniform float u_densityTarget;
 uniform float u_maxReserve;
+uniform float u_oatSupplyRate;
+uniform float u_densityMassScale;
+uniform int u_useOatRationing;
 uniform int u_useHeadingRotation;
 ${safeSamplingGlsl}
 float hash(float n) {
@@ -2171,6 +2562,14 @@ float readDensitySafe(vec2 baseUv, vec2 sampleUv, float fallback) {
     densitySize - ivec2(1)
   );
   return max(texelFetch(u_density, densityPixel, 0).r, 0.0);
+}
+float rationedOatFood(float oatFood, float localDensity) {
+  if (u_useOatRationing == 0 || oatFood <= 0.0) return oatFood;
+  float localReserveLoad = max(localDensity / max(u_densityMassScale, 0.00001), 1.0);
+  float requestedUptake = localReserveLoad * u_uptakeRate * oatFood;
+  float supply = max(u_oatSupplyRate, 0.00001);
+  float ration = clamp(supply / max(requestedUptake, supply), 0.0, 1.0);
+  return oatFood * ration;
 }
 float rotateHeading(float angle, vec2 rotation) {
   float sinT = rotation.x;
@@ -2234,14 +2633,19 @@ float scoreAt(vec2 baseUv, vec2 sampleUv, float reserve) {
   float sampleValid = 0.0;
   float dynamicFood = readFoodSafe(baseUv, sampleUv, 0.0, sampleValid);
   if (sampleValid < 0.5) return -100000.0;
-  float food = dynamicFood + readOatSafe(baseUv, sampleUv, 0.0);
-  float foodSignal = 1.0 - exp(-food * 1.2);
   float crowd = readDensitySafe(baseUv, sampleUv, 1.0);
+  float oatFood = rationedOatFood(readOatSafe(baseUv, sampleUv, 0.0), crowd);
+  float food = dynamicFood + oatFood;
+  float foodSignal = 1.0 - exp(-food * 1.2);
   float appetite = 1.0 - smoothstep(u_reproThreshold * 0.55, u_reproThreshold * 1.05, reserve);
   float target = max(u_densityTarget, 0.001);
-  float occupiedEnough = smoothstep(0.0, target, crowd);
-  float tooCrowded = smoothstep(target, min(target * 3.0, 1.0), crowd);
-  float crowdPreference = occupiedEnough - tooCrowded * 2.0;
+  float densityRatio = max(crowd / target, 0.0);
+  float occupiedEnough = smoothstep(0.0, 1.0, densityRatio);
+  float crowdRangeMax = max(1.0001, min(3.0, 1.0 / target));
+  float tooCrowded = smoothstep(1.0, crowdRangeMax, densityRatio);
+  float crowdCurve = max(u_crowdExponent, 1.0);
+  float superlinearPenalty = tooCrowded * pow(max(densityRatio, 1.0), crowdCurve - 1.0);
+  float crowdPreference = occupiedEnough - superlinearPenalty * 2.0;
   return u_foodWeight * foodSignal * appetite + u_crowdWeight * crowdPreference;
 }
 vec4 advanceAgent(vec4 agent, float seed) {
@@ -2284,7 +2688,8 @@ vec4 advanceAgent(vec4 agent, float seed) {
     angle = rotateHeading(angle, moveRotation);
   }
   float dynamicFood = readFoodSafe(nextPos, nextPos, 0.0);
-  float oatFood = readOatSafe(nextPos, nextPos, 0.0);
+  float localDensity = readDensitySafe(nextPos, nextPos, 0.0);
+  float oatFood = rationedOatFood(readOatSafe(nextPos, nextPos, 0.0), localDensity);
   float effectiveFood = dynamicFood + oatFood;
   float reserve = agent.w + (u_uptakeRate * effectiveFood - u_depositRate - u_burnRate) * u_dt;
   if (reserve <= 0.0) {
@@ -2312,40 +2717,55 @@ vec4 makeChildCandidate(vec4 parentNext, int side, float seed, float childReserv
   parentNext.w = childReserve;
   return parentNext;
 }
+`;
+
+const agentParentUpdateFragment = `${agentAllocatorCommonFragment}
+void main() {
+  int sourceIndex = int(gl_FragCoord.y) * u_agentSide + int(gl_FragCoord.x);
+  outColor = advanceAgent(fetchAgent(sourceIndex), float(sourceIndex));
+}
+`;
+
+const agentCandidateBuildFragment = `${agentAllocatorCommonFragment}
+uniform sampler2D u_parentNext;
+uniform int u_allocationOffset;
+vec4 fetchParentNext(int index) {
+  ivec2 pixel = ivec2(index % u_agentSide, index / u_agentSide);
+  return texelFetch(u_parentNext, pixel, 0);
+}
 void main() {
   int candidateIndex = int(gl_FragCoord.y) * u_agentSide + int(gl_FragCoord.x);
   int capacity = u_agentSide * u_agentSide;
-  int recordRole = candidateIndex / capacity;
-  int sourceIndex = candidateIndex - recordRole * capacity;
-  vec4 parentNext = advanceAgent(fetchAgent(sourceIndex), float(sourceIndex));
   vec4 result = vec4(0.0);
-  if (parentNext.w <= 0.0) {
+
+  // Segment 0: advanced parents, before all children. This preserves every
+  // surviving parent under capacity pressure.
+  if (candidateIndex < capacity) {
+    vec4 parentNext = fetchParentNext(candidateIndex);
+    if (parentNext.w > 0.0) result = parentNext;
     outColor = result;
     return;
   }
+
+  // Segments 1/2: child proposals in a frame-rotated order. Proposal identity is
+  // independent from storage position; storage index is only storage.
+  int childLinearIndex = candidateIndex - capacity;
+  int proposalCount = capacity * 2;
+  int offset = u_allocationOffset % proposalCount;
+  int proposalId = (childLinearIndex + offset) % proposalCount;
+  int sourceIndex = proposalId / 2;
+  int side = proposalId - sourceIndex * 2;
+
+  vec4 parentNext = fetchParentNext(sourceIndex);
   if (parentNext.w <= u_reproThreshold) {
-    if (recordRole == 0) result = parentNext;
     outColor = result;
     return;
   }
 
   float childReserve = parentNext.w * 0.25;
-  if (recordRole == 0) {
-    float leftValid = 0.0;
-    float rightValid = 0.0;
-    makeChildCandidate(parentNext, 0, float(sourceIndex * 2 + 1), childReserve, leftValid);
-    makeChildCandidate(parentNext, 1, float(sourceIndex * 2 + 2), childReserve, rightValid);
-    parentNext.w = max(parentNext.w - childReserve * (leftValid + rightValid), 0.0);
-    result = parentNext;
-  } else if (recordRole == 1) {
-    float leftValid = 0.0;
-    vec4 leftChild = makeChildCandidate(parentNext, 0, float(sourceIndex * 2 + 1), childReserve, leftValid);
-    if (leftValid >= 0.5) result = leftChild;
-  } else if (recordRole == 2) {
-    float rightValid = 0.0;
-    vec4 rightChild = makeChildCandidate(parentNext, 1, float(sourceIndex * 2 + 2), childReserve, rightValid);
-    if (rightValid >= 0.5) result = rightChild;
-  }
+  float childValid = 0.0;
+  vec4 child = makeChildCandidate(parentNext, side, float(sourceIndex * 2 + side + 1), childReserve, childValid);
+  if (childValid >= 0.5) result = child;
   outColor = result;
 }
 `;
@@ -2396,6 +2816,7 @@ uniform sampler2D u_prefix;
 uniform int u_agentSide;
 uniform int u_candidateWidth;
 uniform int u_candidateCount;
+uniform int u_allocationOffset;
 float prefixAt(int index) {
   ivec2 pixel = ivec2(index % u_candidateWidth, index / u_candidateWidth);
   return texelFetch(u_prefix, pixel, 0).r;
@@ -2404,11 +2825,27 @@ vec4 candidateAt(int index) {
   ivec2 pixel = ivec2(index % u_candidateWidth, index / u_candidateWidth);
   return texelFetch(u_candidates, pixel, 0);
 }
+int childCandidateIndexForParentSide(int sourceIndex, int side) {
+  int capacity = u_agentSide * u_agentSide;
+  int proposalCount = capacity * 2;
+  int proposalId = sourceIndex * 2 + side;
+  int offset = u_allocationOffset % proposalCount;
+  int childLinearIndex = (proposalId - offset + proposalCount) % proposalCount;
+  return capacity + childLinearIndex;
+}
+float acceptedChildDebit(int sourceIndex, int side) {
+  int capacity = u_agentSide * u_agentSide;
+  int childIndex = childCandidateIndexForParentSide(sourceIndex, side);
+  vec4 child = candidateAt(childIndex);
+  if (child.w <= 0.0001) return 0.0;
+  return prefixAt(childIndex) <= float(capacity) + 0.001 ? 1.0 : 0.0;
+}
 void main() {
   int outputIndex = int(gl_FragCoord.y) * u_agentSide + int(gl_FragCoord.x);
+  int capacity = u_agentSide * u_agentSide;
   float target = float(outputIndex + 1);
   float total = prefixAt(u_candidateCount - 1);
-  if (target > total) {
+  if (target > total || target > float(capacity)) {
     outColor = vec4(0.0);
     return;
   }
@@ -2427,6 +2864,11 @@ void main() {
   vec4 candidate = candidateAt(lo);
   if (candidate.w <= 0.0001 || prefixAt(lo) < target - 0.25) {
     candidate = vec4(0.0);
+  } else if (lo < capacity) {
+    int sourceIndex = lo;
+    float debitCount = acceptedChildDebit(sourceIndex, 0) + acceptedChildDebit(sourceIndex, 1);
+    float childReserve = candidate.w * 0.25;
+    candidate.w = max(candidate.w - debitCount * childReserve, 0.0);
   }
   outColor = candidate;
 }
@@ -3189,7 +3631,7 @@ void main() {
 
   if (u_meshOutlineEnabled == 1) {
     float fres = pow(1.0 - max(dot(N0, viewDir), 0.0), 3.0);
-    color += vec3(0.18, 0.36, 0.55) * fres * 0.85;
+    color += vec3(0.18, 0.36, 0.55) * fres * 0.34;
   }
 
   outColor = vec4(pow(color, vec3(0.78)), 1.0);
@@ -3316,7 +3758,7 @@ const dilateMaterial = makeRawShaderMaterial(dilateFragment, {
   u_texel: { value: new THREE.Vector2(1 / FIELD_SIZE, 1 / FIELD_SIZE) },
 });
 
-const agentExpandMaterial = makeRawShaderMaterial(agentUpdateFragment, {
+const agentParentUpdateMaterial = makeRawShaderMaterial(agentParentUpdateFragment, {
   u_agents: { value: null },
   u_food: { value: null },
   u_oat: { value: oatRT.texture },
@@ -3338,9 +3780,47 @@ const agentExpandMaterial = makeRawShaderMaterial(agentUpdateFragment, {
   u_childStep: { value: params.childStep },
   u_foodWeight: { value: params.foodWeight },
   u_crowdWeight: { value: params.crowdWeight },
+  u_crowdExponent: { value: params.crowdExponent },
   u_densityTarget: { value: params.densityTarget },
   u_maxReserve: { value: params.maxReserve },
+  u_oatSupplyRate: { value: params.oatSupplyRate },
+  u_densityMassScale: { value: DENSITY_MASS_SCALE },
+  u_useOatRationing: { value: params.useOatRationing ? 1 : 0 },
   u_useHeadingRotation: { value: 1 },
+  ...sharedSafeSamplingUniforms(),
+});
+
+const agentCandidateBuildMaterial = makeRawShaderMaterial(agentCandidateBuildFragment, {
+  u_agents: { value: null },
+  u_parentNext: { value: agentParentNextRT.texture },
+  u_food: { value: null },
+  u_oat: { value: oatRT.texture },
+  u_density: { value: densityRT.texture },
+  u_agentSide: { value: AGENT_SIDE },
+  u_time: { value: 0 },
+  u_dt: { value: 1 },
+  u_stepSize: { value: params.stepSize },
+  u_minMoveScale: { value: params.minMoveScale },
+  u_sensorDistance: { value: params.sensorDistance },
+  u_sensorAngle: { value: params.sensorAngle },
+  u_turnAngle: { value: params.turnAngle },
+  u_wander: { value: params.wander },
+  u_uptakeRate: { value: params.uptakeRate },
+  u_depositRate: { value: params.depositRate },
+  u_burnRate: { value: params.burnRate },
+  u_reproThreshold: { value: params.reproThreshold },
+  u_reproAngle: { value: params.reproAngle },
+  u_childStep: { value: params.childStep },
+  u_foodWeight: { value: params.foodWeight },
+  u_crowdWeight: { value: params.crowdWeight },
+  u_crowdExponent: { value: params.crowdExponent },
+  u_densityTarget: { value: params.densityTarget },
+  u_maxReserve: { value: params.maxReserve },
+  u_oatSupplyRate: { value: params.oatSupplyRate },
+  u_densityMassScale: { value: DENSITY_MASS_SCALE },
+  u_useOatRationing: { value: params.useOatRationing ? 1 : 0 },
+  u_useHeadingRotation: { value: 1 },
+  u_allocationOffset: { value: 0 },
   ...sharedSafeSamplingUniforms(),
 });
 
@@ -3360,6 +3840,7 @@ const agentCompactMaterial = makeRawShaderMaterial(agentCompactFragment, {
   u_agentSide: { value: AGENT_SIDE },
   u_candidateWidth: { value: AGENT_SIDE },
   u_candidateCount: { value: AGENT_CANDIDATE_COUNT },
+  u_allocationOffset: { value: 0 },
 });
 
 const deltaMaterial = makeRawShaderMaterial(deltaFragment, {
@@ -3533,6 +4014,10 @@ const oatGlowTexture = makeRadialGlowTexture({
 });
 const oatGlowTint = 0xffffff;
 const oatGlowLift = 0.026 * WORLD_LINEAR_SCALE;
+const OBSERVATION_TETHER_LENGTH = 0.34 * WORLD_LINEAR_SCALE;
+const OBSERVATION_LABEL_GAP_PX = 18;
+const OBSERVATION_VIEW_MARGIN_PX = 14;
+const SVG_NS = 'http://www.w3.org/2000/svg';
 
 function makeOatGlowSprite(texture, color, opacity, scale, { depthTest = false } = {}) {
   const material = new THREE.SpriteMaterial({
@@ -3591,6 +4076,175 @@ function updateOatGlowMarkers() {
   }
 }
 
+function createSvgLine(className) {
+  if (!annotationTethers) return null;
+  const line = document.createElementNS(SVG_NS, 'line');
+  line.setAttribute('class', className);
+  line.style.opacity = '0';
+  annotationTethers.append(line);
+  return line;
+}
+
+function createOatObservation(oat) {
+  if (!annotationLayer || !annotationTethers || !oat.worldPos || !oat.worldNormal) return null;
+  const normal = oat.worldNormal.clone();
+  if (normal.lengthSq() < 1e-8) normal.set(0, 1, 0);
+  normal.normalize();
+
+  const id = nextObservationId++;
+  const callout = document.createElement('article');
+  callout.className = 'observation-callout';
+
+  const heading = document.createElement('strong');
+  heading.textContent = 'Story Placeholder';
+  const body = document.createElement('p');
+  body.textContent = 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.';
+  callout.append(heading, body);
+
+  const observation = {
+    id,
+    callout,
+    stem: createSvgLine('observation-stem'),
+    surfacePos: oat.worldPos.clone(),
+    surfaceNormal: normal,
+  };
+  annotationLayer.append(callout);
+  return observation;
+}
+
+function disposeOatObservation(observation) {
+  observation?.callout?.remove();
+  observation?.stem?.remove();
+}
+
+function projectWorldToScreen(worldPoint) {
+  const projected = worldPoint.clone().project(camera);
+  return {
+    x: (projected.x * 0.5 + 0.5) * canvas.clientWidth,
+    y: (-projected.y * 0.5 + 0.5) * canvas.clientHeight,
+    z: projected.z,
+    inClip: projected.z >= -1 && projected.z <= 1,
+  };
+}
+
+function setLine(line, start, end, opacity) {
+  if (!line) return;
+  line.setAttribute('x1', start.x.toFixed(1));
+  line.setAttribute('y1', start.y.toFixed(1));
+  line.setAttribute('x2', end.x.toFixed(1));
+  line.setAttribute('y2', end.y.toFixed(1));
+  line.style.opacity = opacity.toFixed(3);
+}
+
+function hideOatObservation(observation) {
+  if (!observation) return;
+  observation.callout.classList.remove('is-visible');
+  observation.callout.style.opacity = '0';
+  if (observation.stem) observation.stem.style.opacity = '0';
+}
+
+function getOatAnnotationAnchorPos(oat, observation) {
+  if (oat?.sphere?.position) return oat.sphere.position.clone();
+  return observation.surfacePos.clone().addScaledVector(observation.surfaceNormal, oatGlowLift);
+}
+
+function nearestBoxEdgePoint(box, from, inset = 3) {
+  const centerX = box.left + box.width * 0.5;
+  const centerY = box.top + box.height * 0.5;
+  const halfWidth = Math.max(1, box.width * 0.5);
+  const halfHeight = Math.max(1, box.height * 0.5);
+  const dx = from.x - centerX;
+  const dy = from.y - centerY;
+  const scale = Math.max(Math.abs(dx) / halfWidth, Math.abs(dy) / halfHeight);
+  if (scale < 1e-6) return { x: centerX, y: centerY - halfHeight + inset };
+
+  const edge = {
+    x: centerX + dx / scale,
+    y: centerY + dy / scale,
+  };
+  const edgeLen = Math.hypot(edge.x - centerX, edge.y - centerY);
+  if (edgeLen <= 1e-6) return edge;
+
+  return {
+    x: edge.x - ((edge.x - centerX) / edgeLen) * inset,
+    y: edge.y - ((edge.y - centerY) / edgeLen) * inset,
+  };
+}
+
+function updateOatAnnotations() {
+  if (!annotationLayer || !annotationTethers || !mesh) return;
+  camera.updateMatrixWorld(true);
+  camera.matrixWorldInverse.copy(camera.matrixWorld).invert();
+
+  const viewportWidth = Math.max(1, canvas.clientWidth);
+  const viewportHeight = Math.max(1, canvas.clientHeight);
+  annotationTethers.setAttribute('viewBox', `0 0 ${viewportWidth} ${viewportHeight}`);
+  annotationTethers.setAttribute('width', String(viewportWidth));
+  annotationTethers.setAttribute('height', String(viewportHeight));
+
+  for (const oat of oats) {
+    const observation = oat.observation;
+    if (!observation) continue;
+
+    const surfacePos = observation.surfacePos;
+    const surfaceNormal = observation.surfaceNormal;
+    const anchorPos = getOatAnnotationAnchorPos(oat, observation);
+    const tetherTip = anchorPos.clone().addScaledVector(surfaceNormal, OBSERVATION_TETHER_LENGTH);
+    const anchorScreen = projectWorldToScreen(anchorPos);
+    const tipScreen = projectWorldToScreen(tetherTip);
+    const toCamera = camera.position.clone().sub(surfacePos).normalize();
+    const facing = surfaceNormal.dot(toCamera);
+    const visibility = THREE.MathUtils.smoothstep(facing, -0.14, 0.2);
+
+    if (!anchorScreen.inClip || !tipScreen.inClip || visibility <= 0.02) {
+      hideOatObservation(observation);
+      continue;
+    }
+
+    let dirX = tipScreen.x - anchorScreen.x;
+    let dirY = tipScreen.y - anchorScreen.y;
+    const dirLen = Math.hypot(dirX, dirY);
+    if (dirLen > 0.001) {
+      dirX /= dirLen;
+      dirY /= dirLen;
+    } else {
+      dirX = 0;
+      dirY = -1;
+    }
+
+    const boxWidth = observation.callout.offsetWidth || 230;
+    const boxHeight = observation.callout.offsetHeight || 74;
+    const stagger = ((observation.id % 5) - 2) * 8;
+    const desiredCenterX = tipScreen.x +
+      dirX * (boxWidth * 0.5 + OBSERVATION_LABEL_GAP_PX) -
+      dirY * stagger;
+    const desiredCenterY = tipScreen.y +
+      dirY * (boxHeight * 0.5 + OBSERVATION_LABEL_GAP_PX) +
+      dirX * stagger;
+    const left = THREE.MathUtils.clamp(
+      desiredCenterX - boxWidth * 0.5,
+      OBSERVATION_VIEW_MARGIN_PX,
+      viewportWidth - boxWidth - OBSERVATION_VIEW_MARGIN_PX,
+    );
+    const top = THREE.MathUtils.clamp(
+      desiredCenterY - boxHeight * 0.5,
+      OBSERVATION_VIEW_MARGIN_PX,
+      viewportHeight - boxHeight - OBSERVATION_VIEW_MARGIN_PX,
+    );
+
+    observation.callout.style.left = `${left.toFixed(1)}px`;
+    observation.callout.style.top = `${top.toFixed(1)}px`;
+    observation.callout.style.opacity = visibility.toFixed(3);
+    observation.callout.classList.add('is-visible');
+
+    const boxAnchor = nearestBoxEdgePoint(
+      { left, top, width: boxWidth, height: boxHeight },
+      tipScreen,
+    );
+    setLine(observation.stem, anchorScreen, boxAnchor, visibility);
+  }
+}
+
 // === state ===
 let mesh = null;
 let wireframeOverlay = null;
@@ -3609,6 +4263,9 @@ let lastFrameTime = performance.now();
 let fpsSmoothed = 60;
 let lastStatsRead = 0;
 let visibleAgents = INITIAL_AGENTS;
+let agentHistorySamples = [];
+let agentAllocationFrame = 0;
+let lastAgentAllocationOffset = 0;
 let smoothInitialized = false;
 let oatDirty = true;
 let lastOatRenderSeamStitching = null;
@@ -3617,6 +4274,7 @@ let started = false;
 let baseStatus = 'loading cuttlefish...';
 let seamPairs = [];
 let loggedClicks = [];
+let nextObservationId = 1;
 let debugMaterials = {};
 let debugBaseMaterial = null;
 let chartOwnership = null;
@@ -5330,6 +5988,10 @@ function createUvDiagnostics(targetMesh, initialTopology = null, initialOwnershi
       }
     }
     const invalidOats = perOat.filter((entry) => !entry.valid);
+    const maxSingleOatPeakFood = perOat.reduce(
+      (maxPower, entry) => Math.max(maxPower, Math.max(entry.power, 0)),
+      0,
+    );
     const sourceDestinationContributionPairs = [...counts.sourceDestinationContributionPairs.entries()]
       .map(([pair, estimatedTexels]) => ({ pair, estimatedTexels }))
       .sort((a, b) => b.estimatedTexels - a.estimatedTexels);
@@ -5340,6 +6002,11 @@ function createUvDiagnostics(targetMesh, initialTopology = null, initialOwnershi
       invalidOatCount: invalidOats.length,
       oatEpsilon: OAT_EPSILON,
       oatSupportSigmas: OAT_SUPPORT_SIGMAS,
+      oatFoodAccumulationMode: 'max of valid individual oat fields; stacked oats do not add food',
+      oatRationingEnabled: !!params.useOatRationing,
+      oatSupplyRate: params.oatSupplyRate,
+      oatRationingMode: 'agent shader scales oat uptake by shared supply divided by topology-safe local density demand',
+      maxSingleOatPeakFood,
       usesToroidalAtlasDistance: false,
       seamDuplicatedOatField: true,
       sameChartContributionSamples: counts.sameChartContributionSamples,
@@ -5357,7 +6024,7 @@ function createUvDiagnostics(targetMesh, initialTopology = null, initialOwnershi
       sampleStrideTexels: stride,
       invalidOats,
       perOat,
-      note: 'PR11.5 oat field keeps real oats unchanged. Broad oat support is not prepainted into seamTransition*; seam continuation is clipped by the narrow crossing map and reports truncation when one-hop support extends beyond it.',
+      note: 'PR11.5 oat field keeps real oats unchanged. Broad oat support is not prepainted into seamTransition*; seam continuation is clipped by the narrow crossing map and reports truncation when one-hop support extends beyond it. Runtime oat food uses the maximum individual oat contribution, so stacked oats do not add food.',
     };
   }
 
@@ -7144,7 +7811,7 @@ function createUvDiagnostics(targetMesh, initialTopology = null, initialOwnershi
     const repeatWrappedTargets = renderTargetRows.filter((entry) => entry.usesRepeatWrapping);
     const remainingFractUses = [
       {
-        site: 'agentUpdateFragment.hash()',
+        site: 'agentAllocatorCommonFragment.hash()',
         expressionClass: 'fract(sin(seed) * constant)',
         purpose: 'scalar PRNG for wander/reproduction decisions',
         uvTopologyUse: false,
@@ -7187,13 +7854,13 @@ function createUvDiagnostics(targetMesh, initialTopology = null, initialOwnershi
       },
       {
         path: 'agent movement and child placement',
-        topologyMode: 'expand/scan/compact allocator; resolveMoveUvSafe() validates same-chart, zero-gutter transition, or redirect destination',
+        topologyMode: 'parent-update + deferred-debit compact allocator; resolveMoveUvSafe() validates same-chart, zero-gutter transition, or redirect destination',
         atlasWrapping: false,
         crossOwnerReadsAllowed: false,
       },
       {
         path: 'agent reproduction storage allocation',
-        topologyMode: 'source agents emit parent/child candidates, prefix-sum compaction stores valid records; storage index no longer encodes lineage topology',
+        topologyMode: 'advanced parents are preserved first; child proposal admission is prefix-compacted and parent reserve is debited only for admitted children',
         atlasWrapping: false,
         crossOwnerReadsAllowed: false,
       },
@@ -7263,6 +7930,7 @@ function createUvDiagnostics(targetMesh, initialTopology = null, initialOwnershi
     return {
       agentRead: describeRenderTarget(agentRT.read),
       agentWrite: describeRenderTarget(agentRT.write),
+      agentParentNext: describeRenderTarget(agentParentNextRT),
       agentCandidate: describeRenderTarget(agentCandidateRT),
       agentPrefixRead: describeRenderTarget(agentPrefixRT.read),
       agentPrefixWrite: describeRenderTarget(agentPrefixRT.write),
@@ -8500,6 +9168,7 @@ function estimateRenderTargetMemory() {
   const targets = [
     ['agentRT.read', agentRT.read],
     ['agentRT.write', agentRT.write],
+    ['agentParentNextRT', agentParentNextRT],
     ['agentCandidateRT', agentCandidateRT],
     ['agentPrefixRT.read', agentPrefixRT.read],
     ['agentPrefixRT.write', agentPrefixRT.write],
@@ -8871,6 +9540,7 @@ function onLoad(gltf) {
     mesh,
     params,
     agentRT,
+    agentParentNextRT,
     agentCandidateRT,
     agentPrefixRT,
     fieldRT,
@@ -8909,9 +9579,18 @@ function onLoad(gltf) {
     debugMaterials,
     perf: createPerfHelpers(),
     oats,
+    annotationLayer,
+    annotationTethers,
+    updateOatAnnotations,
     loggedClicks,
     addOat,
     resetSimulation,
+    listSimulationPresets,
+    listRenderDisplayPresets,
+    applySimulationPreset,
+    applyRenderDisplayPreset,
+    applyRuntimeParams,
+    runPopulationTrial,
     setPerformanceMode,
     getPerformanceModeConfig: () => ({ ...getPerformanceModeConfig(params) }),
     refreshRuntimeReadbackStats,
@@ -8944,6 +9623,7 @@ function onLoad(gltf) {
     measureSafeSamplingRejections: uvDiagnostics.measureSafeSamplingRejections,
     measureAgentTopologySafety: uvDiagnostics.measureAgentTopologySafety,
     measureAgentAllocatorDiagnostics,
+    runAgentAllocatorRegressionTests,
     getChartOwnershipStats: uvDiagnostics.getChartOwnershipStats,
     getMicroCharts: uvDiagnostics.getMicroCharts,
     getZeroOwnedCharts: uvDiagnostics.getZeroOwnedCharts,
@@ -9943,6 +10623,7 @@ function addOat(x, y, opts = {}) {
   if (oats.length >= MAX_OATS) {
     // Replace oldest non-initial oat (preserve oats[0]).
     const removed = oats.splice(1, 1)[0];
+    disposeOatObservation(removed?.observation);
     if (removed?.sphere) {
       oatGroup.remove(removed.sphere);
       disposeOatMarker(removed.sphere);
@@ -9961,7 +10642,8 @@ function addOat(x, y, opts = {}) {
     sphere = createOatGlowMarker(worldPos, worldNormal);
     oatGroup.add(sphere);
   }
-  const oat = { uv, chartId, worldPos, worldNormal, radius, power, sphere };
+  const oat = { uv, chartId, worldPos, worldNormal, radius, power, sphere, observation: null };
+  oat.observation = createOatObservation(oat);
   oats.push(oat);
   oatDirty = true;
   oatCountEl.textContent = String(oats.length);
@@ -9970,12 +10652,14 @@ function addOat(x, y, opts = {}) {
 
 function clearAllOats() {
   for (const o of oats) {
+    disposeOatObservation(o.observation);
     if (o.sphere) {
       oatGroup.remove(o.sphere);
       disposeOatMarker(o.sphere);
     }
   }
   oats.length = 0;
+  nextObservationId = 1;
   oatDirty = true;
 }
 
@@ -10117,6 +10801,7 @@ function initAgents() {
   uploadAgentDataToRT(data, agentRT.write);
   visibleAgents = diagnostics.createdAgents;
   agentCountEl.textContent = visibleAgents.toLocaleString();
+  resetAgentHistory(visibleAgents);
 }
 
 function resetSimulation({ resetOats = false } = {}) {
@@ -10134,6 +10819,7 @@ function resetSimulation({ resetOats = false } = {}) {
   clearRT(renderScratchRT);
   clearRT(densityRT);
   clearRT(depositDensityRT);
+  clearRT(agentParentNextRT);
   clearRT(agentCandidateRT);
   clearRT(agentPrefixRT.read);
   clearRT(agentPrefixRT.write);
@@ -10161,6 +10847,8 @@ function resetSimulation({ resetOats = false } = {}) {
     note: 'Safe seam padding has not run yet.',
   };
   initAgents();
+  agentAllocationFrame = 0;
+  lastAgentAllocationOffset = 0;
   oatDirty = true;
   smoothInitialized = false;
 }
@@ -10221,9 +10909,10 @@ function renderDepositDensity() {
   renderer.setRenderTarget(null);
 }
 
-function updateAgents(now, dt) {
-  const u = agentExpandMaterial.uniforms;
-  u.u_agents.value = agentRT.read.texture;
+function setAgentUpdateUniforms(material, now, dt) {
+  const u = material.uniforms;
+  if (u.u_agents) u.u_agents.value = agentRT.read.texture;
+  if (u.u_parentNext) u.u_parentNext.value = agentParentNextRT.texture;
   u.u_food.value = fieldRT.read.texture;
   u.u_oat.value = oatRT.texture;
   u.u_density.value = densityRT.texture;
@@ -10243,12 +10932,29 @@ function updateAgents(now, dt) {
   u.u_childStep.value = params.childStep;
   u.u_foodWeight.value = params.foodWeight;
   u.u_crowdWeight.value = params.crowdWeight;
+  u.u_crowdExponent.value = params.crowdExponent;
   u.u_densityTarget.value = params.densityTarget;
   u.u_maxReserve.value = params.maxReserve;
+  u.u_oatSupplyRate.value = params.oatSupplyRate;
+  u.u_densityMassScale.value = DENSITY_MASS_SCALE;
+  u.u_useOatRationing.value = params.useOatRationing ? 1 : 0;
   u.u_useSeamStitching.value = params.useSeamStitching ? 1 : 0;
   u.u_useZeroGutterTransitions.value = params.useSeamStitching ? 1 : 0;
   u.u_useHeadingRotation.value = params.useHeadingRotation ? 1 : 0;
-  runFullscreenPass(agentExpandMaterial, agentCandidateRT);
+}
+
+function updateAgents(now, dt) {
+  lastAgentAllocationOffset = (Math.imul(agentAllocationFrame, 1664525) + 1013904223) >>> 0;
+  lastAgentAllocationOffset %= AGENT_CAPACITY * 2;
+  agentAllocationFrame++;
+
+  setAgentUpdateUniforms(agentParentUpdateMaterial, now, dt);
+  runFullscreenPass(agentParentUpdateMaterial, agentParentNextRT);
+
+  setAgentUpdateUniforms(agentCandidateBuildMaterial, now, dt);
+  agentCandidateBuildMaterial.uniforms.u_parentNext.value = agentParentNextRT.texture;
+  agentCandidateBuildMaterial.uniforms.u_allocationOffset.value = lastAgentAllocationOffset;
+  runFullscreenPass(agentCandidateBuildMaterial, agentCandidateRT);
 
   agentPrefixInitMaterial.uniforms.u_candidates.value = agentCandidateRT.texture;
   runFullscreenPass(agentPrefixInitMaterial, agentPrefixRT.write);
@@ -10262,6 +10968,7 @@ function updateAgents(now, dt) {
 
   agentCompactMaterial.uniforms.u_candidates.value = agentCandidateRT.texture;
   agentCompactMaterial.uniforms.u_prefix.value = agentPrefixRT.read.texture;
+  agentCompactMaterial.uniforms.u_allocationOffset.value = lastAgentAllocationOffset;
   runFullscreenPass(agentCompactMaterial, agentRT.write);
   agentRT.swap();
 }
@@ -10513,12 +11220,14 @@ function initControls() {
     repro: 'reproThreshold',
     attract: 'foodWeight',
     avoid: 'crowdWeight',
+    crowdCurve: 'crowdExponent',
     blur: 'densityBlur',
     ideal: 'densityTarget',
     minSpeed: 'minMoveScale',
     decay: 'fieldDecay',
     steps: 'simulationSteps',
     oatPower: 'oatPower',
+    oatSupply: 'oatSupplyRate',
     spatialSmooth: 'spatialSmoothing',
     temporalSmooth: 'temporalSmoothing',
     surfaceHeight: 'surfaceHeight',
@@ -10532,7 +11241,7 @@ function initControls() {
   for (const [id, key] of Object.entries(bindings)) {
     const input = document.getElementById(id);
     const output = input.parentElement.querySelector('output');
-    const sync = () => {
+    const sync = ({ markCustom = true } = {}) => {
       params[key] = Number(input.value);
       const scale = Number(input.dataset.scale || 1);
       const suffix = input.dataset.suffix || '';
@@ -10547,19 +11256,78 @@ function initControls() {
         }
         oatDirty = true;
       }
+      if (markCustom && SIMULATION_PRESET_KEY_SET.has(key)) {
+        setActiveSimulationPreset('custom');
+      }
+      if (markCustom && RENDER_DISPLAY_PRESET_KEY_SET.has(key)) {
+        setActiveRenderDisplayPreset('custom');
+      }
     };
-    input.addEventListener('input', sync);
-    sync();
+    const syncFromParams = () => {
+      input.value = params[key];
+      sync({ markCustom: false });
+    };
+    input.addEventListener('input', () => sync());
+    boundParamControls.set(key, syncFromParams);
+    syncFromParams();
+  }
+
+  const simulationPresetSelect = document.getElementById('simulationPreset');
+  if (simulationPresetSelect) {
+    simulationPresetSelect.innerHTML = '';
+    const customOption = document.createElement('option');
+    customOption.value = 'custom';
+    customOption.textContent = 'Custom';
+    simulationPresetSelect.appendChild(customOption);
+    for (const preset of SIMULATION_PRESETS) {
+      const option = document.createElement('option');
+      option.value = preset.id;
+      option.textContent = preset.label;
+      option.title = preset.note;
+      simulationPresetSelect.appendChild(option);
+    }
+    simulationPresetSelect.value = activeSimulationPresetId;
+    simulationPresetSelect.addEventListener('change', () => {
+      if (simulationPresetSelect.value === 'custom') return;
+      applySimulationPreset(simulationPresetSelect.value);
+    });
+  }
+
+  const renderPresetSelect = document.getElementById('renderPreset');
+  if (renderPresetSelect) {
+    renderPresetSelect.innerHTML = '';
+    const customOption = document.createElement('option');
+    customOption.value = 'custom';
+    customOption.textContent = 'Custom';
+    renderPresetSelect.appendChild(customOption);
+    for (const preset of RENDER_DISPLAY_PRESETS) {
+      const option = document.createElement('option');
+      option.value = preset.id;
+      option.textContent = preset.label;
+      option.title = preset.note;
+      renderPresetSelect.appendChild(option);
+    }
+    renderPresetSelect.value = activeRenderDisplayPresetId;
+    renderPresetSelect.addEventListener('change', () => {
+      if (renderPresetSelect.value === 'custom') return;
+      applyRenderDisplayPreset(renderPresetSelect.value);
+    });
   }
 
   const baseColorInput = document.getElementById('slimeBaseColor');
   const baseColorOutput = baseColorInput.parentElement.querySelector('output');
-  const syncBaseColor = () => {
+  const syncBaseColor = ({ markCustom = true } = {}) => {
     params.slimeBaseColor = baseColorInput.value;
     baseColorOutput.value = baseColorInput.value.toUpperCase();
+    if (markCustom) setActiveRenderDisplayPreset('custom');
   };
-  baseColorInput.addEventListener('input', syncBaseColor);
-  syncBaseColor();
+  const syncBaseColorFromParams = () => {
+    baseColorInput.value = params.slimeBaseColor;
+    syncBaseColor({ markCustom: false });
+  };
+  baseColorInput.addEventListener('input', () => syncBaseColor());
+  boundParamControls.set('slimeBaseColor', syncBaseColorFromParams);
+  syncBaseColorFromParams();
 
   for (const tip of document.querySelectorAll('.help-tip')) {
     tip.addEventListener('pointerdown', (event) => {
@@ -10576,10 +11344,20 @@ function initControls() {
   function bindToggle(id, key) {
     const input = document.getElementById(id);
     if (!input) return;
-    input.checked = !!params[key];
+    const syncFromParams = () => {
+      input.checked = !!params[key];
+    };
     input.addEventListener('change', () => {
       params[key] = input.checked;
+      if (SIMULATION_PRESET_KEY_SET.has(key)) {
+        setActiveSimulationPreset('custom');
+      }
+      if (RENDER_DISPLAY_PRESET_KEY_SET.has(key)) {
+        setActiveRenderDisplayPreset('custom');
+      }
     });
+    boundParamControls.set(key, syncFromParams);
+    syncFromParams();
   }
   bindToggle('showAgents', 'showAgentDots');
   bindToggle('showOats', 'showOats');
@@ -10587,6 +11365,7 @@ function initControls() {
   bindToggle('useSeamStitching', 'useSeamStitching');
   bindToggle('useIslandMasking', 'useIslandMasking');
   bindToggle('useHeadingRotation', 'useHeadingRotation');
+  bindToggle('useOatRationing', 'useOatRationing');
   bindToggle('showWireframe', 'showWireframe');
   bindToggle('filmFollowsSlimeHeight', 'filmFollowsSlimeHeight');
 
@@ -10605,7 +11384,9 @@ function initControls() {
     collapsePanelButton.setAttribute('aria-expanded', String(!collapsed));
     collapsePanelButton.title = collapsed ? 'Show parameters' : 'Hide parameters';
     panelBody.setAttribute('aria-hidden', String(collapsed));
+    if (!collapsed) drawAgentCharts();
   });
+  window.addEventListener('resize', drawAgentCharts);
 
   document.getElementById('pause').addEventListener('click', () => {
     paused = !paused;
@@ -10719,11 +11500,278 @@ function frame(now) {
 function renderSceneOnce() {
   controls.update();
   resizeIfNeeded();
+  updateOatAnnotations();
 
   renderer.setRenderTarget(null);
   renderer.setClearColor(scene.background, 1);
   renderer.clear(true, true, false);
   renderer.render(scene, camera);
+}
+
+function formatCompactAgentCount(value) {
+  if (!Number.isFinite(value)) return '0';
+  if (value >= 1000000) return `${(value / 1000000).toFixed(1)}m`;
+  if (value >= 10000) return `${Math.round(value / 1000)}k`;
+  if (value >= 1000) return `${(value / 1000).toFixed(1)}k`;
+  return String(Math.round(value));
+}
+
+function formatGrowthRate(value) {
+  if (!Number.isFinite(value)) return '0/s';
+  const sign = value > 0 ? '+' : value < 0 ? '-' : '';
+  const absValue = Math.abs(value);
+  if (absValue >= 10000) return `${sign}${Math.round(absValue / 1000)}k/s`;
+  if (absValue >= 1000) return `${sign}${(absValue / 1000).toFixed(1)}k/s`;
+  return `${sign}${Math.round(absValue)}/s`;
+}
+
+function formatGrowthAcceleration(value) {
+  if (!Number.isFinite(value)) return '0/s²';
+  const sign = value > 0 ? '+' : value < 0 ? '-' : '';
+  const absValue = Math.abs(value);
+  if (absValue >= 10000) return `${sign}${Math.round(absValue / 1000)}k/s²`;
+  if (absValue >= 1000) return `${sign}${(absValue / 1000).toFixed(1)}k/s²`;
+  return `${sign}${Math.round(absValue)}/s²`;
+}
+
+function prepareHistoryCanvas(canvas, fallbackHeight) {
+  const parentWidth = canvas.parentElement?.clientWidth ?? 0;
+  const cssWidth = Math.max(240, Math.floor(parentWidth > 0 ? parentWidth - 20 : 320));
+  const cssHeight = Math.max(40, Math.floor(canvas.clientHeight || fallbackHeight));
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const pixelWidth = Math.round(cssWidth * dpr);
+  const pixelHeight = Math.round(cssHeight * dpr);
+  if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+    canvas.width = pixelWidth;
+    canvas.height = pixelHeight;
+  }
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cssWidth, cssHeight);
+  return { ctx, cssWidth, cssHeight };
+}
+
+function drawAgentHistoryChart() {
+  if (!agentHistoryCanvas) return;
+  const { ctx, cssWidth, cssHeight } = prepareHistoryCanvas(agentHistoryCanvas, 76);
+
+  ctx.fillStyle = 'rgba(2, 6, 8, 0.52)';
+  ctx.fillRect(0, 0, cssWidth, cssHeight);
+
+  const counts = agentHistorySamples.map((sample) => sample.count);
+  const latest = counts[counts.length - 1] ?? visibleAgents;
+  const peak = Math.max(1000, ...counts, latest);
+  const yMax = Math.max(1000, Math.ceil((peak * 1.12) / 1000) * 1000);
+  const plotLeft = 34;
+  const plotRight = cssWidth - 8;
+  const plotTop = 7;
+  const plotBottom = cssHeight - 18;
+  const plotWidth = Math.max(1, plotRight - plotLeft);
+  const plotHeight = Math.max(1, plotBottom - plotTop);
+  const yFor = (count) => plotBottom - Math.max(0, Math.min(1, count / yMax)) * plotHeight;
+
+  const targetLow = 5000;
+  const targetHigh = 30000;
+  if (yMax >= targetLow) {
+    const bandTop = yFor(Math.min(targetHigh, yMax));
+    const bandBottom = yFor(targetLow);
+    ctx.fillStyle = 'rgba(109, 223, 129, 0.12)';
+    ctx.fillRect(plotLeft, bandTop, plotWidth, Math.max(0, bandBottom - bandTop));
+  }
+
+  ctx.strokeStyle = 'rgba(223, 234, 232, 0.12)';
+  ctx.lineWidth = 1;
+  ctx.fillStyle = 'rgba(168, 182, 177, 0.82)';
+  ctx.font = '10px Inter, system-ui, sans-serif';
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  for (const tick of [0, yMax * 0.5, yMax]) {
+    const y = yFor(tick);
+    ctx.beginPath();
+    ctx.moveTo(plotLeft, y);
+    ctx.lineTo(plotRight, y);
+    ctx.stroke();
+    ctx.fillText(formatCompactAgentCount(tick), plotLeft - 6, y);
+  }
+
+  if (agentHistorySamples.length >= 2) {
+    ctx.beginPath();
+    agentHistorySamples.forEach((sample, index) => {
+      const x = plotLeft + (index / Math.max(1, agentHistorySamples.length - 1)) * plotWidth;
+      const y = yFor(sample.count);
+      if (index === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.strokeStyle = 'rgba(140, 232, 255, 0.95)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+
+  const latestY = yFor(latest);
+  ctx.fillStyle = '#8ce8ff';
+  ctx.beginPath();
+  ctx.arc(plotRight, latestY, 3, 0, Math.PI * 2);
+  ctx.fill();
+
+  if (agentHistoryRangeEl) {
+    const min = counts.length ? Math.min(...counts) : latest;
+    agentHistoryRangeEl.value = `${formatCompactAgentCount(latest)} now / ${formatCompactAgentCount(min)}-${formatCompactAgentCount(peak)}`;
+  }
+}
+
+function drawAgentGrowthChart() {
+  if (!agentGrowthCanvas) return;
+  const { ctx, cssWidth, cssHeight } = prepareHistoryCanvas(agentGrowthCanvas, 54);
+  ctx.fillStyle = 'rgba(2, 6, 8, 0.38)';
+  ctx.fillRect(0, 0, cssWidth, cssHeight);
+
+  const rates = [];
+  for (let i = 1; i < agentHistorySamples.length; i++) {
+    const prev = agentHistorySamples[i - 1];
+    const next = agentHistorySamples[i];
+    const seconds = Math.max(0.001, (next.t - prev.t) / 1000);
+    rates.push((next.count - prev.count) / seconds);
+  }
+
+  const plotLeft = 46;
+  const plotRight = cssWidth - 8;
+  const plotTop = 7;
+  const plotBottom = cssHeight - 15;
+  const plotWidth = Math.max(1, plotRight - plotLeft);
+  const plotHeight = Math.max(1, plotBottom - plotTop);
+  const maxAbs = Math.max(25, ...rates.map((rate) => Math.abs(rate)));
+  const yFor = (rate) => plotTop + (0.5 - rate / (maxAbs * 2)) * plotHeight;
+
+  ctx.strokeStyle = 'rgba(223, 234, 232, 0.1)';
+  ctx.lineWidth = 1;
+  for (const rate of [-maxAbs, 0, maxAbs]) {
+    const y = yFor(rate);
+    ctx.beginPath();
+    ctx.moveTo(plotLeft, y);
+    ctx.lineTo(plotRight, y);
+    ctx.stroke();
+  }
+
+  ctx.fillStyle = 'rgba(168, 182, 177, 0.82)';
+  ctx.font = '10px Inter, system-ui, sans-serif';
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(formatGrowthRate(maxAbs), plotLeft - 6, yFor(maxAbs));
+  ctx.fillText('0/s', plotLeft - 6, yFor(0));
+  ctx.fillText(formatGrowthRate(-maxAbs), plotLeft - 6, yFor(-maxAbs));
+
+  ctx.fillStyle = 'rgba(168, 182, 177, 0.86)';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillText('growth rate', plotLeft, 1);
+
+  if (rates.length >= 1) {
+    ctx.beginPath();
+    rates.forEach((rate, index) => {
+      const x = plotLeft + (index / Math.max(1, rates.length - 1)) * plotWidth;
+      const y = yFor(rate);
+      if (index === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.strokeStyle = 'rgba(255, 205, 88, 0.96)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+}
+
+function drawAgentAccelerationChart() {
+  if (!agentAccelerationCanvas) return;
+  const { ctx, cssWidth, cssHeight } = prepareHistoryCanvas(agentAccelerationCanvas, 54);
+  ctx.fillStyle = 'rgba(2, 6, 8, 0.34)';
+  ctx.fillRect(0, 0, cssWidth, cssHeight);
+
+  const rates = [];
+  for (let i = 1; i < agentHistorySamples.length; i++) {
+    const prev = agentHistorySamples[i - 1];
+    const next = agentHistorySamples[i];
+    const seconds = Math.max(0.001, (next.t - prev.t) / 1000);
+    rates.push({
+      t: next.t,
+      rate: (next.count - prev.count) / seconds,
+    });
+  }
+  const accelerations = [];
+  for (let i = 1; i < rates.length; i++) {
+    const prev = rates[i - 1];
+    const next = rates[i];
+    const seconds = Math.max(0.001, (next.t - prev.t) / 1000);
+    accelerations.push((next.rate - prev.rate) / seconds);
+  }
+  const smoothedAccelerations = [];
+  for (const value of accelerations) {
+    const previous = smoothedAccelerations[smoothedAccelerations.length - 1];
+    smoothedAccelerations.push(previous === undefined ? value : previous * 0.72 + value * 0.28);
+  }
+
+  const plotLeft = 54;
+  const plotRight = cssWidth - 8;
+  const plotTop = 7;
+  const plotBottom = cssHeight - 15;
+  const plotWidth = Math.max(1, plotRight - plotLeft);
+  const plotHeight = Math.max(1, plotBottom - plotTop);
+  const maxAbs = Math.max(25, ...smoothedAccelerations.map((value) => Math.abs(value)));
+  const yFor = (value) => plotTop + (0.5 - value / (maxAbs * 2)) * plotHeight;
+
+  ctx.strokeStyle = 'rgba(223, 234, 232, 0.1)';
+  ctx.lineWidth = 1;
+  for (const value of [-maxAbs, 0, maxAbs]) {
+    const y = yFor(value);
+    ctx.beginPath();
+    ctx.moveTo(plotLeft, y);
+    ctx.lineTo(plotRight, y);
+    ctx.stroke();
+  }
+
+  ctx.fillStyle = 'rgba(168, 182, 177, 0.82)';
+  ctx.font = '10px Inter, system-ui, sans-serif';
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(formatGrowthAcceleration(maxAbs), plotLeft - 6, yFor(maxAbs));
+  ctx.fillText('0/s²', plotLeft - 6, yFor(0));
+  ctx.fillText(formatGrowthAcceleration(-maxAbs), plotLeft - 6, yFor(-maxAbs));
+
+  ctx.fillStyle = 'rgba(168, 182, 177, 0.86)';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillText('growth acceleration', plotLeft, 1);
+
+  if (smoothedAccelerations.length >= 1) {
+    ctx.beginPath();
+    smoothedAccelerations.forEach((value, index) => {
+      const x = plotLeft + (index / Math.max(1, smoothedAccelerations.length - 1)) * plotWidth;
+      const y = yFor(value);
+      if (index === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.strokeStyle = 'rgba(246, 139, 92, 0.98)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+}
+
+function drawAgentCharts() {
+  drawAgentHistoryChart();
+  drawAgentGrowthChart();
+  drawAgentAccelerationChart();
+}
+
+function recordAgentHistory(count, now = performance.now()) {
+  if (!Number.isFinite(count)) return;
+  agentHistorySamples.push({ t: now, count });
+  if (agentHistorySamples.length > AGENT_HISTORY_SAMPLE_LIMIT) {
+    agentHistorySamples.splice(0, agentHistorySamples.length - AGENT_HISTORY_SAMPLE_LIMIT);
+  }
+  drawAgentCharts();
+}
+
+function resetAgentHistory(count = visibleAgents, now = performance.now()) {
+  agentHistorySamples = [];
+  recordAgentHistory(count, now);
 }
 
 function updateStats(now, dt) {
@@ -10736,11 +11784,11 @@ function updateStats(now, dt) {
   const statsDue = now - lastStatsRead >= STATS_UPDATE_INTERVAL_MS;
   if (!statsDue) return;
   lastStatsRead = now;
-  refreshRuntimeAgentFeedback();
+  refreshRuntimeAgentFeedback({ recordHistory: true, now });
   statusEl.textContent = baseStatus;
 }
 
-function refreshRuntimeAgentFeedback() {
+function refreshRuntimeAgentFeedback({ recordHistory = false, now = performance.now() } = {}) {
   // Low-frequency count readback for UI/runtime visibility. Full-field coverage
   // readbacks remain manual diagnostics only.
   renderer.readRenderTargetPixels(agentRT.read, 0, 0, AGENT_SIDE, AGENT_SIDE, agentReadback);
@@ -10750,7 +11798,72 @@ function refreshRuntimeAgentFeedback() {
   }
   visibleAgents = alive;
   agentCountEl.textContent = alive.toLocaleString();
+  if (recordHistory) recordAgentHistory(alive, now);
   return { visibleAgents };
+}
+
+function applyRuntimeParams(overrides = {}) {
+  Object.assign(params, overrides);
+  if (Object.prototype.hasOwnProperty.call(overrides, 'oatPower')) {
+    for (const oat of oats) oat.power = params.oatPower;
+    oatDirty = true;
+  }
+  return { ...params };
+}
+
+function runPopulationTrial({
+  overrides = {},
+  steps = 360,
+  dt = 1,
+  sampleEvery = 30,
+  resetOats = true,
+  targetMin = 5000,
+  targetMax = 30000,
+} = {}) {
+  const previousPaused = paused;
+  paused = true;
+  applyRuntimeParams(overrides);
+  resetSimulation({ resetOats });
+  const samples = [];
+  const startedAt = performance.now();
+  for (let step = 0; step <= steps; step++) {
+    if (step > 0) simulate(step * dt * 16.6667, dt);
+    if (step === 0 || step === steps || step % sampleEvery === 0) {
+      const { visibleAgents: agents } = refreshRuntimeAgentFeedback();
+      samples.push({ step, agents });
+    }
+  }
+  const durationMs = performance.now() - startedAt;
+  const counts = samples.map((sample) => sample.agents);
+  const finalAgents = counts[counts.length - 1] ?? 0;
+  const maxAgents = Math.max(...counts);
+  const minAgents = Math.min(...counts);
+  const tail = samples.slice(-Math.min(5, samples.length));
+  const tailCounts = tail.map((sample) => sample.agents);
+  const tailMin = Math.min(...tailCounts);
+  const tailMax = Math.max(...tailCounts);
+  const tailMean = tailCounts.reduce((sum, value) => sum + value, 0) / Math.max(1, tailCounts.length);
+  paused = previousPaused;
+  return {
+    overrides: { ...overrides },
+    steps,
+    dt,
+    sampleEvery,
+    durationMs,
+    samples,
+    targetMin,
+    targetMax,
+    initialAgents: samples[0]?.agents ?? null,
+    finalAgents,
+    maxAgents,
+    minAgents,
+    tailMin,
+    tailMax,
+    tailMean,
+    inTargetBand: finalAgents >= targetMin && finalAgents <= targetMax,
+    tailInTargetBand: tailMin >= targetMin && tailMax <= targetMax,
+    exploding: maxAgents >= AGENT_CAPACITY * 0.96,
+  };
 }
 
 function measureAgentAllocatorDiagnostics() {
@@ -10764,26 +11877,276 @@ function measureAgentAllocatorDiagnostics() {
       1,
       prefixLast,
     );
-    renderer.readRenderTargetPixels(agentRT.read, 0, 0, AGENT_SIDE, AGENT_SIDE, agentReadback);
-    let liveAgents = 0;
-    for (let i = 3; i < agentReadback.length; i += 4) {
-      if (agentReadback[i] > 0.0001) liveAgents++;
+    const parentNext = new Float32Array(AGENT_CAPACITY * 4);
+    const finalAgents = new Float32Array(AGENT_CAPACITY * 4);
+    const candidates = new Float32Array(AGENT_CANDIDATE_COUNT * 4);
+    const prefix = new Float32Array(AGENT_CANDIDATE_COUNT * 4);
+    renderer.readRenderTargetPixels(agentParentNextRT, 0, 0, AGENT_SIDE, AGENT_SIDE, parentNext);
+    renderer.readRenderTargetPixels(agentRT.read, 0, 0, AGENT_SIDE, AGENT_SIDE, finalAgents);
+    renderer.readRenderTargetPixels(agentCandidateRT, 0, 0, AGENT_SIDE, AGENT_CANDIDATE_HEIGHT, candidates);
+    renderer.readRenderTargetPixels(agentPrefixRT.read, 0, 0, AGENT_SIDE, AGENT_CANDIDATE_HEIGHT, prefix);
+
+    let liveParentsAfterAdvance = 0;
+    let fertileParentCount = 0;
+    let estimatedReserveBeforeBirth = 0;
+    for (let i = 0; i < AGENT_CAPACITY; i++) {
+      const reserve = parentNext[i * 4 + 3];
+      if (reserve > 0.0001) {
+        liveParentsAfterAdvance++;
+        estimatedReserveBeforeBirth += reserve;
+        if (reserve > params.reproThreshold) fertileParentCount++;
+      }
     }
-    const candidateRecords = Math.round(prefixLast[0]);
+
+    let liveAgents = 0;
+    let estimatedReserveAfterBirth = 0;
+    for (let i = 0; i < AGENT_CAPACITY; i++) {
+      const reserve = finalAgents[i * 4 + 3];
+      if (reserve > 0.0001) {
+        liveAgents++;
+        estimatedReserveAfterBirth += reserve;
+      }
+    }
+
+    let validChildProposalCount = 0;
+    let acceptedChildCount = 0;
+    let acceptedLeftChildren = 0;
+    let acceptedRightChildren = 0;
+    const proposalCount = AGENT_CAPACITY * 2;
+    const offset = lastAgentAllocationOffset % proposalCount;
+    for (let childLinearIndex = 0; childLinearIndex < proposalCount; childLinearIndex++) {
+      const candidateIndex = AGENT_CAPACITY + childLinearIndex;
+      const reserve = candidates[candidateIndex * 4 + 3];
+      if (reserve <= 0.0001) continue;
+      validChildProposalCount++;
+      const proposalId = (childLinearIndex + offset) % proposalCount;
+      const side = proposalId % 2;
+      const accepted = prefix[candidateIndex * 4] <= AGENT_CAPACITY + 0.001;
+      if (accepted) {
+        acceptedChildCount++;
+        if (side === 0) acceptedLeftChildren++;
+        else acceptedRightChildren++;
+      }
+    }
+
+    const invalidChildPlacementCount = Math.max(0, fertileParentCount * 2 - validChildProposalCount);
+    const capacityRejectedChildCount = Math.max(0, validChildProposalCount - acceptedChildCount);
+    const reserveConservationError = estimatedReserveAfterBirth - estimatedReserveBeforeBirth;
+    const reserveTolerance = Math.max(1e-3, estimatedReserveBeforeBirth * 2e-5);
     return {
-      allocator: 'expand-scan-compact',
+      allocator: 'parent-update + deferred-debit compact',
       storageIndexEncodesLineage: false,
+      parentSlotsStable: false,
       agentCapacity: AGENT_CAPACITY,
       candidateRecordStride: AGENT_RECORD_STRIDE,
-      candidateLayout: 'all parents, then left children, then right children',
+      candidateLayout: 'all parents, then frame-rotated child proposals',
       candidateCapacity: AGENT_CANDIDATE_COUNT,
-      candidateRecordsLastFrame: candidateRecords,
+      candidateRecordsLastFrame: Math.round(prefixLast[0]),
+      parentAdvanceCallsPerFrame: AGENT_CAPACITY,
+      advanceAgentEvaluationsPerSource: 1,
+      liveParentsAfterAdvance,
+      admittedParents: liveParentsAfterAdvance,
       liveAgents,
-      compactedAgents: Math.min(candidateRecords, AGENT_CAPACITY),
-      capacityTruncatedCandidateRecords: Math.max(0, candidateRecords - AGENT_CAPACITY),
-      note: 'Manual readback. Each source agent emits parent/child candidates; prefix-sum compaction assigns storage slots, so leaf slots do not block reproduction.',
+      freeSlotCount: AGENT_CAPACITY - liveParentsAfterAdvance,
+      fertileParentCount,
+      validChildProposalCount,
+      acceptedChildCount,
+      admittedChildren: acceptedChildCount,
+      capacityRejectedChildCount,
+      invalidChildPlacementCount,
+      parentReserveChargedForAcceptedChildrenOnly: true,
+      parentReserveDebitedForRejectedChildren: 0,
+      allocationReserveLostDueToCapacity: 0,
+      acceptedLeftChildren,
+      acceptedRightChildren,
+      allocationOffset: lastAgentAllocationOffset,
+      childAcceptanceOrder: 'rotated',
+      estimatedReserveBeforeBirth,
+      estimatedReserveAfterBirth,
+      reserveConservationError,
+      reserveConservationPass: Math.abs(reserveConservationError) <= reserveTolerance,
+      note: 'Manual readback. Parent advancement is separated from child admission; reserve is debited only in the compact pass for child records whose prefix rank fits in capacity.',
     };
   });
+}
+
+function findAllocatorRegressionUv() {
+  const spawnTexels = getAuthoritativeSpawnTexels();
+  const step = Math.max(1, Math.floor(spawnTexels.length / 4096));
+  const testAngles = [0, Math.PI * 0.5, Math.PI, Math.PI * 1.5];
+  for (let i = 0; i < spawnTexels.length; i += step) {
+    const uv = uvFromTexelIndex(spawnTexels[i]);
+    if (validateSpawnUv(uv) !== 'valid') continue;
+    let valid = true;
+    for (const angle of testAngles) {
+      for (const sideSign of [1, -1]) {
+        const childAngle = angle + sideSign * params.reproAngle;
+        const childUv = {
+          x: uv.x + Math.cos(childAngle) * params.childStep,
+          y: uv.y + Math.sin(childAngle) * params.childStep,
+        };
+        if (validateSpawnUv(childUv) !== 'valid') {
+          valid = false;
+          break;
+        }
+      }
+      if (!valid) break;
+    }
+    if (valid) return uv;
+  }
+  for (const texel of spawnTexels) {
+    const uv = uvFromTexelIndex(texel);
+    if (validateSpawnUv(uv) === 'valid') return uv;
+  }
+  return null;
+}
+
+function runAgentAllocatorRegressionTests() {
+  const savedParams = {
+    uptakeRate: params.uptakeRate,
+    depositRate: params.depositRate,
+    burnRate: params.burnRate,
+    reproThreshold: params.reproThreshold,
+    stepSize: params.stepSize,
+    minMoveScale: params.minMoveScale,
+    sensorDistance: params.sensorDistance,
+    turnAngle: params.turnAngle,
+    wander: params.wander,
+    useSeamStitching: params.useSeamStitching,
+    useHeadingRotation: params.useHeadingRotation,
+  };
+  const savedAllocationFrame = agentAllocationFrame;
+  const savedAllocationOffset = lastAgentAllocationOffset;
+  const testUv = findAllocatorRegressionUv();
+  const result = {
+    allocator: 'parent-update + deferred-debit compact',
+    accepted: false,
+    mutatesSimulationState: true,
+    restoredWithFreshReset: true,
+    testUv,
+    checks: {},
+    cases: {},
+    note: 'Manual destructive regression helper. It installs synthetic agent textures, runs allocator passes with dt=0, then restores parameters and resets the simulation.',
+  };
+  if (!testUv) {
+    result.error = 'No authoritative UV suitable for allocator regression tests was found.';
+    return result;
+  }
+
+  function applyTestParams() {
+    params.uptakeRate = 0;
+    params.depositRate = 0;
+    params.burnRate = 0;
+    params.reproThreshold = 1.0;
+    params.stepSize = 0;
+    params.minMoveScale = 0;
+    params.sensorDistance = 0;
+    params.turnAngle = 0;
+    params.wander = 0;
+    params.useSeamStitching = true;
+    params.useHeadingRotation = true;
+  }
+
+  function makeAgentDataFromGenerator(generator) {
+    const data = new Float32Array(AGENT_CAPACITY * 4);
+    for (let i = 0; i < AGENT_CAPACITY; i++) {
+      const agent = generator(i);
+      if (!agent) continue;
+      const p = i * 4;
+      data[p] = agent.x;
+      data[p + 1] = agent.y;
+      data[p + 2] = agent.angle;
+      data[p + 3] = agent.reserve;
+    }
+    return data;
+  }
+
+  function installAgentData(data) {
+    uploadAgentDataToRT(data, agentRT.read);
+    uploadAgentDataToRT(data, agentRT.write);
+    clearRT(agentParentNextRT);
+    clearRT(agentCandidateRT);
+    clearRT(agentPrefixRT.read);
+    clearRT(agentPrefixRT.write);
+    clearRT(densityRT);
+    clearRT(depositDensityRT);
+  }
+
+  function freshAllocatorDiagnostics() {
+    readbackDiagnosticState.delete('measureAgentAllocatorDiagnostics');
+    return measureAgentAllocatorDiagnostics();
+  }
+
+  function runSyntheticCase(name, data, allocationFrame = 0) {
+    agentAllocationFrame = allocationFrame;
+    lastAgentAllocationOffset = 0;
+    installAgentData(data);
+    updateAgents(0, 0);
+    const diagnostics = freshAllocatorDiagnostics();
+    result.cases[name] = diagnostics;
+    return diagnostics;
+  }
+
+  try {
+    applyTestParams();
+    const agentTemplate = {
+      x: testUv.x,
+      y: testUv.y,
+      angle: 0,
+      reserve: 4.0,
+    };
+
+    const leafData = makeAgentDataFromGenerator((index) =>
+      index === AGENT_CAPACITY - 1 ? agentTemplate : null
+    );
+    const leaf = runSyntheticCase('leafHighIndex', leafData, 0);
+    result.checks.leafHighIndexCanReproduce =
+      leaf.liveParentsAfterAdvance === 1 &&
+      leaf.acceptedChildCount >= 1 &&
+      leaf.reserveConservationPass === true;
+
+    const fullData = makeAgentDataFromGenerator(() => agentTemplate);
+    const full = runSyntheticCase('fullCapacityNoDebit', fullData, 1);
+    result.checks.fullCapacityRejectsChildrenWithoutReserveLoss =
+      full.liveParentsAfterAdvance === AGENT_CAPACITY &&
+      full.acceptedChildCount === 0 &&
+      full.capacityRejectedChildCount > 0 &&
+      full.parentReserveDebitedForRejectedChildren === 0 &&
+      full.allocationReserveLostDueToCapacity === 0 &&
+      full.reserveConservationPass === true;
+
+    const halfLiveCount = Math.floor(AGENT_CAPACITY * 0.5);
+    const holeData = makeAgentDataFromGenerator((index) =>
+      index < halfLiveCount ? agentTemplate : null
+    );
+    const hole = runSyntheticCase('holeFillUnderPressure', holeData, 2);
+    result.checks.deadHolesAreReusableByAcceptedChildren =
+      hole.liveParentsAfterAdvance === halfLiveCount &&
+      hole.acceptedChildCount > 0 &&
+      hole.liveAgents === Math.min(AGENT_CAPACITY, halfLiveCount + hole.acceptedChildCount) &&
+      hole.reserveConservationPass === true;
+    result.checks.capacityPressureIsNotPermanentlyOneSided =
+      hole.acceptedChildCount === 0 ||
+      (hole.acceptedLeftChildren > 0 && hole.acceptedRightChildren > 0);
+
+    result.checks.advanceAgentOncePerSource =
+      leaf.advanceAgentEvaluationsPerSource === 1 &&
+      full.advanceAgentEvaluationsPerSource === 1 &&
+      hole.advanceAgentEvaluationsPerSource === 1;
+    result.checks.reserveDebitedForAcceptedChildrenOnly =
+      leaf.parentReserveChargedForAcceptedChildrenOnly === true &&
+      full.parentReserveChargedForAcceptedChildrenOnly === true &&
+      hole.parentReserveChargedForAcceptedChildrenOnly === true &&
+      full.parentReserveDebitedForRejectedChildren === 0;
+
+    result.accepted = Object.values(result.checks).every(Boolean);
+    return result;
+  } finally {
+    Object.assign(params, savedParams);
+    agentAllocationFrame = savedAllocationFrame;
+    lastAgentAllocationOffset = savedAllocationOffset;
+    resetSimulation({ resetOats: false });
+  }
 }
 
 function refreshRuntimeReadbackStats() {
