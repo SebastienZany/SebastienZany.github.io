@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Slime Mold on Cuttlefish</title>
     <link rel="icon" href="data:,">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Syne+Mono&display=swap" rel="stylesheet">
     <style>
 :root {
   color-scheme: dark;
@@ -18,6 +21,20 @@
   --gold: #ffcd58;
   --cyan: #8ce8ff;
   --red: #ff6f6f;
+  --observation-stroke-opacity: 0;
+  --observation-corner-radius: 24px;
+  --observation-edge-feather: 24px;
+  --observation-edge-feather-outset: 42px;
+  --observation-edge-feather-mask: 62px;
+  --observation-edge-feather-opacity: 1;
+  --observation-blur-radius: 14px;
+  --observation-tint-rgb: 8, 16, 24;
+  --observation-tint-opacity: 0.33;
+  --observation-text-fade: 28px;
+  --observation-text-rgb: 238, 245, 242;
+  --observation-glass-opacity: 0;
+  --observation-text-opacity: 0;
+  --observation-spatial-opacity: 0;
 }
 
 * {
@@ -60,18 +77,10 @@ select {
   cursor: grabbing;
 }
 
-.annotation-tethers,
 .annotation-layer {
   position: absolute;
   inset: 0;
   pointer-events: none;
-}
-
-.annotation-tethers {
-  z-index: 1;
-  width: 100%;
-  height: 100%;
-  overflow: visible;
 }
 
 .annotation-layer {
@@ -82,49 +91,111 @@ select {
 .observation-callout {
   position: absolute;
   width: min(230px, calc(100vw - 28px));
-  min-height: 74px;
+  height: 126px;
   padding: 10px 12px 11px;
-  border: 1px solid rgba(255, 219, 110, 0.42);
-  border-radius: 7px;
-  background: rgba(9, 12, 13, 0.84);
-  box-shadow:
-    0 18px 42px rgba(0, 0, 0, 0.35),
-    0 0 28px rgba(255, 207, 80, 0.08);
+  border: 1.5px solid rgba(255, 255, 255, calc(var(--observation-stroke-opacity) * var(--observation-glass-opacity) * var(--observation-spatial-opacity)));
+  border-radius: var(--observation-corner-radius);
+  background: transparent;
+  box-shadow: none;
+  font-family: "Syne Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  isolation: isolate;
   opacity: 0;
+  overflow: visible;
+  pointer-events: none;
   transform: translateZ(0);
-  transition: opacity 160ms ease;
-  backdrop-filter: blur(14px);
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .observation-callout.is-visible {
   opacity: 1;
 }
 
-.observation-callout strong {
-  display: block;
-  overflow: hidden;
-  color: #fff5bd;
-  font-size: 0.7rem;
-  letter-spacing: 0.08em;
-  line-height: 1.15;
-  text-overflow: ellipsis;
-  text-transform: uppercase;
-  white-space: nowrap;
+.observation-callout::before {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  inset: calc(-1 * var(--observation-edge-feather-outset));
+  border-radius: calc(var(--observation-corner-radius) + var(--observation-edge-feather-outset));
+  background: rgba(var(--observation-tint-rgb), var(--observation-tint-opacity));
+  /* Feather the backdrop-filtered layer itself; a plain blurred fill leaves a hard blur edge. */
+  backdrop-filter: blur(var(--observation-blur-radius)) saturate(1.12);
+  -webkit-backdrop-filter: blur(var(--observation-blur-radius)) saturate(1.12);
+  -webkit-mask-image:
+    linear-gradient(to right, transparent, #000 var(--observation-edge-feather-mask), #000 calc(100% - var(--observation-edge-feather-mask)), transparent),
+    linear-gradient(to bottom, transparent, #000 var(--observation-edge-feather-mask), #000 calc(100% - var(--observation-edge-feather-mask)), transparent);
+  -webkit-mask-composite: source-in;
+  mask-image:
+    linear-gradient(to right, transparent, #000 var(--observation-edge-feather-mask), #000 calc(100% - var(--observation-edge-feather-mask)), transparent),
+    linear-gradient(to bottom, transparent, #000 var(--observation-edge-feather-mask), #000 calc(100% - var(--observation-edge-feather-mask)), transparent);
+  mask-composite: intersect;
+  opacity: calc(var(--observation-edge-feather-opacity) * var(--observation-glass-opacity) * var(--observation-spatial-opacity));
+  pointer-events: none;
+}
+
+.observation-tail {
+  position: absolute;
+  z-index: 2;
+  width: 0;
+  height: 1.5px;
+  background: rgba(255, 255, 255, calc(var(--observation-stroke-opacity) * var(--observation-glass-opacity) * var(--observation-spatial-opacity)));
+  opacity: 0;
+  pointer-events: none;
+  transform-origin: 0 50%;
+}
+
+.observation-content {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  opacity: calc(var(--observation-text-opacity) * var(--observation-spatial-opacity));
+  position: relative;
+  z-index: 3;
 }
 
 .observation-callout p {
-  margin-top: 7px;
-  color: rgba(238, 245, 242, 0.88);
+  flex: 1 1 auto;
+  margin: 0;
+  min-height: 0;
+  overflow: hidden;
+  overscroll-behavior: contain;
+  padding: 2px 5px 2px 0;
+  color: rgba(var(--observation-text-rgb), 0.88);
   font-size: 0.78rem;
   line-height: 1.35;
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    #000 var(--observation-text-fade),
+    #000 calc(100% - var(--observation-text-fade)),
+    transparent
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    #000 var(--observation-text-fade),
+    #000 calc(100% - var(--observation-text-fade)),
+    transparent
+  );
+  scrollbar-width: none;
 }
 
-.observation-stem {
-  fill: none;
-  stroke: rgba(255, 218, 84, 0.92);
-  stroke-linecap: round;
-  stroke-width: 2;
-  vector-effect: non-scaling-stroke;
+.observation-text-roll {
+  display: block;
+  will-change: transform;
+}
+
+.observation-line {
+  display: block;
+  min-height: 1.35em;
+  overflow: hidden;
+  white-space: nowrap;
+  will-change: mask-position, -webkit-mask-position;
+}
+
+.observation-callout p::-webkit-scrollbar {
+  display: none;
 }
 
 .panel {
@@ -473,6 +544,59 @@ input[type="color"] {
   text-overflow: ellipsis;
 }
 
+.camera-readout {
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+}
+
+.camera-readout-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 12px;
+  margin: 0;
+}
+
+.camera-readout-grid div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.camera-readout-grid dt {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.camera-readout-grid dd {
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  margin: 0;
+  text-align: right;
+}
+
+.camera-pose-command {
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: rgba(238, 245, 242, 0.78);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.62rem;
+  line-height: 1.35;
+  margin: 0;
+  max-height: 64px;
+  overflow: hidden;
+  padding: 7px 8px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
 .error {
   color: var(--red);
 }
@@ -507,7 +631,6 @@ input[type="color"] {
   <body>
     <main id="app">
       <canvas id="sim" aria-label="Slime mold on cuttlefish skin"></canvas>
-      <svg id="annotationTethers" class="annotation-tethers" aria-hidden="true"></svg>
       <div id="annotationLayer" class="annotation-layer" aria-hidden="true"></div>
 
       <section class="panel is-collapsed" aria-label="Simulation controls">
@@ -727,7 +850,7 @@ input[type="color"] {
                   <strong>Height</strong>
                   <span class="help-tip" tabindex="0" aria-label="Heightmap scale used by the slime bump map.">?<span role="tooltip">Heightmap scale used by the slime bump map.</span></span>
                 </span>
-                <input id="surfaceHeight" type="range" min="0" max="1.5" step="0.01" value="1">
+                <input id="surfaceHeight" type="range" min="0" max="5" step="0.01" value="1">
                 <output for="surfaceHeight"></output>
               </label>
               <label class="control-row">
@@ -782,6 +905,70 @@ input[type="color"] {
                 <input id="lightBrightness" type="range" min="0" max="1" step="0.01" value="1" data-scale="100" data-suffix="%" data-digits="0">
                 <output for="lightBrightness"></output>
               </label>
+              <label class="control-row">
+                <span class="control-copy">
+                  <strong>Tail length</strong>
+                  <span class="help-tip" tabindex="0" aria-label="Distance from each oat to its story textbox along the surface normal.">?<span role="tooltip">Distance from each oat to its story textbox along the surface normal.</span></span>
+                </span>
+                <input id="observationTailLength" type="range" min="0" max="0.9" step="0.01" value="0.07" data-scale="100" data-suffix="%" data-digits="0">
+                <output for="observationTailLength"></output>
+              </label>
+              <label class="control-row">
+                <span class="control-copy">
+                  <strong>Tail opacity</strong>
+                  <span class="help-tip" tabindex="0" aria-label="Opacity shared by the story textbox border and tail line.">?<span role="tooltip">Opacity shared by the story textbox border and tail line.</span></span>
+                </span>
+                <input id="observationStrokeOpacity" type="range" min="0" max="1" step="0.01" value="0" data-scale="100" data-suffix="%" data-digits="0">
+                <output for="observationStrokeOpacity"></output>
+              </label>
+              <label class="control-row">
+                <span class="control-copy">
+                  <strong>Corner round</strong>
+                  <span class="help-tip" tabindex="0" aria-label="Corner radius for story textboxes.">?<span role="tooltip">Corner radius for story textboxes.</span></span>
+                </span>
+                <input id="observationCornerRadius" type="range" min="0" max="24" step="1" value="24" data-suffix="px" data-digits="0">
+                <output for="observationCornerRadius"></output>
+              </label>
+              <label class="control-row">
+                <span class="control-copy">
+                  <strong>Edge feather</strong>
+                  <span class="help-tip" tabindex="0" aria-label="Soft outer feather around story textboxes.">?<span role="tooltip">Soft outer feather around story textboxes.</span></span>
+                </span>
+                <input id="observationEdgeFeather" type="range" min="0" max="48" step="1" value="24" data-suffix="px" data-digits="0">
+                <output for="observationEdgeFeather"></output>
+              </label>
+              <label class="control-row">
+                <span class="control-copy">
+                  <strong>Blur radius</strong>
+                  <span class="help-tip" tabindex="0" aria-label="Backdrop blur radius for story textboxes.">?<span role="tooltip">Backdrop blur radius for story textboxes.</span></span>
+                </span>
+                <input id="observationBlurRadius" type="range" min="0" max="36" step="1" value="14" data-suffix="px" data-digits="0">
+                <output for="observationBlurRadius"></output>
+              </label>
+              <label class="control-row">
+                <span class="control-copy">
+                  <strong>Tint color</strong>
+                  <span class="help-tip" tabindex="0" aria-label="Color of the softly feathered story textbox blur.">?<span role="tooltip">Color of the softly feathered story textbox blur.</span></span>
+                </span>
+                <input id="observationTintColor" type="color" value="#081018">
+                <output for="observationTintColor"></output>
+              </label>
+              <label class="control-row">
+                <span class="control-copy">
+                  <strong>Tint strength</strong>
+                  <span class="help-tip" tabindex="0" aria-label="Opacity of the story textbox tint; the blur stays feathered at zero border opacity.">?<span role="tooltip">Opacity of the story textbox tint; the blur stays feathered at zero border opacity.</span></span>
+                </span>
+                <input id="observationTintOpacity" type="range" min="0" max="0.5" step="0.01" value="0.33" data-scale="100" data-suffix="%" data-digits="0">
+                <output for="observationTintOpacity"></output>
+              </label>
+              <label class="control-row">
+                <span class="control-copy">
+                  <strong>Story trigger</strong>
+                  <span class="help-tip" tabindex="0" aria-label="Local slime amount needed before an oat starts its story textbox animation.">?<span role="tooltip">Local slime amount needed before an oat starts its story textbox animation.</span></span>
+                </span>
+                <input id="observationSlimeTriggerThreshold" type="range" min="0" max="1" step="0.01" value="0.05" data-digits="2">
+                <output for="observationSlimeTriggerThreshold"></output>
+              </label>
             </section>
 
             <section class="control-group" aria-labelledby="debugControls">
@@ -798,6 +985,10 @@ input[type="color"] {
               <label class="toggle-control">
                 <span>Heading rotation</span>
                 <input id="useHeadingRotation" type="checkbox" checked>
+              </label>
+              <label class="toggle-control">
+                <span>Optical zoom</span>
+                <input id="useOpticalZoom" type="checkbox">
               </label>
               <label class="toggle-control">
                 <span>Show wireframe</span>
@@ -824,6 +1015,36 @@ input[type="color"] {
                 </select>
                 <span></span>
               </label>
+              <div class="camera-readout" aria-label="Camera angle readout">
+                <dl class="camera-readout-grid">
+                  <div>
+                    <dt>Azimuth</dt>
+                    <dd id="cameraAzimuth">--</dd>
+                  </div>
+                  <div>
+                    <dt>Elevation</dt>
+                    <dd id="cameraElevation">--</dd>
+                  </div>
+                  <div>
+                    <dt>Polar</dt>
+                    <dd id="cameraPolar">--</dd>
+                  </div>
+                  <div>
+                    <dt>Distance</dt>
+                    <dd id="cameraDistance">--</dd>
+                  </div>
+                  <div>
+                    <dt>FOV</dt>
+                    <dd id="cameraFov">--</dd>
+                  </div>
+                  <div>
+                    <dt>Target</dt>
+                    <dd id="cameraTarget">--</dd>
+                  </div>
+                </dl>
+                <pre id="cameraPoseCommand" class="camera-pose-command">window.__cuttle.setCameraPose(...)</pre>
+                <button id="copyCameraPose" type="button">Copy camera pose</button>
+              </div>
             </section>
           </div>
 
@@ -838,7 +1059,7 @@ input[type="color"] {
             </label>
             <label class="toggle-control">
               <span>Mesh outline</span>
-              <input id="meshOutline" type="checkbox" checked>
+              <input id="meshOutline" type="checkbox">
             </label>
           </div>
 
@@ -867,7 +1088,14 @@ const agentGrowthCanvas = document.getElementById('agentGrowthChart');
 const agentAccelerationCanvas = document.getElementById('agentAccelerationChart');
 const agentHistoryRangeEl = document.getElementById('agentHistoryRange');
 const annotationLayer = document.getElementById('annotationLayer');
-const annotationTethers = document.getElementById('annotationTethers');
+const cameraAzimuthEl = document.getElementById('cameraAzimuth');
+const cameraElevationEl = document.getElementById('cameraElevation');
+const cameraPolarEl = document.getElementById('cameraPolar');
+const cameraDistanceEl = document.getElementById('cameraDistance');
+const cameraFovEl = document.getElementById('cameraFov');
+const cameraTargetEl = document.getElementById('cameraTarget');
+const cameraPoseCommandEl = document.getElementById('cameraPoseCommand');
+const copyCameraPoseButton = document.getElementById('copyCameraPose');
 
 const FIELD_SIZE = 1024;
 const AGENT_SIDE = 512;
@@ -881,6 +1109,9 @@ const MAX_OATS = 64;
 const WORLD_LINEAR_SCALE = 4.0;
 const SURFACE_WORLD_SIZE = 2.4 * WORLD_LINEAR_SCALE;
 const SURFACE_FOV = Math.PI / 4.2;
+const OPTICAL_ZOOM_MIN_FOV_DEG = 8;
+const OPTICAL_ZOOM_MAX_FOV_DEG = 76;
+const OPTICAL_ZOOM_WHEEL_SCALE = 0.001;
 const DEFAULT_OAT_RADIUS = 0.08 / WORLD_LINEAR_SCALE;
 const DEFAULT_OAT_POWER = 1.55;
 const OAT_EPSILON = 0.001;
@@ -1053,7 +1284,7 @@ const SIMULATION_PRESET_KEY_SET = new Set(SIMULATION_PRESET_KEYS);
 const BASE_RENDER_DISPLAY_PARAMS = Object.freeze({
   showAgentDots: false,
   showOats: true,
-  meshOutlineEnabled: true,
+  meshOutlineEnabled: false,
   surfaceHeight: 1,
   surfaceBump: 10,
   iridescenceStrength: 0.85,
@@ -1064,6 +1295,14 @@ const BASE_RENDER_DISPLAY_PARAMS = Object.freeze({
   lightBrightness: 1,
   spatialSmoothing: 1,
   temporalSmoothing: 0.85,
+  observationTailLength: 0.07,
+  observationStrokeOpacity: 0,
+  observationCornerRadius: 24,
+  observationEdgeFeather: 24,
+  observationBlurRadius: 14,
+  observationTintColor: '#081018',
+  observationTintOpacity: 0.33,
+  observationSlimeTriggerThreshold: 0.05,
   showWireframe: false,
 });
 
@@ -1088,14 +1327,14 @@ const RENDER_DISPLAY_PRESETS = Object.freeze([
     'Pearl bright',
     'Screenshot render look: softer spatial blur, stronger temporal smoothing, white body, thinner film band.',
     {
-      spatialSmoothing: 0.5,
-      temporalSmoothing: 0.95,
+      spatialSmoothing: 1,
+      temporalSmoothing: 0.9,
       surfaceHeight: 1,
-      surfaceBump: 9,
-      iridescenceStrength: 0.8,
-      slimeBaseColor: '#ffffff',
-      iridescenceMinThickness: 375,
-      iridescenceThickness: 565,
+      surfaceBump: 5,
+      iridescenceStrength: 0.5,
+      slimeBaseColor: '#e0e0e0',
+      iridescenceMinThickness: 220,
+      iridescenceThickness: 760,
       filmFollowsSlimeHeight: true,
       lightBrightness: 1,
     },
@@ -1111,12 +1350,41 @@ const params = {
   useSeamStitching: true,
   useIslandMasking: true,
   useHeadingRotation: true,
+  useOpticalZoom: false,
   debugView: 'slime',
   performanceMode: 'quality',
 };
 let activeSimulationPresetId = DEFAULT_SIMULATION_PRESET_ID;
 let activeRenderDisplayPresetId = DEFAULT_RENDER_DISPLAY_PRESET_ID;
 const boundParamControls = new Map();
+
+function cssRgbFromHex(hex) {
+  const match = /^#?([0-9a-f]{6})$/i.exec(String(hex).trim());
+  if (!match) return '14, 38, 56';
+  const value = Number.parseInt(match[1], 16);
+  return `${(value >> 16) & 255}, ${(value >> 8) & 255}, ${value & 255}`;
+}
+
+function syncObservationCssVars() {
+  const opacity = Math.max(0, Math.min(1, params.observationStrokeOpacity ?? 0));
+  const cornerRadius = Math.max(0, params.observationCornerRadius ?? 24);
+  const edgeFeather = Math.max(0, params.observationEdgeFeather ?? 24);
+  const blurRadius = Math.max(0, params.observationBlurRadius ?? 14);
+  const tintOpacity = Math.max(0, Math.min(1, params.observationTintOpacity ?? 0.15));
+  const edgeFeatherOutset = edgeFeather * 1.75;
+  const edgeFeatherMask = edgeFeather * 2.6;
+  const edgeFeatherOpacity = Math.min(1, edgeFeather / 8);
+  document.documentElement.style.setProperty('--observation-stroke-opacity', opacity.toFixed(3));
+  document.documentElement.style.setProperty('--observation-corner-radius', `${cornerRadius.toFixed(1)}px`);
+  document.documentElement.style.setProperty('--observation-edge-feather', `${edgeFeather.toFixed(1)}px`);
+  document.documentElement.style.setProperty('--observation-edge-feather-outset', `${edgeFeatherOutset.toFixed(1)}px`);
+  document.documentElement.style.setProperty('--observation-edge-feather-mask', `${edgeFeatherMask.toFixed(1)}px`);
+  document.documentElement.style.setProperty('--observation-edge-feather-opacity', edgeFeatherOpacity.toFixed(3));
+  document.documentElement.style.setProperty('--observation-blur-radius', `${blurRadius.toFixed(1)}px`);
+  document.documentElement.style.setProperty('--observation-tint-rgb', cssRgbFromHex(params.observationTintColor ?? '#0e2638'));
+  document.documentElement.style.setProperty('--observation-tint-opacity', tintOpacity.toFixed(3));
+  document.documentElement.style.setProperty('--observation-text-rgb', cssRgbFromHex(params.slimeBaseColor ?? '#eef5f2'));
+}
 
 function getPerformanceModeConfig(settings = params) {
   return PERFORMANCE_MODES[settings.performanceMode] ?? PERFORMANCE_MODES.quality;
@@ -1684,8 +1952,7 @@ camera.lookAt(initialCameraPose.target);
 
 const controls = new OrbitControls(camera, canvas);
 controls.enablePan = false;
-controls.enableDamping = true;
-controls.dampingFactor = 0.08;
+controls.enableDamping = false;
 controls.minDistance = 0.8 * WORLD_LINEAR_SCALE;
 controls.maxDistance = 5.6 * WORLD_LINEAR_SCALE;
 // Allow a true side view while keeping the camera above the underside.
@@ -1693,6 +1960,200 @@ controls.minPolarAngle = 0;
 controls.maxPolarAngle = Math.PI * 0.5 - 0.04;
 controls.target.copy(initialCameraPose.target);
 controls.update();
+controls.enableZoom = !params.useOpticalZoom;
+
+const cameraPoseOffset = new THREE.Vector3();
+const cameraPoseSpherical = new THREE.Spherical();
+let cameraPoseReadoutDirty = true;
+let lastCameraPoseReadoutText = '';
+
+function roundPoseNumber(value, digits = 6) {
+  return Number(Number(value).toFixed(digits));
+}
+
+function vectorToPoseObject(vector, digits = 6) {
+  return {
+    x: roundPoseNumber(vector.x, digits),
+    y: roundPoseNumber(vector.y, digits),
+    z: roundPoseNumber(vector.z, digits),
+  };
+}
+
+function poseObjectToVector(value, fallback) {
+  if (Array.isArray(value) && value.length >= 3) {
+    return new THREE.Vector3(Number(value[0]), Number(value[1]), Number(value[2]));
+  }
+  if (value && typeof value === 'object') {
+    return new THREE.Vector3(Number(value.x), Number(value.y), Number(value.z));
+  }
+  return fallback.clone();
+}
+
+function normalizeCameraAngleDeg(angleDeg) {
+  return roundPoseNumber(THREE.MathUtils.euclideanModulo(angleDeg + 180, 360) - 180, 3);
+}
+
+function getCameraPose() {
+  cameraPoseOffset.copy(camera.position).sub(controls.target);
+  cameraPoseSpherical.setFromVector3(cameraPoseOffset);
+  const azimuthDeg = normalizeCameraAngleDeg(THREE.MathUtils.radToDeg(cameraPoseSpherical.theta));
+  const polarDeg = roundPoseNumber(THREE.MathUtils.radToDeg(cameraPoseSpherical.phi), 3);
+  const elevationDeg = roundPoseNumber(90 - polarDeg, 3);
+  return {
+    position: vectorToPoseObject(camera.position),
+    target: vectorToPoseObject(controls.target),
+    distance: roundPoseNumber(cameraPoseSpherical.radius, 6),
+    azimuthDeg,
+    elevationDeg,
+    polarDeg,
+    fovDeg: roundPoseNumber(camera.fov, 4),
+    viewport: {
+      width: Math.round(canvas.clientWidth),
+      height: Math.round(canvas.clientHeight),
+      devicePixelRatio: roundPoseNumber(window.devicePixelRatio || 1, 3),
+    },
+  };
+}
+
+function getCameraPoseCommand(pose = getCameraPose()) {
+  const replayPose = {
+    position: pose.position,
+    target: pose.target,
+    fovDeg: pose.fovDeg,
+  };
+  return `window.__cuttle.setCameraPose(${JSON.stringify(replayPose)});`;
+}
+
+function setCameraPose(poseLike = {}) {
+  const pose = typeof poseLike === 'string' ? JSON.parse(poseLike) : poseLike;
+  if (!pose || typeof pose !== 'object') return getCameraPose();
+  const positionSource = pose.position ?? pose.camera?.position;
+  const targetSource = pose.target ?? pose.controls?.target ?? pose.camera?.target;
+  const nextPosition = poseObjectToVector(positionSource, camera.position);
+  const nextTarget = poseObjectToVector(targetSource, controls.target);
+  if (Number.isFinite(nextPosition.x) && Number.isFinite(nextPosition.y) && Number.isFinite(nextPosition.z)) {
+    camera.position.copy(nextPosition);
+  }
+  if (Number.isFinite(nextTarget.x) && Number.isFinite(nextTarget.y) && Number.isFinite(nextTarget.z)) {
+    controls.target.copy(nextTarget);
+  }
+  const nextFov = Number(pose.fovDeg ?? pose.fov);
+  if (Number.isFinite(nextFov) && nextFov > 1 && nextFov < 175) {
+    camera.fov = nextFov;
+    camera.updateProjectionMatrix();
+  }
+  controls.update();
+  cameraPoseReadoutDirty = true;
+  updateCameraPoseReadout(true);
+  return getCameraPose();
+}
+
+function setCameraAngles(anglePose = {}) {
+  const current = getCameraPose();
+  const nextTarget = poseObjectToVector(anglePose.target, controls.target);
+  const distance = Number(anglePose.distance ?? current.distance);
+  const azimuthDeg = Number(anglePose.azimuthDeg ?? current.azimuthDeg);
+  const polarDeg = Number(anglePose.polarDeg ?? (90 - Number(anglePose.elevationDeg ?? current.elevationDeg)));
+  if (!Number.isFinite(distance) || distance <= 0 || !Number.isFinite(azimuthDeg) || !Number.isFinite(polarDeg)) {
+    return current;
+  }
+  const clampedPolar = THREE.MathUtils.clamp(
+    polarDeg,
+    THREE.MathUtils.radToDeg(controls.minPolarAngle),
+    THREE.MathUtils.radToDeg(controls.maxPolarAngle),
+  );
+  cameraPoseSpherical.set(
+    distance,
+    THREE.MathUtils.degToRad(clampedPolar),
+    THREE.MathUtils.degToRad(azimuthDeg),
+  );
+  cameraPoseOffset.setFromSpherical(cameraPoseSpherical);
+  controls.target.copy(nextTarget);
+  camera.position.copy(nextTarget).add(cameraPoseOffset);
+  const nextFov = Number(anglePose.fovDeg ?? anglePose.fov);
+  if (Number.isFinite(nextFov) && nextFov > 1 && nextFov < 175) {
+    camera.fov = nextFov;
+    camera.updateProjectionMatrix();
+  }
+  controls.update();
+  cameraPoseReadoutDirty = true;
+  updateCameraPoseReadout(true);
+  return getCameraPose();
+}
+
+function updateCameraPoseReadout(force = false) {
+  if (!cameraAzimuthEl || (!force && !cameraPoseReadoutDirty)) return;
+  const pose = getCameraPose();
+  const text = JSON.stringify(pose);
+  if (!force && text === lastCameraPoseReadoutText) {
+    cameraPoseReadoutDirty = false;
+    return;
+  }
+  lastCameraPoseReadoutText = text;
+  cameraPoseReadoutDirty = false;
+  cameraAzimuthEl.textContent = `${pose.azimuthDeg.toFixed(2)}deg`;
+  cameraElevationEl.textContent = `${pose.elevationDeg.toFixed(2)}deg`;
+  cameraPolarEl.textContent = `${pose.polarDeg.toFixed(2)}deg`;
+  cameraDistanceEl.textContent = pose.distance.toFixed(3);
+  cameraFovEl.textContent = `${pose.fovDeg.toFixed(2)}deg`;
+  cameraTargetEl.textContent = `${pose.target.x.toFixed(2)}, ${pose.target.y.toFixed(2)}, ${pose.target.z.toFixed(2)}`;
+  if (cameraPoseCommandEl) cameraPoseCommandEl.textContent = getCameraPoseCommand(pose);
+}
+
+async function copyCameraPoseToClipboard() {
+  const command = getCameraPoseCommand();
+  try {
+    await navigator.clipboard.writeText(command);
+    if (copyCameraPoseButton) {
+      copyCameraPoseButton.textContent = 'Copied';
+      window.setTimeout(() => {
+        copyCameraPoseButton.textContent = 'Copy camera pose';
+      }, 1200);
+    }
+  } catch (error) {
+    console.warn('Camera pose copy failed; use window.__cuttle.getCameraPose().', error);
+  }
+}
+
+controls.addEventListener('change', () => {
+  cameraPoseReadoutDirty = true;
+});
+window.addEventListener('resize', () => {
+  cameraPoseReadoutDirty = true;
+});
+updateCameraPoseReadout(true);
+
+function syncCameraZoomMode() {
+  controls.enableZoom = !params.useOpticalZoom;
+}
+
+function normalizedWheelDeltaY(event) {
+  if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) return event.deltaY * 16;
+  if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) return event.deltaY * window.innerHeight;
+  return event.deltaY;
+}
+
+function handleOpticalZoomWheel(event) {
+  if (!params.useOpticalZoom) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+
+  const deltaY = normalizedWheelDeltaY(event);
+  if (!Number.isFinite(deltaY) || deltaY === 0) return;
+
+  const currentHalfTan = Math.tan(THREE.MathUtils.degToRad(camera.fov) * 0.5);
+  const nextHalfTan = currentHalfTan * Math.exp(deltaY * OPTICAL_ZOOM_WHEEL_SCALE);
+  const nextFov = THREE.MathUtils.radToDeg(Math.atan(nextHalfTan)) * 2;
+  camera.fov = THREE.MathUtils.clamp(
+    nextFov,
+    OPTICAL_ZOOM_MIN_FOV_DEG,
+    OPTICAL_ZOOM_MAX_FOV_DEG,
+  );
+  camera.updateProjectionMatrix();
+  cameraPoseReadoutDirty = true;
+}
+
+canvas.addEventListener('wheel', handleOpticalZoomWheel, { capture: true, passive: false });
 
 const ICOSA_LIGHT_RADIUS = SURFACE_WORLD_SIZE * 1.85;
 function makeIcosahedronLightPositions() {
@@ -3543,9 +4004,16 @@ void main() {
   vec3 dp1perp = cross(N0, dp1);
   vec3 T = dp2perp * duv1.x + dp1perp * duv2.x;
   vec3 B = dp2perp * duv1.y + dp1perp * duv2.y;
-  float invMax = inversesqrt(max(max(dot(T, T), dot(B, B)), 1e-12));
-  T *= invMax;
-  B *= invMax;
+  float tb2 = max(dot(T, T), dot(B, B));
+  if (tb2 > 1e-24) {
+    float invMax = inversesqrt(tb2);
+    T *= invMax;
+    B *= invMax;
+  } else {
+    vec3 up = abs(N0.y) < 0.999 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+    T = normalize(cross(up, N0));
+    B = normalize(cross(N0, T));
+  }
 
   vec3 viewDir = normalize(u_cameraPos - v_worldPos);
   float normalRadius = max(u_normalSampleRadius, 1.0);
@@ -4013,11 +4481,40 @@ const oatGlowTexture = makeRadialGlowTexture({
   ],
 });
 const oatGlowTint = 0xffffff;
-const oatGlowLift = 0.026 * WORLD_LINEAR_SCALE;
-const OBSERVATION_TETHER_LENGTH = 0.34 * WORLD_LINEAR_SCALE;
-const OBSERVATION_LABEL_GAP_PX = 18;
+const oatGlowLift = 0;
 const OBSERVATION_VIEW_MARGIN_PX = 14;
-const SVG_NS = 'http://www.w3.org/2000/svg';
+const OBSERVATION_BOX_WIDTH_PX = 230;
+const OBSERVATION_BOX_HEIGHT_PX = 126;
+const OBSERVATION_STROKE_WIDTH_PX = 1.5;
+const OBSERVATION_LEADER_BORDER_OVERLAP_PX = 2;
+const OBSERVATION_Z_INDEX_RANGE = 100000;
+const OBSERVATION_OCCLUSION_MARGIN = 0.012 * WORLD_LINEAR_SCALE;
+const OBSERVATION_OCCLUSION_REFRESH_MS = 120;
+const OBSERVATION_SLIME_TRIGGER_RADIUS_TEXELS = 3;
+const OBSERVATION_SLIME_TRIGGER_SAMPLE_SIZE = OBSERVATION_SLIME_TRIGGER_RADIUS_TEXELS * 2 + 1;
+const OBSERVATION_SLIME_TRIGGER_INTERVAL_MS = 220;
+const OBSERVATION_SLIME_TRIGGER_READS_PER_FRAME = 4;
+const OBSERVATION_CHAR_STEP_MS = 70;
+const OBSERVATION_CHAR_FADE_MS = 620;
+const OBSERVATION_EXIT_LINE_COUNT = 5;
+const OBSERVATION_BOX_FADE_IN_MS = 2600;
+const OBSERVATION_TEXT_START_DELAY_MS = OBSERVATION_BOX_FADE_IN_MS;
+const OBSERVATION_BOX_FADE_OUT_MS = 2600;
+const OBSERVATION_OAT_FADE_OUT_MS = 1800;
+const OBSERVATION_PLACEHOLDER_TEXT = [
+  'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.',
+  'Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.',
+  'Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.',
+  'Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.',
+  'Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium.',
+].join(' ');
+const observationTextMeasureCanvas = document.createElement('canvas');
+const observationTextMeasureContext = observationTextMeasureCanvas.getContext('2d');
+const observationOcclusionRaycaster = new THREE.Raycaster();
+const observationOcclusionDirection = new THREE.Vector3();
+const observationGraphemeSegmenter = typeof Intl !== 'undefined' && Intl.Segmenter
+  ? new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+  : null;
 
 function makeOatGlowSprite(texture, color, opacity, scale, { depthTest = false } = {}) {
   const material = new THREE.SpriteMaterial({
@@ -4044,6 +4541,9 @@ function createOatGlowMarker(surfacePos, surfaceNormal = null) {
   marker.userData.surfacePos = surfacePos.clone();
   marker.userData.surfaceNormal = normal.clone();
   marker.userData.baseScale = 0.15 * WORLD_LINEAR_SCALE;
+  marker.userData.occlusionOpacity = 1;
+  marker.userData.occlusionUpdatedAt = performance.now();
+  marker.userData.occlusionPhaseMs = (nextObservationId * 19) % OBSERVATION_OCCLUSION_REFRESH_MS;
   marker.position.copy(surfacePos).addScaledVector(normal, oatGlowLift);
 
   const glow = makeOatGlowSprite(oatGlowTexture, oatGlowTint, 1.0, marker.userData.baseScale * 0.68);
@@ -4059,11 +4559,59 @@ function disposeOatMarker(marker) {
   });
 }
 
+function updateOatMarkerOcclusionOpacity(marker, target, now) {
+  return updateOcclusionOpacity(marker.userData, target, now, 14);
+}
+
+function getOatStorySpriteOpacity(oat, now) {
+  const observation = oat?.observation;
+  const timeline = observation?.textTimeline;
+  if (!observation?.triggered || !timeline) return 1;
+  const elapsedMs = now - timeline.startTime;
+  if (elapsedMs <= timeline.totalDurationMs) return 1;
+  return 1 - smoothUnit((elapsedMs - timeline.totalDurationMs) / OBSERVATION_OAT_FADE_OUT_MS);
+}
+
+function updateOcclusionOpacity(cache, target, now, responseRate = 10) {
+  const current = Number.isFinite(cache.occlusionOpacity) ? cache.occlusionOpacity : target;
+  const last = Number.isFinite(cache.occlusionUpdatedAt) ? cache.occlusionUpdatedAt : now;
+  const dtSeconds = Math.max(0, (now - last) / 1000);
+  const response = 1 - Math.exp(-dtSeconds * responseRate);
+  const next = current + (target - current) * response;
+  cache.occlusionOpacity = next;
+  cache.occlusionUpdatedAt = now;
+  return next;
+}
+
+function getCachedMeshOcclusionTarget(cache, anchorPos, facingVisibility, now) {
+  if (facingVisibility <= 0.002) {
+    cache.occlusionTarget = 0;
+    return 0;
+  }
+  if (!Number.isFinite(cache.occlusionTarget) || now >= (cache.nextOcclusionCheckAt ?? 0)) {
+    cache.occlusionTarget = getOatMeshOcclusionTarget(anchorPos);
+    const phase = Number.isFinite(cache.occlusionPhaseMs) ? cache.occlusionPhaseMs : 0;
+    cache.nextOcclusionCheckAt = now + OBSERVATION_OCCLUSION_REFRESH_MS + phase;
+  }
+  return cache.occlusionTarget;
+}
+
 function updateOatGlowMarkers() {
+  const now = performance.now();
+  if (mesh) mesh.updateMatrixWorld(true);
   for (const marker of oatGroup.children) {
     const toCamera = camera.position.clone().sub(marker.userData.surfacePos).normalize();
     const facing = marker.userData.surfaceNormal.dot(toCamera);
-    const visibility = THREE.MathUtils.smoothstep(facing, -0.18, 0.14);
+    const facingVisibility = THREE.MathUtils.smoothstep(facing, -0.18, 0.14);
+    const occlusionTarget = getCachedMeshOcclusionTarget(
+      marker.userData,
+      marker.userData.surfacePos,
+      facingVisibility,
+      now,
+    );
+    const occlusionVisibility = updateOatMarkerOcclusionOpacity(marker, occlusionTarget, now);
+    const storyOpacity = getOatStorySpriteOpacity(marker.userData.oat, now);
+    const visibility = facingVisibility * occlusionVisibility * storyOpacity;
     marker.visible = visibility > 0.01;
     marker.position
       .copy(marker.userData.surfacePos)
@@ -4076,17 +4624,275 @@ function updateOatGlowMarkers() {
   }
 }
 
-function createSvgLine(className) {
-  if (!annotationTethers) return null;
-  const line = document.createElementNS(SVG_NS, 'line');
-  line.setAttribute('class', className);
-  line.style.opacity = '0';
-  annotationTethers.append(line);
-  return line;
+function splitObservationGraphemes(text) {
+  if (observationGraphemeSegmenter) {
+    return Array.from(observationGraphemeSegmenter.segment(String(text)), (part) => part.segment);
+  }
+  return Array.from(String(text));
+}
+
+function splitObservationWordToFit(word, availableWidth) {
+  const parts = [];
+  let current = '';
+  for (const char of splitObservationGraphemes(word)) {
+    const candidate = `${current}${char}`;
+    if (!current || observationTextMeasureContext.measureText(candidate).width <= availableWidth) {
+      current = candidate;
+      continue;
+    }
+    parts.push(current);
+    current = char;
+  }
+  if (current) parts.push(current);
+  return parts;
+}
+
+function wrapObservationParagraph(paragraph, availableWidth) {
+  const words = paragraph.trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return [''];
+  const lines = [];
+  let current = '';
+  const pushCurrent = () => {
+    if (!current) return;
+    lines.push(current);
+    current = '';
+  };
+
+  for (const word of words) {
+    const candidate = current ? `${current} ${word}` : word;
+    if (!current || observationTextMeasureContext.measureText(candidate).width <= availableWidth) {
+      current = candidate;
+      continue;
+    }
+    pushCurrent();
+    if (observationTextMeasureContext.measureText(word).width <= availableWidth) {
+      current = word;
+      continue;
+    }
+    const parts = splitObservationWordToFit(word, availableWidth);
+    for (let i = 0; i < parts.length - 1; i++) lines.push(parts[i]);
+    current = parts[parts.length - 1] ?? '';
+  }
+  pushCurrent();
+  return lines;
+}
+
+function wrapObservationText(text, body) {
+  const normalizedText = String(text ?? '').replace(/\r\n?/g, '\n');
+  if (!normalizedText.trim()) return [''];
+
+  const style = getComputedStyle(body);
+  const paddingX = Number.parseFloat(style.paddingLeft || '0') + Number.parseFloat(style.paddingRight || '0');
+  const availableWidth = Math.max(20, body.clientWidth - paddingX);
+  observationTextMeasureContext.font = style.font ||
+    `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+
+  const lines = [];
+  for (const paragraph of normalizedText.split('\n')) {
+    if (lines.length) lines.push('');
+    lines.push(...wrapObservationParagraph(paragraph, availableWidth));
+  }
+  return lines;
+}
+
+function cancelObservationTextAnimation(observation) {
+  observation?.textScrollAnimation?.cancel?.();
+  for (const animation of observation?.textRevealAnimations ?? []) {
+    animation.cancel?.();
+  }
+  if (observation) observation.textScrollAnimation = null;
+  if (observation) observation.textRevealAnimations = [];
+}
+
+function buildObservationTextAnimation(observation, text = OBSERVATION_PLACEHOLDER_TEXT) {
+  const body = observation?.body;
+  if (!body || !body.isConnected) return;
+  observation.text = String(text ?? '');
+  cancelObservationTextAnimation(observation);
+
+  const lines = wrapObservationText(observation.text, body);
+  body.textContent = '';
+  body.setAttribute('aria-label', observation.text);
+
+  const roll = document.createElement('span');
+  roll.className = 'observation-text-roll';
+  roll.setAttribute('aria-hidden', 'true');
+  body.append(roll);
+
+  const lineDurations = [];
+  observation.textRevealAnimations = [];
+  let cumulativeMs = 0;
+  for (const lineText of lines) {
+    const line = document.createElement('span');
+    line.className = 'observation-line';
+    const chars = splitObservationGraphemes(lineText);
+    const lineDurationMs = chars.length * OBSERVATION_CHAR_STEP_MS + OBSERVATION_CHAR_FADE_MS;
+    lineDurations.push(lineDurationMs);
+    line.textContent = lineText || '\u00a0';
+    line.style.maskImage = 'linear-gradient(90deg, #000 0%, #000 48%, rgba(0, 0, 0, 0.72) 51%, rgba(0, 0, 0, 0.28) 54%, transparent 58%, transparent 100%)';
+    line.style.webkitMaskImage = line.style.maskImage;
+    line.style.maskSize = '260% 100%';
+    line.style.webkitMaskSize = line.style.maskSize;
+    line.style.maskRepeat = 'no-repeat';
+    line.style.webkitMaskRepeat = line.style.maskRepeat;
+    line.style.maskPosition = '100% 0';
+    line.style.webkitMaskPosition = line.style.maskPosition;
+    roll.append(line);
+    const revealAnimation = line.animate([
+      { maskPosition: '100% 0', WebkitMaskPosition: '100% 0' },
+      { maskPosition: '0% 0', WebkitMaskPosition: '0% 0' },
+    ], {
+      duration: Math.max(240, lineDurationMs),
+      delay: OBSERVATION_TEXT_START_DELAY_MS + cumulativeMs,
+      easing: 'linear',
+      fill: 'forwards',
+    });
+    observation.textRevealAnimations.push(revealAnimation);
+    cumulativeMs += lineDurationMs;
+  }
+
+  const style = getComputedStyle(body);
+  const lineHeight = Number.parseFloat(style.lineHeight) || 16;
+  const viewportHeight = Math.max(1, body.clientHeight);
+  const textFadePx = Math.max(0, Number.parseFloat(style.getPropertyValue('--observation-text-fade')) || 0);
+  const revealDurationMs = Math.max(1, cumulativeMs);
+  const averageLineDurationMs = revealDurationMs / Math.max(1, lineDurations.length);
+  const exitDurationMs = Math.max(2400, averageLineDurationMs * OBSERVATION_EXIT_LINE_COUNT);
+  const textEndMs = OBSERVATION_TEXT_START_DELAY_MS + revealDurationMs + exitDurationMs;
+  const totalDurationMs = textEndMs + OBSERVATION_BOX_FADE_OUT_MS;
+  // Start revealing right at the lower edge of the opaque zone.
+  const initialOffset = Math.max(0, viewportHeight - textFadePx);
+  const finalOffset = -((lineDurations.length + 1) * lineHeight);
+  const keyframes = [{ transform: `translate3d(0, ${initialOffset.toFixed(2)}px, 0)`, offset: 0 }];
+  if (OBSERVATION_TEXT_START_DELAY_MS > 0) {
+    keyframes.push({
+      transform: `translate3d(0, ${initialOffset.toFixed(2)}px, 0)`,
+      offset: Math.min(1, OBSERVATION_TEXT_START_DELAY_MS / totalDurationMs),
+    });
+  }
+  let elapsedMs = OBSERVATION_TEXT_START_DELAY_MS;
+  lineDurations.forEach((durationMs, index) => {
+    elapsedMs += durationMs;
+    keyframes.push({
+      transform: `translate3d(0, ${(initialOffset - lineHeight * (index + 1)).toFixed(2)}px, 0)`,
+      offset: Math.min(1, elapsedMs / totalDurationMs),
+    });
+  });
+  keyframes.push({
+    transform: `translate3d(0, ${finalOffset.toFixed(2)}px, 0)`,
+    offset: Math.min(1, textEndMs / totalDurationMs),
+  });
+  keyframes.push({
+    transform: `translate3d(0, ${finalOffset.toFixed(2)}px, 0)`,
+    offset: 1,
+  });
+
+  observation.textTimeline = {
+    startTime: performance.now(),
+    textStartDelayMs: OBSERVATION_TEXT_START_DELAY_MS,
+    revealDurationMs,
+    exitDurationMs,
+    textEndMs,
+    fadeOutMs: OBSERVATION_BOX_FADE_OUT_MS,
+    totalDurationMs,
+  };
+  observation.textScrollAnimation = roll.animate(keyframes, {
+    duration: totalDurationMs,
+    easing: 'linear',
+    fill: 'forwards',
+  });
+}
+
+function smoothUnit(value) {
+  const t = Math.max(0, Math.min(1, value));
+  return t * t * (3 - 2 * t);
+}
+
+function getObservationEnvelope(observation, now) {
+  if (!observation?.triggered) return { glassOpacity: 0, textOpacity: 0 };
+  const timeline = observation?.textTimeline;
+  if (!timeline) return { glassOpacity: 0, textOpacity: 0 };
+  const elapsedMs = now - timeline.startTime;
+  if (elapsedMs >= timeline.totalDurationMs) return { glassOpacity: 0, textOpacity: 0 };
+  const fadeIn = smoothUnit(elapsedMs / Math.max(1, timeline.textStartDelayMs));
+  const textOpacity = elapsedMs >= timeline.textStartDelayMs ? 1 : 0;
+  if (elapsedMs <= timeline.textEndMs) {
+    return {
+      glassOpacity: fadeIn,
+      textOpacity,
+    };
+  }
+  const fadeOut = smoothUnit((elapsedMs - timeline.textEndMs) / Math.max(1, timeline.fadeOutMs));
+  return {
+    glassOpacity: fadeIn * (1 - fadeOut),
+    textOpacity: textOpacity * (1 - fadeOut),
+  };
+}
+
+function setObservationText(observation, text = '', { restart = true } = {}) {
+  if (!observation) return null;
+  observation.text = String(text ?? '');
+  if (restart && observation.triggered) {
+    buildObservationTextAnimation(observation, observation.text);
+  } else if (!observation.triggered) {
+    cancelObservationTextAnimation(observation);
+    if (observation.body) observation.body.textContent = '';
+    observation.textTimeline = null;
+  }
+  return observation;
+}
+
+function setOatObservationText(oatOrIndex, text = '', options = {}) {
+  const oat = typeof oatOrIndex === 'number' ? oats[oatOrIndex] : oatOrIndex;
+  if (!oat) return null;
+  oat.storyText = String(text ?? '');
+  return setObservationText(oat.observation, oat.storyText, options);
+}
+
+function setAllOatObservationText(text = '', options = {}) {
+  const value = String(text ?? '');
+  return oats.map((oat) => setOatObservationText(oat, value, options)).filter(Boolean);
+}
+
+function triggerOatObservation(oatOrIndex, { force = false } = {}) {
+  const oat = typeof oatOrIndex === 'number' ? oats[oatOrIndex] : oatOrIndex;
+  const observation = oat?.observation;
+  if (!observation || (observation.triggered && !force)) return null;
+  observation.triggered = true;
+  observation.completed = false;
+  observation.triggeredAt = performance.now();
+  buildObservationTextAnimation(observation, observation.text ?? oat.storyText ?? OBSERVATION_PLACEHOLDER_TEXT);
+  return observation;
+}
+
+function completeOatObservation(oatOrIndex) {
+  const oat = typeof oatOrIndex === 'number' ? oats[oatOrIndex] : oatOrIndex;
+  const observation = oat?.observation;
+  if (!observation) return null;
+  const now = performance.now();
+  observation.triggered = true;
+  observation.completed = true;
+  observation.triggeredAt = now - OBSERVATION_BOX_FADE_OUT_MS - OBSERVATION_OAT_FADE_OUT_MS;
+  cancelObservationTextAnimation(observation);
+  if (observation.body) observation.body.textContent = '';
+  observation.textTimeline = {
+    startTime: now - OBSERVATION_OAT_FADE_OUT_MS - 1,
+    textStartDelayMs: 0,
+    textEndMs: 0,
+    totalDurationMs: 0,
+    fadeOutMs: OBSERVATION_BOX_FADE_OUT_MS,
+  };
+  hideOatObservation(observation, { preserveEnvelope: true });
+  if (oat?.sphere) {
+    oat.sphere.visible = false;
+    const glow = oat.sphere.children?.[0];
+    if (glow?.material) glow.material.opacity = 0;
+  }
+  return observation;
 }
 
 function createOatObservation(oat) {
-  if (!annotationLayer || !annotationTethers || !oat.worldPos || !oat.worldNormal) return null;
+  if (!annotationLayer || !oat.worldPos || !oat.worldNormal) return null;
   const normal = oat.worldNormal.clone();
   if (normal.lengthSq() < 1e-8) normal.set(0, 1, 0);
   normal.normalize();
@@ -4095,26 +4901,48 @@ function createOatObservation(oat) {
   const callout = document.createElement('article');
   callout.className = 'observation-callout';
 
-  const heading = document.createElement('strong');
-  heading.textContent = 'Story Placeholder';
+  const tail = document.createElement('div');
+  tail.className = 'observation-tail';
+  tail.setAttribute('aria-hidden', 'true');
+
+  const content = document.createElement('div');
+  content.className = 'observation-content';
   const body = document.createElement('p');
-  body.textContent = 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.';
-  callout.append(heading, body);
+  body.className = 'observation-text-viewport';
+  content.append(body);
+  callout.append(tail, content);
 
   const observation = {
     id,
     callout,
-    stem: createSvgLine('observation-stem'),
+    tail,
+    body,
+    text: String(oat.storyText ?? OBSERVATION_PLACEHOLDER_TEXT),
+    triggered: false,
+    completed: false,
+    triggeredAt: 0,
+    slimeTriggerScore: 0,
+    slimeTriggerMean: 0,
+    slimeTriggerMax: 0,
     surfacePos: oat.worldPos.clone(),
     surfaceNormal: normal,
+    occlusionOpacity: 1,
+    occlusionUpdatedAt: performance.now(),
+    occlusionPhaseMs: (id * 19) % OBSERVATION_OCCLUSION_REFRESH_MS,
   };
   annotationLayer.append(callout);
+  body.textContent = '';
+  document.fonts?.ready?.then(() => {
+    if (observation.callout.isConnected && observation.triggered && !observation.completed) {
+      buildObservationTextAnimation(observation, observation.text);
+    }
+  });
   return observation;
 }
 
 function disposeOatObservation(observation) {
+  cancelObservationTextAnimation(observation);
   observation?.callout?.remove();
-  observation?.stem?.remove();
 }
 
 function projectWorldToScreen(worldPoint) {
@@ -4127,20 +4955,71 @@ function projectWorldToScreen(worldPoint) {
   };
 }
 
-function setLine(line, start, end, opacity) {
-  if (!line) return;
-  line.setAttribute('x1', start.x.toFixed(1));
-  line.setAttribute('y1', start.y.toFixed(1));
-  line.setAttribute('x2', end.x.toFixed(1));
-  line.setAttribute('y2', end.y.toFixed(1));
-  line.style.opacity = opacity.toFixed(3);
+function getTailAnchor(box, tip) {
+  const centerX = box.left + box.width * 0.5;
+  const centerY = box.top + box.height * 0.5;
+  const halfWidth = Math.max(1, box.width * 0.5);
+  const halfHeight = Math.max(1, box.height * 0.5);
+  const dx = tip.x - centerX;
+  const dy = tip.y - centerY;
+  const scale = Math.max(Math.abs(dx) / halfWidth, Math.abs(dy) / halfHeight, 1e-6);
+  const edgeX = centerX + dx / scale;
+  const edgeY = centerY + dy / scale;
+  const onLeft = Math.abs(edgeX - box.left) <= 0.5;
+  const onRight = Math.abs(edgeX - (box.left + box.width)) <= 0.5;
+  const side = onLeft ? 'left' : onRight ? 'right' : edgeY < centerY ? 'top' : 'bottom';
+  const x = side === 'left' ? box.left : side === 'right' ? box.left + box.width : edgeX;
+  const y = side === 'top' ? box.top : side === 'bottom' ? box.top + box.height : edgeY;
+  return {
+    x: THREE.MathUtils.clamp(x, box.left, box.left + box.width),
+    y: THREE.MathUtils.clamp(y, box.top, box.top + box.height),
+  };
 }
 
-function hideOatObservation(observation) {
+function isPointOutsideRect(point, rect) {
+  return point.x < rect.left ||
+    point.x > rect.left + rect.width ||
+    point.y < rect.top ||
+    point.y > rect.top + rect.height;
+}
+
+function updateObservationTail(observation, tip, box, opacity) {
+  if (!observation?.tail) return;
+  if (!isPointOutsideRect(tip, box)) {
+    observation.tail.style.opacity = '0';
+    return;
+  }
+
+  const anchor = getTailAnchor(box, tip);
+  const dx = tip.x - anchor.x;
+  const dy = tip.y - anchor.y;
+  const length = Math.hypot(dx, dy);
+  if (length < 1) {
+    observation.tail.style.opacity = '0';
+    return;
+  }
+
+  const ux = dx / length;
+  const uy = dy / length;
+  const leaderStartX = anchor.x - ux * OBSERVATION_LEADER_BORDER_OVERLAP_PX;
+  const leaderStartY = anchor.y - uy * OBSERVATION_LEADER_BORDER_OVERLAP_PX;
+  observation.tail.style.left = `${(leaderStartX - box.left).toFixed(1)}px`;
+  observation.tail.style.top = `${(leaderStartY - box.top - OBSERVATION_STROKE_WIDTH_PX * 0.5).toFixed(1)}px`;
+  observation.tail.style.width = `${(length + OBSERVATION_LEADER_BORDER_OVERLAP_PX).toFixed(1)}px`;
+  observation.tail.style.opacity = opacity.toFixed(3);
+  observation.tail.style.transform = `rotate(${Math.atan2(dy, dx).toFixed(4)}rad)`;
+}
+
+function hideOatObservation(observation, { preserveEnvelope = false } = {}) {
   if (!observation) return;
   observation.callout.classList.remove('is-visible');
   observation.callout.style.opacity = '0';
-  if (observation.stem) observation.stem.style.opacity = '0';
+  observation.callout.style.setProperty('--observation-spatial-opacity', '0');
+  if (!preserveEnvelope) {
+    observation.callout.style.setProperty('--observation-glass-opacity', '0');
+    observation.callout.style.setProperty('--observation-text-opacity', '0');
+  }
+  if (observation.tail) observation.tail.style.opacity = '0';
 }
 
 function getOatAnnotationAnchorPos(oat, observation) {
@@ -4148,79 +5027,132 @@ function getOatAnnotationAnchorPos(oat, observation) {
   return observation.surfacePos.clone().addScaledVector(observation.surfaceNormal, oatGlowLift);
 }
 
-function nearestBoxEdgePoint(box, from, inset = 3) {
-  const centerX = box.left + box.width * 0.5;
-  const centerY = box.top + box.height * 0.5;
-  const halfWidth = Math.max(1, box.width * 0.5);
-  const halfHeight = Math.max(1, box.height * 0.5);
-  const dx = from.x - centerX;
-  const dy = from.y - centerY;
-  const scale = Math.max(Math.abs(dx) / halfWidth, Math.abs(dy) / halfHeight);
-  if (scale < 1e-6) return { x: centerX, y: centerY - halfHeight + inset };
+function getOatMeshOcclusionTarget(anchorPos) {
+  if (!mesh || !anchorPos) return 1;
+  const distance = observationOcclusionDirection.copy(anchorPos).sub(camera.position).length();
+  if (distance <= OBSERVATION_OCCLUSION_MARGIN) return 1;
 
-  const edge = {
-    x: centerX + dx / scale,
-    y: centerY + dy / scale,
-  };
-  const edgeLen = Math.hypot(edge.x - centerX, edge.y - centerY);
-  if (edgeLen <= 1e-6) return edge;
+  observationOcclusionDirection.normalize();
+  observationOcclusionRaycaster.near = 0;
+  observationOcclusionRaycaster.far = Math.max(0, distance - OBSERVATION_OCCLUSION_MARGIN);
+  observationOcclusionRaycaster.set(camera.position, observationOcclusionDirection);
+  return observationOcclusionRaycaster.intersectObject(mesh, false).length > 0 ? 0 : 1;
+}
 
+function updateObservationOcclusionOpacity(observation, target, now) {
+  return updateOcclusionOpacity(observation, target, now, 10);
+}
+
+function measureOatSlimeTriggerScore(oat) {
+  if (!oat?.uv) return null;
+  const cx = THREE.MathUtils.clamp(Math.floor(oat.uv.x * FIELD_SIZE), 0, FIELD_SIZE - 1);
+  const cy = THREE.MathUtils.clamp(Math.floor(oat.uv.y * FIELD_SIZE), 0, FIELD_SIZE - 1);
+  const radius = OBSERVATION_SLIME_TRIGGER_RADIUS_TEXELS;
+  const x0 = Math.max(0, cx - radius);
+  const y0 = Math.max(0, cy - radius);
+  const width = Math.min(FIELD_SIZE - x0, radius * 2 + 1, cx + radius + 1 - x0);
+  const height = Math.min(FIELD_SIZE - y0, radius * 2 + 1, cy + radius + 1 - y0);
+  if (width <= 0 || height <= 0) return null;
+
+  renderer.readRenderTargetPixels(renderSampleViewRT.read, x0, y0, width, height, observationTriggerReadback);
+  let sum = 0;
+  let maxValue = 0;
+  const count = width * height;
+  for (let i = 0; i < count; i++) {
+    const value = Math.max(0, observationTriggerReadback[i * 4]);
+    sum += value;
+    maxValue = Math.max(maxValue, value);
+  }
   return {
-    x: edge.x - ((edge.x - centerX) / edgeLen) * inset,
-    y: edge.y - ((edge.y - centerY) / edgeLen) * inset,
+    mean: sum / Math.max(1, count),
+    max: maxValue,
+    score: maxValue,
   };
 }
 
+function updateObservationSlimeTriggers(now = performance.now()) {
+  if (!oats.length || now < nextObservationTriggerCheckAt) return lastObservationTriggerDiagnostics;
+  nextObservationTriggerCheckAt = now + OBSERVATION_SLIME_TRIGGER_INTERVAL_MS;
+
+  const threshold = Math.max(0, params.observationSlimeTriggerThreshold ?? 0);
+  let checked = 0;
+  let triggered = 0;
+  let pending = 0;
+  const maxReads = Math.max(1, OBSERVATION_SLIME_TRIGGER_READS_PER_FRAME);
+
+  for (let attempts = 0; attempts < oats.length && checked < maxReads; attempts++) {
+    const index = observationTriggerCursor % oats.length;
+    observationTriggerCursor = (observationTriggerCursor + 1) % Math.max(1, oats.length);
+    const oat = oats[index];
+    const observation = oat?.observation;
+    if (!observation || observation.triggered) continue;
+    checked++;
+    const sample = measureOatSlimeTriggerScore(oat);
+    if (!sample) continue;
+    observation.slimeTriggerMean = sample.mean;
+    observation.slimeTriggerMax = sample.max;
+    observation.slimeTriggerScore = sample.score;
+    if (sample.score >= threshold) {
+      triggerOatObservation(oat);
+      triggered++;
+    }
+  }
+
+  for (const oat of oats) {
+    if (oat.observation && !oat.observation.triggered) pending++;
+  }
+  lastObservationTriggerDiagnostics = {
+    checked,
+    triggered,
+    pending,
+    threshold,
+    lastCheckedAt: now,
+  };
+  return lastObservationTriggerDiagnostics;
+}
+
 function updateOatAnnotations() {
-  if (!annotationLayer || !annotationTethers || !mesh) return;
+  if (!annotationLayer || !mesh) return;
+  const now = performance.now();
   camera.updateMatrixWorld(true);
   camera.matrixWorldInverse.copy(camera.matrixWorld).invert();
+  mesh.updateMatrixWorld(true);
 
   const viewportWidth = Math.max(1, canvas.clientWidth);
   const viewportHeight = Math.max(1, canvas.clientHeight);
-  annotationTethers.setAttribute('viewBox', `0 0 ${viewportWidth} ${viewportHeight}`);
-  annotationTethers.setAttribute('width', String(viewportWidth));
-  annotationTethers.setAttribute('height', String(viewportHeight));
 
   for (const oat of oats) {
     const observation = oat.observation;
     if (!observation) continue;
+    const envelope = getObservationEnvelope(observation, now);
+    if (envelope.glassOpacity <= 0.005) {
+      hideOatObservation(observation, { preserveEnvelope: observation.triggered });
+      continue;
+    }
 
     const surfacePos = observation.surfacePos;
     const surfaceNormal = observation.surfaceNormal;
     const anchorPos = getOatAnnotationAnchorPos(oat, observation);
-    const tetherTip = anchorPos.clone().addScaledVector(surfaceNormal, OBSERVATION_TETHER_LENGTH);
+    const tailLength = Math.max(0, params.observationTailLength ?? 0.48) * WORLD_LINEAR_SCALE;
+    const tetherTip = anchorPos.clone().addScaledVector(surfaceNormal, tailLength);
     const anchorScreen = projectWorldToScreen(anchorPos);
     const tipScreen = projectWorldToScreen(tetherTip);
     const toCamera = camera.position.clone().sub(surfacePos).normalize();
     const facing = surfaceNormal.dot(toCamera);
-    const visibility = THREE.MathUtils.smoothstep(facing, -0.14, 0.2);
+    const facingVisibility = THREE.MathUtils.smoothstep(facing, -0.14, 0.2);
+    const occlusionCache = oat.sphere?.userData ?? observation;
+    const occlusionTarget = getCachedMeshOcclusionTarget(occlusionCache, anchorPos, facingVisibility, now);
+    const visibility = facingVisibility * updateObservationOcclusionOpacity(occlusionCache, occlusionTarget, now);
 
-    if (!anchorScreen.inClip || !tipScreen.inClip || visibility <= 0.02) {
-      hideOatObservation(observation);
+    if (!anchorScreen.inClip || !tipScreen.inClip) {
+      hideOatObservation(observation, { preserveEnvelope: true });
       continue;
     }
 
-    let dirX = tipScreen.x - anchorScreen.x;
-    let dirY = tipScreen.y - anchorScreen.y;
-    const dirLen = Math.hypot(dirX, dirY);
-    if (dirLen > 0.001) {
-      dirX /= dirLen;
-      dirY /= dirLen;
-    } else {
-      dirX = 0;
-      dirY = -1;
-    }
-
-    const boxWidth = observation.callout.offsetWidth || 230;
-    const boxHeight = observation.callout.offsetHeight || 74;
-    const stagger = ((observation.id % 5) - 2) * 8;
-    const desiredCenterX = tipScreen.x +
-      dirX * (boxWidth * 0.5 + OBSERVATION_LABEL_GAP_PX) -
-      dirY * stagger;
-    const desiredCenterY = tipScreen.y +
-      dirY * (boxHeight * 0.5 + OBSERVATION_LABEL_GAP_PX) +
-      dirX * stagger;
+    const boxWidth = Math.min(OBSERVATION_BOX_WIDTH_PX, Math.max(1, viewportWidth - OBSERVATION_VIEW_MARGIN_PX * 2));
+    const boxHeight = OBSERVATION_BOX_HEIGHT_PX;
+    const desiredCenterX = tipScreen.x;
+    const desiredCenterY = tipScreen.y;
     const left = THREE.MathUtils.clamp(
       desiredCenterX - boxWidth * 0.5,
       OBSERVATION_VIEW_MARGIN_PX,
@@ -4234,14 +5166,20 @@ function updateOatAnnotations() {
 
     observation.callout.style.left = `${left.toFixed(1)}px`;
     observation.callout.style.top = `${top.toFixed(1)}px`;
-    observation.callout.style.opacity = visibility.toFixed(3);
+    observation.callout.style.opacity = '1';
+    observation.callout.style.setProperty('--observation-glass-opacity', envelope.glassOpacity.toFixed(3));
+    observation.callout.style.setProperty('--observation-text-opacity', envelope.textOpacity.toFixed(3));
+    observation.callout.style.setProperty('--observation-spatial-opacity', visibility.toFixed(3));
+    const depth01 = THREE.MathUtils.clamp((tipScreen.z + 1) * 0.5, 0, 1);
+    observation.callout.style.zIndex = String(Math.round((1 - depth01) * OBSERVATION_Z_INDEX_RANGE));
     observation.callout.classList.add('is-visible');
 
-    const boxAnchor = nearestBoxEdgePoint(
+    updateObservationTail(
+      observation,
+      anchorScreen,
       { left, top, width: boxWidth, height: boxHeight },
-      tipScreen,
+      1,
     );
-    setLine(observation.stem, anchorScreen, boxAnchor, visibility);
   }
 }
 
@@ -4252,6 +5190,18 @@ let agentReadback = new Float32Array(AGENT_CAPACITY * 4);
 let slimeCoverageReadback = new Float32Array(FIELD_SIZE * FIELD_SIZE * 4);
 let coverageMaskReadback = new Uint8Array(FIELD_SIZE * FIELD_SIZE * 4);
 let legacyCoverageMaskReadback = new Uint8Array(FIELD_SIZE * FIELD_SIZE * 4);
+const observationTriggerReadback = new Float32Array(
+  OBSERVATION_SLIME_TRIGGER_SAMPLE_SIZE * OBSERVATION_SLIME_TRIGGER_SAMPLE_SIZE * 4,
+);
+let nextObservationTriggerCheckAt = 0;
+let observationTriggerCursor = 0;
+let lastObservationTriggerDiagnostics = {
+  checked: 0,
+  triggered: 0,
+  pending: 0,
+  threshold: 0,
+  lastCheckedAt: 0,
+};
 let coverageSurfaceTexels = 0;
 let surfaceCoverageBuildDiagnostics = {
   phase: 'not-built',
@@ -9537,6 +10487,10 @@ function onLoad(gltf) {
     scene,
     camera,
     controls,
+    getCameraPose,
+    getCameraPoseCommand,
+    setCameraPose,
+    setCameraAngles,
     mesh,
     params,
     agentRT,
@@ -9580,8 +10534,15 @@ function onLoad(gltf) {
     perf: createPerfHelpers(),
     oats,
     annotationLayer,
-    annotationTethers,
     updateOatAnnotations,
+    updateObservationSlimeTriggers,
+    triggerOatObservation,
+    completeOatObservation,
+    getLastObservationTriggerDiagnostics: () => ({ ...lastObservationTriggerDiagnostics }),
+    setObservationText,
+    setOatObservationText,
+    setAllOatObservationText,
+    observationPlaceholderText: OBSERVATION_PLACEHOLDER_TEXT,
     loggedClicks,
     addOat,
     resetSimulation,
@@ -10642,8 +11603,11 @@ function addOat(x, y, opts = {}) {
     sphere = createOatGlowMarker(worldPos, worldNormal);
     oatGroup.add(sphere);
   }
-  const oat = { uv, chartId, worldPos, worldNormal, radius, power, sphere, observation: null };
+  const storyText = String(opts.storyText ?? opts.text ?? OBSERVATION_PLACEHOLDER_TEXT);
+  const oat = { uv, chartId, worldPos, worldNormal, radius, power, sphere, storyText, observation: null };
+  if (sphere) sphere.userData.oat = oat;
   oat.observation = createOatObservation(oat);
+  if (opts.observationCompleted) completeOatObservation(oat);
   oats.push(oat);
   oatDirty = true;
   oatCountEl.textContent = String(oats.length);
@@ -10807,7 +11771,7 @@ function initAgents() {
 function resetSimulation({ resetOats = false } = {}) {
   if (resetOats) {
     clearAllOats();
-    addOat(INITIAL_OAT_UV.x, INITIAL_OAT_UV.y);
+    addOat(INITIAL_OAT_UV.x, INITIAL_OAT_UV.y, { observationCompleted: true });
   }
   clearRT(fieldRT.read);
   clearRT(fieldRT.write);
@@ -11236,6 +12200,13 @@ function initControls() {
     iridescenceMinThickness: 'iridescenceMinThickness',
     iridescenceThickness: 'iridescenceThickness',
     lightBrightness: 'lightBrightness',
+    observationTailLength: 'observationTailLength',
+    observationStrokeOpacity: 'observationStrokeOpacity',
+    observationCornerRadius: 'observationCornerRadius',
+    observationEdgeFeather: 'observationEdgeFeather',
+    observationBlurRadius: 'observationBlurRadius',
+    observationTintOpacity: 'observationTintOpacity',
+    observationSlimeTriggerThreshold: 'observationSlimeTriggerThreshold',
     speed: 'stepSize',
   };
   for (const [id, key] of Object.entries(bindings)) {
@@ -11255,6 +12226,15 @@ function initControls() {
           oat.power = params.oatPower;
         }
         oatDirty = true;
+      }
+      if (
+        key === 'observationStrokeOpacity' ||
+        key === 'observationCornerRadius' ||
+        key === 'observationEdgeFeather' ||
+        key === 'observationBlurRadius' ||
+        key === 'observationTintOpacity'
+      ) {
+        syncObservationCssVars();
       }
       if (markCustom && SIMULATION_PRESET_KEY_SET.has(key)) {
         setActiveSimulationPreset('custom');
@@ -11319,6 +12299,7 @@ function initControls() {
   const syncBaseColor = ({ markCustom = true } = {}) => {
     params.slimeBaseColor = baseColorInput.value;
     baseColorOutput.value = baseColorInput.value.toUpperCase();
+    syncObservationCssVars();
     if (markCustom) setActiveRenderDisplayPreset('custom');
   };
   const syncBaseColorFromParams = () => {
@@ -11328,6 +12309,22 @@ function initControls() {
   baseColorInput.addEventListener('input', () => syncBaseColor());
   boundParamControls.set('slimeBaseColor', syncBaseColorFromParams);
   syncBaseColorFromParams();
+
+  const tintColorInput = document.getElementById('observationTintColor');
+  const tintColorOutput = tintColorInput.parentElement.querySelector('output');
+  const syncTintColor = ({ markCustom = true } = {}) => {
+    params.observationTintColor = tintColorInput.value;
+    tintColorOutput.value = tintColorInput.value.toUpperCase();
+    syncObservationCssVars();
+    if (markCustom) setActiveRenderDisplayPreset('custom');
+  };
+  const syncTintColorFromParams = () => {
+    tintColorInput.value = params.observationTintColor;
+    syncTintColor({ markCustom: false });
+  };
+  tintColorInput.addEventListener('input', () => syncTintColor());
+  boundParamControls.set('observationTintColor', syncTintColorFromParams);
+  syncTintColorFromParams();
 
   for (const tip of document.querySelectorAll('.help-tip')) {
     tip.addEventListener('pointerdown', (event) => {
@@ -11341,11 +12338,12 @@ function initControls() {
     });
   }
 
-  function bindToggle(id, key) {
+  function bindToggle(id, key, { onChange = null } = {}) {
     const input = document.getElementById(id);
     if (!input) return;
     const syncFromParams = () => {
       input.checked = !!params[key];
+      if (onChange) onChange();
     };
     input.addEventListener('change', () => {
       params[key] = input.checked;
@@ -11355,6 +12353,7 @@ function initControls() {
       if (RENDER_DISPLAY_PRESET_KEY_SET.has(key)) {
         setActiveRenderDisplayPreset('custom');
       }
+      if (onChange) onChange();
     });
     boundParamControls.set(key, syncFromParams);
     syncFromParams();
@@ -11365,6 +12364,7 @@ function initControls() {
   bindToggle('useSeamStitching', 'useSeamStitching');
   bindToggle('useIslandMasking', 'useIslandMasking');
   bindToggle('useHeadingRotation', 'useHeadingRotation');
+  bindToggle('useOpticalZoom', 'useOpticalZoom', { onChange: syncCameraZoomMode });
   bindToggle('useOatRationing', 'useOatRationing');
   bindToggle('showWireframe', 'showWireframe');
   bindToggle('filmFollowsSlimeHeight', 'filmFollowsSlimeHeight');
@@ -11374,6 +12374,9 @@ function initControls() {
   debugViewSelect.addEventListener('change', () => {
     params.debugView = debugViewSelect.value;
   });
+  if (copyCameraPoseButton) {
+    copyCameraPoseButton.addEventListener('click', copyCameraPoseToClipboard);
+  }
 
   const panel = document.querySelector('.panel');
   const panelBody = document.getElementById('panelBody');
@@ -11399,7 +12402,11 @@ function initControls() {
   document.getElementById('resetCamera').addEventListener('click', () => {
     camera.position.copy(initialCameraPose.position);
     controls.target.copy(initialCameraPose.target);
+    camera.fov = THREE.MathUtils.radToDeg(SURFACE_FOV);
+    camera.updateProjectionMatrix();
     controls.update();
+    cameraPoseReadoutDirty = true;
+    updateCameraPoseReadout(true);
   });
   document.getElementById('seed').addEventListener('click', () => {
     if (started) initAgents();
@@ -11407,7 +12414,7 @@ function initControls() {
   document.getElementById('clearOats').addEventListener('click', () => {
     if (!started) return;
     clearAllOats();
-    addOat(INITIAL_OAT_UV.x, INITIAL_OAT_UV.y);
+    addOat(INITIAL_OAT_UV.x, INITIAL_OAT_UV.y, { observationCompleted: true });
   });
 }
 initControls();
@@ -11431,6 +12438,7 @@ function frame(now) {
       renderDensity();
     }
     smoothRenderField();
+    updateObservationSlimeTriggers(now);
   }
 
   // Pick the right material for the cuttlefish based on debugView.
@@ -11488,7 +12496,7 @@ function frame(now) {
     }
     if (wireframeOverlay) wireframeOverlay.visible = !!params.showWireframe;
     oatGroup.visible = !!params.showOats;
-    if (oatGroup.visible) updateOatGlowMarkers(now);
+    if (oatGroup.visible) updateOatGlowMarkers();
   }
 
   renderSceneOnce();
@@ -11500,6 +12508,7 @@ function frame(now) {
 function renderSceneOnce() {
   controls.update();
   resizeIfNeeded();
+  updateCameraPoseReadout();
   updateOatAnnotations();
 
   renderer.setRenderTarget(null);
@@ -11804,6 +12813,7 @@ function refreshRuntimeAgentFeedback({ recordHistory = false, now = performance.
 
 function applyRuntimeParams(overrides = {}) {
   Object.assign(params, overrides);
+  syncObservationCssVars();
   if (Object.prototype.hasOwnProperty.call(overrides, 'oatPower')) {
     for (const oat of oats) oat.power = params.oatPower;
     oatDirty = true;
