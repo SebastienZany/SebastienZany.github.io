@@ -1,0 +1,382 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Gold Wafer — PBR</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0a0a0a; overflow: hidden; }
+  canvas { display: block; }
+  #hud {
+    position: fixed; top: 10px; left: 12px; color: #ccc;
+    font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace;
+    background: rgba(0,0,0,0.4); padding: 8px 10px; border-radius: 6px;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<div id="hud">drag to orbit · scroll to zoom · right-drag to pan · <b>shift+drag to thicken</b></div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x111114);
+
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+
+const camera = new THREE.PerspectiveCamera(35, window.innerWidth / window.innerHeight, 0.01, 100);
+camera.position.set(0.18, 0.18, 0.35);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.target.set(0, 0, 0);
+
+// ---------------------------------------------------------------------------
+// Thin-film lookup tensor (inlined). Shape [5 angle, 100 thickness, 3 ch], uint8.
+//   angle_deg     = [0, 10, 20, 30, 40]
+//   thickness_nm  = linspace(100, 600, 100)
+// ---------------------------------------------------------------------------
+const LOOKUP_W = 100, LOOKUP_H = 5;
+const LOOKUP_FLAT = new Uint8Array([255,166,255,255,190,255,255,219,255,242,245,255,169,255,255,99,255,255,64,255,255,98,255,255,144,255,249,183,255,228,215,255,209,240,255,192,255,255,176,255,255,162,255,252,149,255,248,137,255,245,126,255,242,116,255,239,107,255,236,100,255,233,97,255,230,98,255,226,105,255,222,116,255,218,131,255,213,148,255,208,167,255,203,187,255,197,206,255,192,224,255,187,241,255,183,255,255,181,255,255,181,255,255,184,255,255,190,255,255,198,255,255,207,255,255,218,255,255,229,255,255,240,255,255,249,249,255,255,235,237,255,221,225,255,206,218,255,191,217,255,178,222,255,166,231,255,157,242,255,151,255,255,148,255,255,148,255,255,151,255,250,157,255,245,164,255,241,173,255,236,182,255,231,191,255,226,200,255,222,207,255,218,215,255,214,221,255,211,226,255,208,230,255,206,232,255,205,234,255,204,234,255,204,234,255,204,232,255,206,229,255,208,226,255,211,222,255,214,217,255,218,213,255,222,208,255,226,203,255,231,199,255,235,196,255,238,195,255,242,194,255,244,195,255,247,197,255,248,199,255,249,202,255,250,206,255,250,210,255,249,213,255,248,216,255,247,219,255,245,221,255,243,222,255,241,223,255,239,223,255,236,223,255,234,222,255,232,220,255,230,218,255,228,216,255,226,213,255,224,210,255,165,255,255,189,255,255,218,255,246,244,255,172,255,255,102,255,255,65,255,255,97,255,255,142,255,250,182,255,229,214,255,210,239,255,193,255,255,177,255,255,163,255,252,150,255,248,138,255,245,127,255,242,116,255,239,108,255,236,101,255,233,97,255,230,98,255,227,105,255,223,115,255,218,130,255,214,147,255,208,166,255,203,186,255,197,205,255,192,223,255,187,240,255,183,254,255,181,255,255,181,255,255,184,255,255,189,255,255,197,255,255,207,255,255,217,255,255,228,255,255,239,255,255,248,250,255,255,236,239,255,222,226,255,207,219,255,193,218,255,179,222,255,167,230,255,158,241,255,151,254,255,148,255,255,148,255,255,151,255,251,156,255,246,164,255,241,172,255,236,181,255,232,190,255,227,199,255,223,207,255,219,214,255,215,220,255,212,225,255,209,229,255,207,232,255,205,234,255,204,234,255,204,234,255,204,232,255,205,230,255,208,226,255,210,222,255,214,218,255,217,213,255,222,208,255,226,204,255,230,200,255,234,197,255,238,195,255,241,194,255,244,195,255,246,196,255,248,199,255,249,202,255,250,206,255,250,209,255,249,213,255,248,216,255,247,219,255,245,221,255,243,222,255,241,223,255,239,223,255,237,223,255,234,222,255,232,220,255,230,218,255,228,216,255,226,214,255,225,211,255,163,255,255,186,255,255,214,255,255,241,255,183,255,255,112,255,255,68,255,255,92,255,255,137,255,253,177,255,232,209,255,212,236,255,195,255,255,180,255,255,166,255,253,153,255,249,140,255,246,129,255,243,119,255,240,110,255,237,102,255,234,98,255,231,99,255,227,104,255,223,114,255,219,128,255,215,144,255,210,163,255,204,182,255,199,201,255,193,219,255,189,236,255,185,251,255,182,255,255,181,255,255,183,255,255,188,255,255,195,255,255,204,255,255,215,255,255,226,255,255,236,255,255,246,253,255,254,240,244,255,226,230,255,211,221,255,197,219,255,183,221,255,171,229,255,161,239,255,153,251,255,149,255,255,148,255,255,150,255,252,155,255,247,162,255,243,170,255,238,179,255,233,188,255,228,196,255,224,204,255,220,212,255,216,218,255,213,224,255,210,228,255,207,231,255,206,233,255,204,234,255,204,234,255,204,233,255,205,231,255,207,228,255,209,224,255,213,220,255,216,215,255,220,210,255,224,205,255,229,201,255,233,198,255,236,196,255,240,195,255,243,195,255,245,196,255,247,198,255,249,201,255,249,204,255,249,208,255,249,211,255,248,215,255,247,218,255,246,220,255,244,222,255,242,223,255,240,223,255,238,223,255,235,222,255,233,221,255,231,219,255,229,217,255,227,215,255,226,212,255,161,255,255,181,255,255,208,255,255,235,255,199,255,255,129,255,255,77,255,255,86,255,255,128,255,255,169,255,237,202,255,217,230,255,200,251,255,184,255,255,170,255,254,156,255,250,144,255,247,133,255,244,122,255,241,113,255,238,105,255,235,101,255,232,99,255,229,103,255,225,111,255,221,124,255,216,140,255,212,157,255,206,176,255,201,195,255,196,213,255,191,231,255,186,246,255,183,255,255,182,255,255,183,255,255,187,255,255,193,255,255,201,255,255,211,255,255,221,255,255,232,255,255,242,255,255,250,246,253,255,232,238,255,218,227,255,203,221,255,189,221,255,177,226,255,166,235,255,157,246,255,152,255,255,149,255,255,150,255,254,153,255,249,159,255,245,166,255,240,175,255,236,184,255,231,192,255,227,201,255,222,208,255,219,215,255,215,221,255,212,226,255,209,229,255,207,232,255,206,234,255,205,234,255,204,233,255,205,232,255,206,229,255,208,226,255,211,222,255,214,218,255,218,213,255,222,208,255,226,204,255,230,200,255,234,197,255,238,195,255,241,195,255,244,195,255,246,197,255,247,199,255,248,202,255,249,206,255,249,209,255,249,213,255,248,216,255,246,218,255,245,220,255,243,222,255,241,223,255,239,223,255,237,223,255,235,222,255,233,221,255,231,219,255,229,217,255,227,214,255,158,255,255,175,255,255,201,255,255,228,255,222,251,255,153,255,255,95,255,255,82,255,255,116,255,255,157,255,244,192,255,224,221,255,206,244,255,190,255,255,175,255,255,162,255,251,150,255,248,138,255,245,127,255,242,118,255,239,110,255,236,104,255,233,101,255,230,103,255,227,109,255,223,119,255,219,133,255,214,150,255,209,168,255,204,187,255,199,205,255,194,222,255,189,239,255,186,253,255,183,255,255,183,255,255,185,255,255,190,255,255,197,255,255,205,255,255,215,255,255,226,255,255,236,255,255,245,253,255,253,240,249,255,226,236,255,212,227,255,199,223,255,185,225,255,174,231,255,164,240,255,157,251,255,152,255,255,151,255,255,152,255,252,156,255,248,162,255,244,170,255,239,178,255,234,187,255,230,195,255,226,203,255,222,210,255,218,217,255,215,222,255,212,227,255,209,230,255,207,232,255,206,234,255,205,234,255,205,233,255,206,231,255,207,229,255,209,225,255,212,221,255,215,217,255,219,212,255,223,208,255,227,204,255,230,200,255,234,197,255,238,196,255,241,195,255,243,196,255,245,197,255,247,200,255,248,203,255,248,206,255,248,210,255,248,213,255,247,216,255,246,218,255,245,220,255,243,222,255,241,223,255,239,223,255,237,223,255,235,222,255,233,221,255,231,219,255,229,217]);
+
+function buildLookupTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = LOOKUP_W; canvas.height = LOOKUP_H;
+  const ctx = canvas.getContext('2d');
+  const img = ctx.createImageData(LOOKUP_W, LOOKUP_H);
+  for (let i = 0; i < LOOKUP_W * LOOKUP_H; i++) {
+    img.data[i*4    ] = LOOKUP_FLAT[i*3    ];
+    img.data[i*4 + 1] = LOOKUP_FLAT[i*3 + 1];
+    img.data[i*4 + 2] = LOOKUP_FLAT[i*3 + 2];
+    img.data[i*4 + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.magFilter = THREE.NearestFilter;
+  tex.minFilter = THREE.NearestFilter;
+  tex.generateMipmaps = false;
+  tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+  return tex;
+}
+
+// ---------------------------------------------------------------------------
+// Perlin fBm thickness texture (seed 104 / params dialed earlier).
+// ---------------------------------------------------------------------------
+function makePerlin(seed) {
+  const perm = new Uint8Array(512);
+  const p = new Uint8Array(256);
+  for (let i = 0; i < 256; i++) p[i] = i;
+  let s = (seed >>> 0) || 1;
+  const rand = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+  for (let i = 255; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    const t = p[i]; p[i] = p[j]; p[j] = t;
+  }
+  for (let i = 0; i < 512; i++) perm[i] = p[i & 255];
+  const fade = t => t*t*t*(t*(t*6 - 15) + 10);
+  const lerp = (a, b, t) => a + t*(b - a);
+  const grad = (h, x, y) => {
+    const g = h & 7;
+    const u = g < 4 ? x : y, v = g < 4 ? y : x;
+    return ((g & 1) ? -u : u) + ((g & 2) ? -2*v : 2*v);
+  };
+  return (x, y) => {
+    const X = Math.floor(x) & 255, Y = Math.floor(y) & 255;
+    x -= Math.floor(x); y -= Math.floor(y);
+    const u = fade(x), v = fade(y);
+    const A = perm[X] + Y, B = perm[X + 1] + Y;
+    return lerp(
+      lerp(grad(perm[A],     x,     y    ), grad(perm[B],     x - 1, y    ), u),
+      lerp(grad(perm[A + 1], x,     y - 1), grad(perm[B + 1], x - 1, y - 1), u),
+      v
+    );
+  };
+}
+
+function buildThicknessTexture({ size = 512, seed = 104, octaves = 8, baseFreq = 5.2, lacunarity = 1.95, gain = 0.43 } = {}) {
+  const noise = makePerlin(seed);
+  const data = new Float32Array(size * size);
+  let lo = +Infinity, hi = -Infinity;
+  for (let j = 0; j < size; j++) {
+    const v = j / size;
+    for (let i = 0; i < size; i++) {
+      const u = i / size;
+      let amp = 1.0, freq = baseFreq, sum = 0.0, norm = 0.0;
+      for (let o = 0; o < octaves; o++) {
+        sum  += amp * noise(u * freq, v * freq);
+        norm += amp;
+        amp  *= gain;
+        freq *= lacunarity;
+      }
+      const val = sum / norm;
+      data[j * size + i] = val;
+      if (val < lo) lo = val;
+      if (val > hi) hi = val;
+    }
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const img = ctx.createImageData(size, size);
+  const span = (hi - lo) || 1;
+  for (let k = 0; k < data.length; k++) {
+    const t = (data[k] - lo) / span;
+    const g = Math.round(t * 255);
+    img.data[k*4] = g; img.data[k*4+1] = g; img.data[k*4+2] = g; img.data[k*4+3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.NoColorSpace;
+  tex.anisotropy = 8;
+  return tex;
+}
+
+// ---------------------------------------------------------------------------
+// Wafer geometry: thin disc. 200mm wafer ≈ 0.2 m diameter, ~0.725 mm thick.
+// We keep real-ish proportions but scale to a comfortable view size.
+// ---------------------------------------------------------------------------
+const WAFER_RADIUS = 0.1;        // 100 mm
+const WAFER_THICKNESS = 0.0008;  // 0.8 mm
+
+// Perlin field nm range. Anything that maps below the LUT's data floor
+// (100nm) is clamped to 100nm in the shader — representing bare wafer where
+// no measurable film exists. A symmetric-ish range with a chunk below the
+// floor makes the natural Perlin distribution produce visible "bare" patches.
+const PERLIN_NM_MIN = 0;
+const PERLIN_NM_MAX = 600;
+const PERLIN_NM_SPAN = PERLIN_NM_MAX - PERLIN_NM_MIN;
+const LUT_FLOOR_NM = 100;  // LUT data starts here; below this we clamp.
+
+const filmUniforms = {
+  uPerlin:     { value: buildThicknessTexture() },
+  uLookup:     { value: buildLookupTexture() },
+  uPerlinMin:  { value: PERLIN_NM_MIN },
+  uPerlinMax:  { value: PERLIN_NM_MAX },
+  uFloorNm:    { value: LUT_FLOOR_NM },
+  uLookupW:    { value: LOOKUP_W },
+  uLookupH:    { value: LOOKUP_H },
+};
+
+const material = new THREE.MeshPhysicalMaterial({
+  color: 0xffffff,    // placeholder — replaced per-fragment by the LUT below
+  metalness: 1.0,
+  roughness: 0.18,
+});
+
+// Inject the LUT into the standard MeshPhysicalMaterial pipeline:
+// override diffuseColor per-fragment with our (angle, thickness)→RGB lookup.
+// three.js then uses it as the metal F0 and applies Fresnel-Schlick rolloff
+// downstream — taking grazing reflectance to ~1 automatically without us
+// needing a separate Schlick blend.
+material.onBeforeCompile = (shader) => {
+  Object.assign(shader.uniforms, filmUniforms);
+
+  shader.vertexShader = shader.vertexShader
+    .replace('#include <common>',
+      `#include <common>
+       varying vec2 vFilmUv;`)
+    .replace('#include <uv_vertex>',
+      `#include <uv_vertex>
+       vFilmUv = uv;`);
+
+  shader.fragmentShader = shader.fragmentShader
+    .replace('#include <common>',
+      `#include <common>
+       uniform sampler2D uPerlin;
+       uniform sampler2D uLookup;
+       uniform float uPerlinMin;     // nm at canvas value 0
+       uniform float uPerlinMax;     // nm at canvas value 255
+       uniform float uFloorNm;       // clamp floor for thickness lookup
+       uniform float uLookupW;
+       uniform float uLookupH;
+       varying vec2 vFilmUv;
+
+       // LUT thickness axis: data spans 100→600 nm (fixed property of the tensor).
+       const float LUT_MIN_NM  = 100.0;
+       const float LUT_SPAN_NM = 500.0;
+
+       // cos(θ) at the 5 sampled angles: cos(0,10,20,30,40°).
+       const float COS_P0 = 1.00000;
+       const float COS_P1 = 0.98481;
+       const float COS_P2 = 0.93969;
+       const float COS_P3 = 0.86603;
+       const float COS_P4 = 0.76604;
+       float cosToAngleIdx(float c) {
+         if (c >= COS_P1) return       (COS_P0 - c) / (COS_P0 - COS_P1);
+         if (c >= COS_P2) return 1.0 + (COS_P1 - c) / (COS_P1 - COS_P2);
+         if (c >= COS_P3) return 2.0 + (COS_P2 - c) / (COS_P2 - COS_P3);
+         if (c >= COS_P4) return 3.0 + (COS_P3 - c) / (COS_P3 - COS_P4);
+         return                  4.0 + (COS_P4 - c) / (COS_P3 - COS_P4);
+       }
+       vec4 filmCubicW(float t) {
+         float t2 = t*t; float t3 = t2*t;
+         return 0.5 * vec4(-t3 + 2.0*t2 - t, 3.0*t3 - 5.0*t2 + 2.0, -3.0*t3 + 4.0*t2 + t, t3 - t2);
+       }
+       vec3 filmTap(float ti, float ai) {
+         ti = clamp(ti, 0.0, uLookupW - 1.0);
+         ai = clamp(ai, 0.0, uLookupH - 1.0);
+         vec2 uv = vec2((ti + 0.5) / uLookupW, (ai + 0.5) / uLookupH);
+         return texture2D(uLookup, uv).rgb;
+       }
+       vec3 filmBicubic(float tIdx, float aIdx) {
+         float ti0 = clamp(floor(tIdx), 1.0, uLookupW - 3.0);
+         float ai0 = clamp(floor(aIdx), 1.0, uLookupH - 3.0);
+         float ft = tIdx - ti0; float fa = aIdx - ai0;
+         vec4 wt = filmCubicW(ft); vec4 wa = filmCubicW(fa);
+         vec3 r = vec3(0.0);
+         for (int j = 0; j < 4; j++) {
+           float ay = ai0 - 1.0 + float(j);
+           vec3 row = wt.x * filmTap(ti0 - 1.0, ay)
+                    + wt.y * filmTap(ti0,        ay)
+                    + wt.z * filmTap(ti0 + 1.0,  ay)
+                    + wt.w * filmTap(ti0 + 2.0,  ay);
+           r += wa[j] * row;
+         }
+         return r;
+       }`)
+    .replace('#include <color_fragment>',
+      `#include <color_fragment>
+       {
+         vec3 _N = normalize(vNormal);
+         vec3 _V = normalize(vViewPosition);
+         float _c = clamp(abs(dot(_N, _V)), 0.0, 1.0);
+         float _thickNorm = texture2D(uPerlin, vFilmUv).r;
+         float _thickNm   = mix(uPerlinMin, uPerlinMax, _thickNorm);
+         _thickNm = max(_thickNm, uFloorNm);  // below 100nm = bare wafer, clamp
+         float _tIdx = (_thickNm - LUT_MIN_NM) / LUT_SPAN_NM * (uLookupW - 1.0);
+         float _aIdx = clamp(cosToAngleIdx(_c), 0.0, uLookupH - 1.0);
+         diffuseColor.rgb = clamp(filmBicubic(_tIdx, _aIdx), 0.0, 1.0);
+       }`);
+};
+
+const wafer = new THREE.Mesh(
+  new THREE.CylinderGeometry(WAFER_RADIUS, WAFER_RADIUS, WAFER_THICKNESS, 256, 1),
+  material
+);
+// Lay it flat with the polished side up.
+wafer.rotation.x = 0; // cylinder axis is Y, top face already faces +Y
+scene.add(wafer);
+
+// Subtle ground so the wafer doesn't float in pure void.
+const ground = new THREE.Mesh(
+  new THREE.CircleGeometry(0.8, 64),
+  new THREE.MeshStandardMaterial({ color: 0x202024, roughness: 1.0, metalness: 0.0 })
+);
+ground.rotation.x = -Math.PI / 2;
+ground.position.y = -WAFER_THICKNESS / 2 - 0.001;
+scene.add(ground);
+
+// A direct key light gives the gold a specular highlight on top of the env reflections.
+const key = new THREE.DirectionalLight(0xffffff, 2.0);
+key.position.set(0.4, 0.6, 0.3);
+scene.add(key);
+
+// ---------------------------------------------------------------------------
+// Shift+drag on the wafer adds a Gaussian thickness bump where you click.
+// Paint events accumulate additively onto the canvas backing the thickness
+// texture (composite-op 'lighter'), so a slow drag deposits more "film".
+// ---------------------------------------------------------------------------
+const raycaster = new THREE.Raycaster();
+const pointerNDC = new THREE.Vector2();
+const thicknessTex = filmUniforms.uPerlin.value;
+const thicknessCanvas = thicknessTex.image;
+const thicknessCtx = thicknessCanvas.getContext('2d');
+const BRUSH_SIGMA = 16;                              // canvas pixels (~3mm on a 100mm wafer)
+const BRUSH_PEAK_NM = 25;                            // peak nm deposited per paint event
+const BRUSH_STRENGTH = BRUSH_PEAK_NM / PERLIN_NM_SPAN; // normalize over canvas's nm span
+const BRUSH_STEP = BRUSH_SIGMA / 2;                  // min canvas pixels between paint events
+
+function paintGaussianAtPixel(cx, cy) {
+  const radius = BRUSH_SIGMA * 3;
+  const grad = thicknessCtx.createRadialGradient(cx, cy, 0, cx, cy, radius);
+  for (let i = 0; i <= 20; i++) {
+    const t = i / 20;
+    const r = t * radius;
+    const v = BRUSH_STRENGTH * Math.exp(-(r * r) / (2 * BRUSH_SIGMA * BRUSH_SIGMA));
+    const g = Math.round(v * 255);
+    grad.addColorStop(t, `rgba(${g},${g},${g},1)`);
+  }
+  thicknessCtx.globalCompositeOperation = 'lighter';
+  thicknessCtx.fillStyle = grad;
+  thicknessCtx.beginPath();
+  thicknessCtx.arc(cx, cy, radius, 0, Math.PI * 2);
+  thicknessCtx.fill();
+  thicknessCtx.globalCompositeOperation = 'source-over';
+  thicknessTex.needsUpdate = true;
+}
+
+let lastPaintCx = null, lastPaintCy = null;
+function paintFromEvent(e) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  pointerNDC.x =  ((e.clientX - rect.left) / rect.width)  * 2 - 1;
+  pointerNDC.y = -((e.clientY - rect.top)  / rect.height) * 2 + 1;
+  raycaster.setFromCamera(pointerNDC, camera);
+  const hit = raycaster.intersectObject(wafer)[0];
+  if (!hit || !hit.uv || !hit.face || hit.face.normal.y <= 0.5) return;
+  // FlipY=true (CanvasTexture default) maps UV.v=1 to canvas y=0.
+  const cx = hit.uv.x * thicknessCanvas.width;
+  const cy = (1 - hit.uv.y) * thicknessCanvas.height;
+  // Distance throttle: deposition tracks how far you drag, not how long you hover.
+  if (lastPaintCx !== null) {
+    const d = Math.hypot(cx - lastPaintCx, cy - lastPaintCy);
+    if (d < BRUSH_STEP) return;
+  }
+  paintGaussianAtPixel(cx, cy);
+  lastPaintCx = cx; lastPaintCy = cy;
+}
+
+let drawing = false;
+// Capture-phase listeners + stopImmediatePropagation prevent OrbitControls
+// (which uses bubble-phase) from receiving the event while shift is held.
+renderer.domElement.addEventListener('pointerdown', e => {
+  if (!e.shiftKey) return;
+  e.stopImmediatePropagation();
+  e.preventDefault();
+  drawing = true;
+  lastPaintCx = null; lastPaintCy = null;  // reset throttle for each new stroke
+  paintFromEvent(e);
+}, { capture: true });
+renderer.domElement.addEventListener('pointermove', e => {
+  if (!drawing) return;
+  e.stopImmediatePropagation();
+  paintFromEvent(e);
+}, { capture: true });
+window.addEventListener('pointerup',  () => { drawing = false; });
+window.addEventListener('blur',       () => { drawing = false; });
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+renderer.setAnimationLoop(() => {
+  controls.update();
+  renderer.render(scene, camera);
+});
+</script>
+</body>
+</html>
