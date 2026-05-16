@@ -320,7 +320,7 @@ select {
   overscroll-behavior: contain;
   padding: 2px 5px 2px 0;
   color: rgba(var(--observation-text-rgb), 0.88);
-  font-size: 1.56rem;
+  font-size: 1.17rem;
   line-height: 1.35;
   -webkit-mask-image: linear-gradient(
     to bottom,
@@ -1768,6 +1768,7 @@ const OPTICAL_ZOOM_SNAP_EPSILON_DEG = 0.01;
 const CAMERA_ORBIT_DAMPING_FACTOR = 0.07;
 const CAMERA_ORBIT_ROTATE_SPEED = 0.65;
 const CAMERA_ORBIT_ZOOM_SPEED = 0.7;
+const CAMERA_ORBIT_SHIFT_SPEED_MULTIPLIER = 1 / 3;
 const CAMERA_KEYBOARD_ORBIT_SPEED = 0.68;
 const CAMERA_KEYBOARD_ORBIT_RESPONSE_MS = 120;
 const CAMERA_KEYBOARD_ORBIT_DECAY_MS = 520;
@@ -1802,7 +1803,7 @@ const SLIME_TUMBLE_REVERB_MAX_WET = 0.58;
 const SLIME_TUMBLE_SPATIAL_SMOOTH_SECONDS = 0.045;
 const SLIME_TUMBLE_SPATIAL_POSITION_EPSILON = 0.012 * WORLD_LINEAR_SCALE;
 const SLIME_TUMBLE_SPATIAL_DIRECTION_EPSILON = 0.0008;
-const SLIME_TUMBLE_PANNER_ROLLOFF = 3.2;
+const SLIME_TUMBLE_PANNER_ROLLOFF = 4.8;
 const SLIME_TUMBLE_LOWPASS_NEAR_HZ = 18000;
 const SLIME_TUMBLE_LOWPASS_FAR_HZ = 900;
 const SLIME_TUMBLE_LOWPASS_Q = 0.55;
@@ -1846,7 +1847,7 @@ const SOUND_CHECK_CLIPS = Object.freeze([
   { id: 'env', path: ENV_AUDIO_PATH, loop: true, gain: 2, maxGain: 15.5816, fadeOutSeconds: ENV_AUDIO_CROSSFADE_SECONDS },
   { id: 'slime-appear', path: 'shen-soundpack/wav/slime-appear.wav', loop: false, maxGain: 3.4979 },
   { id: 'slime-appear-stretch', path: 'shen-soundpack/wav/slime-appear-stretch.wav', loop: false, gain: 2, maxGain: 4.1431 },
-  { id: 'slime-tumble', path: SLIME_TUMBLE_AUDIO_PATH, loop: false, gain: 0.3, maxGain: 1.9959 },
+  { id: 'slime-tumble', path: SLIME_TUMBLE_AUDIO_PATH, loop: false, gain: 0.5, maxGain: 1.9959 },
   { id: 'slime-tumble-complete', path: 'shen-soundpack/wav/slime-tumble-complete.wav', loop: false, maxGain: 3.0304 },
   { id: 'slime-fuse', path: 'shen-soundpack/wav/slime-fuse.wav', loop: false, maxGain: 1.7083 },
   { id: 'cuttlefish-reveal', path: 'shen-soundpack/wav/cuttlefish-reveal.wav', loop: false, maxGain: 2.2347 },
@@ -2810,6 +2811,7 @@ const cameraKeyboardOrbitState = {
   right: false,
   up: false,
   down: false,
+  shift: false,
   thetaVelocity: 0,
   phiVelocity: 0,
   lastUpdateAt: performance.now(),
@@ -2920,11 +2922,22 @@ function clearCameraKeyboardOrbitState() {
   cameraKeyboardOrbitState.right = false;
   cameraKeyboardOrbitState.up = false;
   cameraKeyboardOrbitState.down = false;
+  cameraKeyboardOrbitState.shift = false;
   cameraKeyboardOrbitState.thetaVelocity = 0;
   cameraKeyboardOrbitState.phiVelocity = 0;
 }
 
+function getCameraOrbitInputSpeedMultiplier(source = null) {
+  const shiftKey = typeof source === 'boolean' ? source : Boolean(source?.shiftKey);
+  return shiftKey ? CAMERA_ORBIT_SHIFT_SPEED_MULTIPLIER : 1;
+}
+
+function syncCameraKeyboardOrbitModifierState(event) {
+  cameraKeyboardOrbitState.shift = Boolean(event?.shiftKey);
+}
+
 function handleCameraKeyboardOrbitKeydown(event) {
+  syncCameraKeyboardOrbitModifierState(event);
   const keyName = cameraKeyboardKeyName(event.key);
   if (!keyName || event.altKey || event.ctrlKey || event.metaKey) return;
   if (isPanelShortcutEditableTarget(event.target)) return;
@@ -2933,6 +2946,7 @@ function handleCameraKeyboardOrbitKeydown(event) {
 }
 
 function handleCameraKeyboardOrbitKeyup(event) {
+  syncCameraKeyboardOrbitModifierState(event);
   const keyName = cameraKeyboardKeyName(event.key);
   if (!keyName) return;
   event.preventDefault();
@@ -2944,7 +2958,9 @@ function updateCameraKeyboardOrbit(now = performance.now()) {
   cameraKeyboardOrbitState.lastUpdateAt = now;
   const horizontal = (cameraKeyboardOrbitState.right ? 1 : 0) - (cameraKeyboardOrbitState.left ? 1 : 0);
   const vertical = (cameraKeyboardOrbitState.down ? 1 : 0) - (cameraKeyboardOrbitState.up ? 1 : 0);
-  const speedMultiplier = horizontal !== 0 && vertical !== 0 ? Math.SQRT1_2 : 1;
+  const diagonalMultiplier = horizontal !== 0 && vertical !== 0 ? Math.SQRT1_2 : 1;
+  const speedMultiplier =
+    diagonalMultiplier * getCameraOrbitInputSpeedMultiplier(cameraKeyboardOrbitState.shift);
   const targetThetaVelocity = horizontal * CAMERA_KEYBOARD_ORBIT_SPEED * speedMultiplier;
   const targetPhiVelocity = vertical * CAMERA_KEYBOARD_ORBIT_SPEED * speedMultiplier;
   const responseMs = areCameraKeyboardOrbitKeysDown()
@@ -3106,6 +3122,7 @@ updateCameraPoseReadout(true);
 
 function syncCameraZoomMode() {
   controls.enableZoom = !params.useOpticalZoom;
+  controls.zoomSpeed = CAMERA_ORBIT_ZOOM_SPEED;
   syncCameraFovTargetToCurrent();
 }
 
@@ -3115,12 +3132,30 @@ function normalizedWheelDeltaY(event) {
   return event.deltaY;
 }
 
+function restoreCameraOrbitWheelSpeed() {
+  controls.zoomSpeed = CAMERA_ORBIT_ZOOM_SPEED;
+}
+
+function queueCameraOrbitWheelSpeedRestore() {
+  if (typeof window.queueMicrotask === 'function') {
+    window.queueMicrotask(restoreCameraOrbitWheelSpeed);
+  } else {
+    window.setTimeout(restoreCameraOrbitWheelSpeed, 0);
+  }
+}
+
+function handleCameraOrbitWheelSpeedCapture(event) {
+  if (params.useOpticalZoom) return;
+  controls.zoomSpeed = CAMERA_ORBIT_ZOOM_SPEED * getCameraOrbitInputSpeedMultiplier(event);
+  queueCameraOrbitWheelSpeedRestore();
+}
+
 function handleOpticalZoomWheel(event) {
   if (!params.useOpticalZoom) return;
   event.preventDefault();
   event.stopImmediatePropagation();
 
-  const deltaY = normalizedWheelDeltaY(event);
+  const deltaY = normalizedWheelDeltaY(event) * getCameraOrbitInputSpeedMultiplier(event);
   if (!Number.isFinite(deltaY) || deltaY === 0) return;
 
   const currentFov = Number.isFinite(cameraTargetFovDeg) ? cameraTargetFovDeg : camera.fov;
@@ -3136,6 +3171,7 @@ function handleOpticalZoomWheel(event) {
 }
 
 canvas.addEventListener('wheel', handleOpticalZoomWheel, { capture: true, passive: false });
+canvas.addEventListener('wheel', handleCameraOrbitWheelSpeedCapture, { capture: true, passive: true });
 window.addEventListener('keydown', handleCameraKeyboardOrbitKeydown);
 window.addEventListener('keyup', handleCameraKeyboardOrbitKeyup);
 window.addEventListener('blur', () => {
