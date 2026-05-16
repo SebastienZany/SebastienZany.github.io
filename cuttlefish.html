@@ -77,6 +77,85 @@ select {
   cursor: grabbing;
 }
 
+.start-screen {
+  position: absolute;
+  z-index: 10;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+  opacity: 1;
+  pointer-events: auto;
+  transition: opacity 900ms ease;
+}
+
+.start-screen.is-running {
+  opacity: 0;
+}
+
+.start-screen.is-complete {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.start-screen-status {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.82);
+  font-family: "Syne Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.82rem;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: lowercase;
+}
+
+.start-screen-status.error {
+  max-width: min(520px, calc(100vw - 48px));
+  color: var(--red);
+  line-height: 1.45;
+  text-align: center;
+}
+
+.start-button {
+  appearance: none;
+  min-width: 92px;
+  padding: 10px 18px;
+  border: 1px solid rgba(255, 255, 255, 0.62);
+  border-radius: 0;
+  background: transparent;
+  color: #fff;
+  cursor: pointer;
+  font-family: "Syne Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.82rem;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: lowercase;
+  transition:
+    background-color 160ms ease,
+    color 160ms ease,
+    opacity 420ms ease;
+}
+
+.start-button:hover {
+  border-color: #fff;
+  background: #fff;
+  color: #000;
+}
+
+.start-button:active {
+  transform: none;
+}
+
+.start-button[hidden] {
+  display: none;
+}
+
+.start-button:disabled,
+.start-screen.is-armed .start-button {
+  opacity: 0;
+  pointer-events: none;
+}
+
 .annotation-layer {
   position: absolute;
   inset: 0;
@@ -212,6 +291,223 @@ select {
   background: var(--panel);
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
   backdrop-filter: blur(16px);
+}
+
+.sound-check-panel {
+  position: absolute;
+  z-index: 5;
+  top: 64px;
+  right: 16px;
+  width: min(760px, calc(100vw - 32px));
+  max-height: calc(100vh - 88px);
+  overflow: auto;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(16px);
+}
+
+.sound-check-panel[hidden] {
+  display: none;
+}
+
+#app[data-panels-visible="false"] .panel,
+#app[data-panels-visible="false"] .sound-check-panel {
+  display: none;
+}
+
+.sound-check-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.sound-check-head h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.sound-check-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.sound-check-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 1.15fr) 68px minmax(136px, 0.9fr) 72px minmax(104px, 0.45fr) minmax(104px, 0.45fr);
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 7px;
+  background: rgba(8, 11, 12, 0.42);
+}
+
+.sound-file-label {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 0.74rem;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sound-check-row button {
+  min-width: 0;
+  padding: 0 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sound-volume-cell {
+  display: grid;
+  grid-template-columns: 28px minmax(72px, 1fr) 44px;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.sound-volume-cell span,
+.sound-loop-cell span,
+.sound-time-cell span {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.sound-volume-cell output {
+  color: var(--text);
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.sound-loop-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.sound-loop-cell input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--gold);
+}
+
+.sound-time-cell {
+  display: grid;
+  grid-template-columns: 24px minmax(68px, 1fr);
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.sound-time-cell input,
+.sound-compressor-control input[type="number"] {
+  width: 100%;
+  min-width: 0;
+  min-height: 28px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-strong);
+  color: var(--text);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+.sound-check-row button.is-loading {
+  color: var(--muted);
+}
+
+.sound-check-row button.is-active {
+  border-color: rgba(109, 223, 129, 0.55);
+  color: var(--green);
+}
+
+.sound-compressor-panel {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.sound-compressor-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.sound-compressor-head h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.sound-compressor-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.sound-compressor-toggle input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--gold);
+}
+
+.sound-compressor-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+}
+
+.sound-compressor-control {
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr) 48px;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.sound-compressor-control span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.sound-compressor-control output {
+  color: var(--text);
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
 }
 
 .panel-head {
@@ -507,14 +803,6 @@ input[type="color"] {
   cursor: pointer;
 }
 
-.display-options {
-  display: grid;
-  gap: 8px;
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--line);
-}
-
 .toggle-control {
   display: flex;
   align-items: center;
@@ -617,6 +905,33 @@ input[type="color"] {
   .help-tip > span {
     max-width: 170px;
   }
+
+  .sound-check-panel {
+    top: 58px;
+    right: 10px;
+    width: calc(100vw - 20px);
+    max-height: calc(100vh - 68px);
+    padding: 12px;
+  }
+
+  .sound-check-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sound-file-label,
+  .sound-volume-cell,
+  .sound-check-row button {
+    grid-column: 1 / -1;
+  }
+
+  .sound-loop-cell,
+  .sound-time-cell {
+    justify-content: start;
+  }
+
+  .sound-compressor-grid {
+    grid-template-columns: 1fr;
+  }
 }
     </style>
     <script type="importmap">
@@ -629,23 +944,28 @@ input[type="color"] {
     </script>
   </head>
   <body>
-    <main id="app">
+    <main id="app" data-panels-visible="false">
       <canvas id="sim" aria-label="Slime mold on cuttlefish skin"></canvas>
       <div id="annotationLayer" class="annotation-layer" aria-hidden="true"></div>
+      <section id="startScreen" class="start-screen" aria-label="Start screen">
+        <p id="startScreenStatus" class="start-screen-status">loading...</p>
+        <button id="startButton" class="start-button" type="button" hidden>start</button>
+      </section>
 
-      <section class="panel is-collapsed" aria-label="Simulation controls">
+      <section class="panel" aria-label="Simulation controls" aria-hidden="true">
         <div class="panel-head">
           <div>
             <h1>Slime Mold on Cuttlefish</h1>
             <p id="gpuStatus">loading cuttlefish...</p>
           </div>
           <div class="panel-tools">
-            <button id="collapsePanel" class="icon-button" type="button" aria-expanded="false" title="Show parameters">Show parameters</button>
+            <button id="collapsePanel" class="icon-button" type="button" aria-expanded="true" title="Hide parameters">Hide parameters</button>
+            <button id="soundCheckToggle" type="button" aria-expanded="false" aria-controls="soundCheckPanel" title="Show sound check">Sound Check</button>
             <button id="pause" type="button">Pause</button>
           </div>
         </div>
 
-        <div id="panelBody" class="panel-body" aria-hidden="true">
+        <div id="panelBody" class="panel-body" aria-hidden="false">
           <div class="stats" aria-label="Simulation statistics">
             <div>
               <strong id="agentCount">0</strong>
@@ -806,6 +1126,14 @@ input[type="color"] {
               </label>
               <label class="control-row">
                 <span class="control-copy">
+                  <strong>Food max</strong>
+                  <span class="help-tip" tabindex="0" aria-label="Maximum value of the slime food field. This value maps to maximum film thickness.">?<span role="tooltip">Maximum value of the slime food field. This value maps to maximum film thickness.</span></span>
+                </span>
+                <input id="foodClamp" type="range" min="0.05" max="1.5" step="0.01" value="0.5" data-digits="2">
+                <output for="foodClamp"></output>
+              </label>
+              <label class="control-row">
+                <span class="control-copy">
                   <strong>Oat food</strong>
                   <span class="help-tip" tabindex="0" aria-label="Food supplied by each oat attractor.">?<span role="tooltip">Food supplied by each oat attractor.</span></span>
                 </span>
@@ -826,8 +1154,8 @@ input[type="color"] {
               </label>
             </section>
 
-            <section class="control-group" aria-labelledby="renderControls">
-              <h2 id="renderControls">Render</h2>
+            <section class="control-group" aria-labelledby="surfaceControls">
+              <h2 id="surfaceControls">Surface</h2>
 
               <label class="control-row">
                 <span class="control-copy">
@@ -866,7 +1194,7 @@ input[type="color"] {
                   <strong>Iridescence</strong>
                   <span class="help-tip" tabindex="0" aria-label="Strength of the nacre thin-film color shift.">?<span role="tooltip">Strength of the nacre thin-film color shift.</span></span>
                 </span>
-                <input id="iridescenceStrength" type="range" min="0" max="1" step="0.01" value="0.85" data-scale="100" data-suffix="%" data-digits="0">
+                <input id="iridescenceStrength" type="range" min="0" max="2" step="0.01" value="0.8" data-scale="100" data-suffix="%" data-digits="0">
                 <output for="iridescenceStrength"></output>
               </label>
               <label class="control-row">
@@ -893,9 +1221,57 @@ input[type="color"] {
                 <input id="iridescenceThickness" type="range" min="90" max="760" step="5" value="600" data-suffix="nm" data-digits="0">
                 <output for="iridescenceThickness"></output>
               </label>
+              <label class="control-row">
+                <span class="control-copy">
+                  <strong>Film curve</strong>
+                  <span class="help-tip" tabindex="0" aria-label="Nonlinearity mapping local slime amount to film thickness. Lower rises slower; higher saturates faster.">?<span role="tooltip">Nonlinearity mapping local slime amount to film thickness. Lower rises slower; higher saturates faster.</span></span>
+                </span>
+                <input id="filmThicknessCurve" type="range" min="0.25" max="12" step="0.05" value="4" data-digits="2">
+                <output for="filmThicknessCurve"></output>
+              </label>
               <label class="toggle-control">
                 <span>Film follows slime height</span>
                 <input id="filmFollowsSlimeHeight" type="checkbox" checked>
+              </label>
+              <label class="toggle-control">
+                <span>Gold wafer film</span>
+                <input id="useGoldWaferFilm" type="checkbox">
+              </label>
+              <label class="toggle-control">
+                <span>Gold wafer body</span>
+                <input id="useGoldWaferBody" type="checkbox" checked>
+              </label>
+              <label class="control-row">
+                <span class="control-copy">
+                  <strong>Gold fade</strong>
+                  <span class="help-tip" tabindex="0" aria-label="Low-end peak-food range for the gold fade-in. At 1%, it eases from 0% to 1%, then stays fully on.">?<span role="tooltip">Low-end peak-food range for the gold fade-in. At 1%, it eases from 0% to 1%, then stays fully on.</span></span>
+                </span>
+                <input id="goldBodyFade" type="range" min="0.01" max="1" step="0.01" value="0.15" data-scale="100" data-suffix="%" data-digits="0">
+                <output for="goldBodyFade"></output>
+              </label>
+              <label class="control-row">
+                <span class="control-copy">
+                  <strong>Roughness</strong>
+                  <span class="help-tip" tabindex="0" aria-label="Surface roughness for the gold body material. Higher values soften reflections.">?<span role="tooltip">Surface roughness for the gold body material. Higher values soften reflections.</span></span>
+                </span>
+                <input id="goldBodyRoughness" type="range" min="0.18" max="1" step="0.01" value="0.33" data-scale="100" data-suffix="%" data-digits="0">
+                <output for="goldBodyRoughness"></output>
+              </label>
+              <label class="control-row">
+                <span class="control-copy">
+                  <strong>Reflectivity</strong>
+                  <span class="help-tip" tabindex="0" aria-label="Reflection strength for the gold body material.">?<span role="tooltip">Reflection strength for the gold body material.</span></span>
+                </span>
+                <input id="goldBodyReflectivity" type="range" min="0" max="1" step="0.01" value="1" data-scale="100" data-suffix="%" data-digits="0">
+                <output for="goldBodyReflectivity"></output>
+              </label>
+              <label class="control-row">
+                <span class="control-copy">
+                  <strong>Gold base</strong>
+                  <span class="help-tip" tabindex="0" aria-label="Base color for the gold-wafer body material under the thin-film reflections.">?<span role="tooltip">Base color for the gold-wafer body material under the thin-film reflections.</span></span>
+                </span>
+                <input id="goldBodyColor" type="color" value="#8a889e">
+                <output for="goldBodyColor"></output>
               </label>
               <label class="control-row">
                 <span class="control-copy">
@@ -905,12 +1281,111 @@ input[type="color"] {
                 <input id="lightBrightness" type="range" min="0" max="1" step="0.01" value="1" data-scale="100" data-suffix="%" data-digits="0">
                 <output for="lightBrightness"></output>
               </label>
+              <label class="toggle-control">
+                <span>Extra lights</span>
+                <input id="useIcosaFaceLights" type="checkbox">
+              </label>
+            </section>
+
+            <section class="control-group" aria-labelledby="environmentControls">
+              <h2 id="environmentControls">Environment</h2>
+
+              <label class="toggle-control">
+                <span>Environment</span>
+                <input id="environmentEnabled" type="checkbox">
+              </label>
+              <label class="control-row">
+                <span class="control-copy">
+                  <strong>Sky drift</strong>
+                  <span class="help-tip" tabindex="0" aria-label="Animation speed for the procedural storm sky.">?<span role="tooltip">Animation speed for the procedural storm sky.</span></span>
+                </span>
+                <input id="backdropAnimationSpeed" type="range" min="0" max="1" step="0.01" value="0.12" data-scale="100" data-suffix="%" data-digits="0">
+                <output for="backdropAnimationSpeed"></output>
+              </label>
+              <label class="control-row">
+                <span class="control-copy">
+                  <strong>Mirror tint</strong>
+                  <span class="help-tip" tabindex="0" aria-label="Color blended into the Reflector lake tint.">?<span role="tooltip">Color blended into the Reflector lake tint.</span></span>
+                </span>
+                <input id="mirrorTint" type="color" value="#7f7f7f">
+                <output for="mirrorTint"></output>
+              </label>
+              <label class="control-row">
+                <span class="control-copy">
+                  <strong>Tint strength</strong>
+                  <span class="help-tip" tabindex="0" aria-label="Blend amount from neutral mirror response to the selected lake tint.">?<span role="tooltip">Blend amount from neutral mirror response to the selected lake tint.</span></span>
+                </span>
+                <input id="mirrorTintStrength" type="range" min="0" max="1" step="0.01" value="0" data-scale="100" data-suffix="%" data-digits="0">
+                <output for="mirrorTintStrength"></output>
+              </label>
+              <label class="toggle-control">
+                <span>Mirror lake</span>
+                <input id="showLakeMirror" type="checkbox" checked>
+              </label>
+            </section>
+
+            <section class="control-group" aria-labelledby="glassControls">
+              <h2 id="glassControls">Glass</h2>
+
+              <label class="toggle-control">
+                <span>Glass shading</span>
+                <input id="glassEnabled" type="checkbox">
+              </label>
+              <label class="control-row">
+                <span class="control-copy">
+                  <strong>Glass</strong>
+                  <span class="help-tip" tabindex="0" aria-label="Blend from legacy slime-only shading to environment glass under the slime.">?<span role="tooltip">Blend from legacy slime-only shading to environment glass under the slime.</span></span>
+                </span>
+                <input id="glassStrength" type="range" min="0" max="1" step="0.01" value="1" data-scale="100" data-suffix="%" data-digits="0">
+                <output for="glassStrength"></output>
+              </label>
+              <label class="control-row">
+                <span class="control-copy">
+                  <strong>Glass bend</strong>
+                  <span class="help-tip" tabindex="0" aria-label="Static normal-dependent bend for the environment sample.">?<span role="tooltip">Static normal-dependent bend for the environment sample.</span></span>
+                </span>
+                <input id="glassBend" type="range" min="0" max="1.5" step="0.01" value="0.55" data-digits="2">
+                <output for="glassBend"></output>
+              </label>
+              <label class="control-row">
+                <span class="control-copy">
+                  <strong>Glass split</strong>
+                  <span class="help-tip" tabindex="0" aria-label="Chromatic separation for bent glass samples.">?<span role="tooltip">Chromatic separation for bent glass samples.</span></span>
+                </span>
+                <input id="glassAberration" type="range" min="0" max="1" step="0.01" value="0.18" data-scale="100" data-suffix="%" data-digits="0">
+                <output for="glassAberration"></output>
+              </label>
+              <label class="control-row">
+                <span class="control-copy">
+                  <strong>Glass rim</strong>
+                  <span class="help-tip" tabindex="0" aria-label="Fresnel edge strength for glass tint and highlights.">?<span role="tooltip">Fresnel edge strength for glass tint and highlights.</span></span>
+                </span>
+                <input id="glassFresnelStrength" type="range" min="0" max="1.5" step="0.01" value="0.7" data-digits="2">
+                <output for="glassFresnelStrength"></output>
+              </label>
+              <label class="control-row">
+                <span class="control-copy">
+                  <strong>Glass tint</strong>
+                  <span class="help-tip" tabindex="0" aria-label="Rim tint used only when glass rim strength is above zero.">?<span role="tooltip">Rim tint used only when glass rim strength is above zero.</span></span>
+                </span>
+                <input id="glassTint" type="color" value="#b8ecff">
+                <output for="glassTint"></output>
+              </label>
+            </section>
+
+            <section class="control-group" aria-labelledby="storyControls">
+              <h2 id="storyControls">Story Labels</h2>
+
+              <label class="toggle-control">
+                <span>Story boxes</span>
+                <input id="storyBoxesEnabled" type="checkbox" checked>
+              </label>
               <label class="control-row">
                 <span class="control-copy">
                   <strong>Tail length</strong>
-                  <span class="help-tip" tabindex="0" aria-label="Distance from each oat to its story textbox along the surface normal.">?<span role="tooltip">Distance from each oat to its story textbox along the surface normal.</span></span>
+                  <span class="help-tip" tabindex="0" aria-label="Screen-space distance from each oat to its story textbox.">?<span role="tooltip">Screen-space distance from each oat to its story textbox.</span></span>
                 </span>
-                <input id="observationTailLength" type="range" min="0" max="0.9" step="0.01" value="0.07" data-scale="100" data-suffix="%" data-digits="0">
+                <input id="observationTailLength" type="range" min="0" max="0.9" step="0.01" value="0" data-scale="100" data-suffix="%" data-digits="0">
                 <output for="observationTailLength"></output>
               </label>
               <label class="control-row">
@@ -971,6 +1446,27 @@ input[type="color"] {
               </label>
             </section>
 
+            <section class="control-group" aria-labelledby="visibilityControls">
+              <h2 id="visibilityControls">Visibility</h2>
+
+              <label class="toggle-control">
+                <span>Oat glow</span>
+                <input id="showOats" type="checkbox" checked>
+              </label>
+              <label class="toggle-control">
+                <span>Agent dots</span>
+                <input id="showAgents" type="checkbox">
+              </label>
+              <label class="toggle-control">
+                <span>Mesh outline</span>
+                <input id="meshOutline" type="checkbox">
+              </label>
+              <label class="toggle-control">
+                <span>Wireframe</span>
+                <input id="showWireframe" type="checkbox">
+              </label>
+            </section>
+
             <section class="control-group" aria-labelledby="debugControls">
               <h2 id="debugControls">Debug</h2>
 
@@ -989,10 +1485,6 @@ input[type="color"] {
               <label class="toggle-control">
                 <span>Optical zoom</span>
                 <input id="useOpticalZoom" type="checkbox">
-              </label>
-              <label class="toggle-control">
-                <span>Show wireframe</span>
-                <input id="showWireframe" type="checkbox">
               </label>
               <label class="control-row">
                 <span class="control-copy">
@@ -1048,21 +1540,6 @@ input[type="color"] {
             </section>
           </div>
 
-          <div class="display-options" aria-label="Display options">
-            <label class="toggle-control">
-              <span>Oat glow</span>
-              <input id="showOats" type="checkbox" checked>
-            </label>
-            <label class="toggle-control">
-              <span>Agent dots</span>
-              <input id="showAgents" type="checkbox">
-            </label>
-            <label class="toggle-control">
-              <span>Mesh outline</span>
-              <input id="meshOutline" type="checkbox">
-            </label>
-          </div>
-
           <div class="actions">
             <button id="reset" type="button" data-testid="reset-button">Reset</button>
             <button id="resetCamera" type="button" data-testid="reset-camera-button">Reset camera</button>
@@ -1071,12 +1548,32 @@ input[type="color"] {
           </div>
         </div>
       </section>
+
+      <section id="soundCheckPanel" class="sound-check-panel" aria-label="Sound check" aria-hidden="true" hidden>
+        <div class="sound-check-head">
+          <h2>Sound Check</h2>
+          <button id="soundCheckClose" class="icon-button" type="button" title="Hide sound check">Hide</button>
+        </div>
+        <div id="soundCheckGrid" class="sound-check-grid"></div>
+        <section class="sound-compressor-panel" aria-label="Dynamics compressor">
+          <div class="sound-compressor-head">
+            <h3>Dynamics Compressor</h3>
+            <label class="sound-compressor-toggle">
+              <span>Enable</span>
+              <input id="soundCompressorEnabled" type="checkbox">
+            </label>
+          </div>
+          <div id="soundCompressorGrid" class="sound-compressor-grid"></div>
+        </section>
+      </section>
     </main>
-    <script type="module">
+<script type="module">
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { Reflector } from 'three/addons/objects/Reflector.js';
 
+const appEl = document.getElementById('app');
 const canvas = document.getElementById('sim');
 const statusEl = document.getElementById('gpuStatus');
 const agentCountEl = document.getElementById('agentCount');
@@ -1088,6 +1585,10 @@ const agentGrowthCanvas = document.getElementById('agentGrowthChart');
 const agentAccelerationCanvas = document.getElementById('agentAccelerationChart');
 const agentHistoryRangeEl = document.getElementById('agentHistoryRange');
 const annotationLayer = document.getElementById('annotationLayer');
+const startScreen = document.getElementById('startScreen');
+const startScreenStatus = document.getElementById('startScreenStatus');
+const startButton = document.getElementById('startButton');
+let startScreenReady = false;
 const cameraAzimuthEl = document.getElementById('cameraAzimuth');
 const cameraElevationEl = document.getElementById('cameraElevation');
 const cameraPolarEl = document.getElementById('cameraPolar');
@@ -1096,6 +1597,13 @@ const cameraFovEl = document.getElementById('cameraFov');
 const cameraTargetEl = document.getElementById('cameraTarget');
 const cameraPoseCommandEl = document.getElementById('cameraPoseCommand');
 const copyCameraPoseButton = document.getElementById('copyCameraPose');
+const soundCheckToggleButton = document.getElementById('soundCheckToggle');
+const soundCheckPanel = document.getElementById('soundCheckPanel');
+const soundCheckCloseButton = document.getElementById('soundCheckClose');
+const soundCheckGrid = document.getElementById('soundCheckGrid');
+const soundCompressorEnabledInput = document.getElementById('soundCompressorEnabled');
+const soundCompressorGrid = document.getElementById('soundCompressorGrid');
+let uiPanelsVisible = appEl?.dataset.panelsVisible === 'true';
 
 const FIELD_SIZE = 1024;
 const AGENT_SIDE = 512;
@@ -1104,7 +1612,7 @@ const AGENT_RECORD_STRIDE = 3; // updated parent plus two child proposal slots
 const AGENT_CANDIDATE_HEIGHT = AGENT_SIDE * AGENT_RECORD_STRIDE;
 const AGENT_CANDIDATE_COUNT = AGENT_CAPACITY * AGENT_RECORD_STRIDE;
 const AGENT_SCAN_PASS_COUNT = Math.ceil(Math.log2(AGENT_CANDIDATE_COUNT));
-const INITIAL_AGENTS = 512;
+const INITIAL_AGENTS = 4096;
 const MAX_OATS = 64;
 const WORLD_LINEAR_SCALE = 4.0;
 const SURFACE_WORLD_SIZE = 2.4 * WORLD_LINEAR_SCALE;
@@ -1118,9 +1626,70 @@ const OAT_EPSILON = 0.001;
 const OAT_SUPPORT_SIGMAS = Math.sqrt(-2 * Math.log(OAT_EPSILON));
 const INITIAL_AGENT_SPAWN_SIGMA = DEFAULT_OAT_RADIUS * 0.45;
 const GLB_PATH = 'vceyxz-xxfsxx.glb';
+const GOLD_WAFER_LOOKUP_PATH = 'material%20data/thicker_au_rgb_thickness_angle_tensor.json';
+const GOLD_WAFER_BODY_ENV_EQUIRECT_WIDTH = 512;
+const GOLD_WAFER_BODY_ENV_EQUIRECT_HEIGHT = 256;
+const INITIAL_OAT_POWER_MULTIPLIER = 4;
+const ENV_AUDIO_PATH = 'shen-soundpack/wav/env.wav';
+const ENV_AUDIO_FALLBACK_PATH = 'shen-soundpack/wav/env-under-25mb.wav';
+const ENV_AUDIO_CROSSFADE_SECONDS = 2.5;
+const ENV_AUDIO_SCHEDULE_LOOKAHEAD_SECONDS = 12;
+const ENV_AUDIO_SCHEDULE_INTERVAL_MS = 1000;
+const ENV_AUDIO_START_DELAY_SECONDS = 0.05;
+const SOUND_VOLUME_RAMP_SECONDS = 0.035;
+const SOUND_FADE_SECONDS_MAX = 30;
+const SOUND_DEFAULT_FADE_IN_SECONDS = 0;
+const SOUND_DEFAULT_FADE_OUT_SECONDS = 0.08;
+const SOUND_COMPRESSOR_DEFAULTS = Object.freeze({
+  enabled: false,
+  threshold: -24,
+  knee: 30,
+  ratio: 12,
+  attack: 0.003,
+  release: 0.25,
+});
+const SOUND_COMPRESSOR_CONTROLS = Object.freeze([
+  { key: 'threshold', label: 'Threshold', min: -100, max: 0, step: 1, suffix: 'dB', digits: 0 },
+  { key: 'knee', label: 'Knee', min: 0, max: 40, step: 1, suffix: 'dB', digits: 0 },
+  { key: 'ratio', label: 'Ratio', min: 1, max: 20, step: 0.1, suffix: ':1', digits: 1 },
+  { key: 'attack', label: 'Attack', min: 0, max: 1, step: 0.001, suffix: 's', digits: 3 },
+  { key: 'release', label: 'Release', min: 0, max: 1, step: 0.01, suffix: 's', digits: 2 },
+]);
+const INTRO_OAT_SPRITE_DELAY_MS = 5500;
+const INTRO_OAT_SEQUENCE_MS = 10000;
+const INITIAL_AGENT_SEED_DURATION_MS = 3460;
+const INITIAL_AGENT_SEED_SOUND_LEAD_MS = 1000;
+const INTRO_OAT_LAND_AT = 0.68;
+const INTRO_OAT_BRIGHTEN_END = 0.84;
+const INTRO_OAT_START_SCREEN_Y = 1.08;
+const SOUND_CHECK_CLIPS = Object.freeze([
+  { id: 'intro', path: 'shen-soundpack/wav/intro.wav', loop: false, maxGain: 2.1809 },
+  { id: 'env', path: ENV_AUDIO_PATH, loop: true, gain: 2, maxGain: 15.5816, fadeOutSeconds: ENV_AUDIO_CROSSFADE_SECONDS },
+  { id: 'slime-appear', path: 'shen-soundpack/wav/slime-appear.wav', loop: false, maxGain: 3.4979 },
+  { id: 'slime-appear-stretch', path: 'shen-soundpack/wav/slime-appear-stretch.wav', loop: false, gain: 2, maxGain: 4.1431 },
+  { id: 'slime-tumble', path: 'shen-soundpack/wav/slime-tumble.wav', loop: false, maxGain: 1.9959 },
+  { id: 'slime-tumble-complete', path: 'shen-soundpack/wav/slime-tumble-complete.wav', loop: false, maxGain: 3.0304 },
+  { id: 'slime-fuse', path: 'shen-soundpack/wav/slime-fuse.wav', loop: false, maxGain: 1.7083 },
+  { id: 'cuttlefish-reveal', path: 'shen-soundpack/wav/cuttlefish-reveal.wav', loop: false, maxGain: 2.2347 },
+  { id: 'cuttlefish-camouflage', path: 'shen-soundpack/wav/cuttlefish-camouflage.wav', loop: false, maxGain: 1.6634 },
+  { id: 'text-reveal', path: 'shen-soundpack/wav/text-reveal.wav', loop: false, maxGain: 5.2462 },
+  { id: 'game-complete', path: 'shen-soundpack/wav/game-complete.wav', loop: false, maxGain: 2.4264 },
+]);
 const STATS_UPDATE_INTERVAL_MS = 650;
+const STATS_READBACK_RESET_COOLDOWN_MS = 1200;
+const STATS_READBACK_MIN_FPS = 24;
+const STATS_READBACK_MAX_DT = 2.15;
 const AGENT_HISTORY_SAMPLE_LIMIT = 180;
 const SLIME_COVERAGE_THRESHOLD = 0.006;
+const SKY_EQUIRECT_WIDTH = 1024;
+const SKY_EQUIRECT_HEIGHT = 512;
+const SKY_CUBE_SIZE = 512;
+const SKY_UPDATE_FPS = 12;
+const SKY_UPDATE_INTERVAL_MS = 1000 / SKY_UPDATE_FPS;
+const MIRROR_REFLECTION_SCALE = 0.5;
+const MIRROR_Y_EPSILON = 0.015 * WORLD_LINEAR_SCALE;
+const LAKE_CAMERA_FAR = 300 * WORLD_LINEAR_SCALE;
+const LAKE_MIRROR_SIZE = LAKE_CAMERA_FAR * 2.5;
 const FRAME_DT_CLAMP = 2.2;
 const MAX_SIMULATION_STEPS = 8;
 const SEAM_REDIRECT_HALO_TEXELS = 1;
@@ -1161,8 +1730,10 @@ const PERFORMANCE_MODES = Object.freeze({
 });
 const PERFORMANCE_MODE_NAMES = Object.freeze(Object.keys(PERFORMANCE_MODES));
 
-// Back-center mantle UV, tuned from a live raycast click on the loaded cuttlefish.
-const INITIAL_OAT_UV = { x: 0.65, y: 0.1 };
+// Fallback only; startup replaces this with the closest mesh point to the camera rotation center.
+const FALLBACK_INITIAL_OAT_UV = { x: 0.65, y: 0.1 };
+let initialOatUv = { ...FALLBACK_INITIAL_OAT_UV };
+let initialOatSurfaceHit = null;
 
 const BASE_SIMULATION_PARAMS = Object.freeze({
   uptakeRate: 0.035,
@@ -1187,7 +1758,7 @@ const BASE_SIMULATION_PARAMS = Object.freeze({
   fieldDiffusion: 0.13,
   fieldDecay: 0.991,
   deltaScale: 1.35,
-  foodClamp: 0.45,
+  foodClamp: 0.5,
   oatPower: DEFAULT_OAT_POWER,
   oatSupplyRate: 0.5,
   useOatRationing: false,
@@ -1287,15 +1858,33 @@ const BASE_RENDER_DISPLAY_PARAMS = Object.freeze({
   meshOutlineEnabled: false,
   surfaceHeight: 1,
   surfaceBump: 10,
-  iridescenceStrength: 0.85,
+  iridescenceStrength: 0.8,
   slimeBaseColor: '#ffffff',
   iridescenceMinThickness: 370,
   iridescenceThickness: 600,
+  filmThicknessCurve: 4,
   filmFollowsSlimeHeight: true,
+  useGoldWaferFilm: false,
+  useGoldWaferBody: true,
+  goldBodyFade: 0.15,
+  goldBodyRoughness: 0.33,
+  goldBodyReflectivity: 1,
+  goldBodyColor: '#8a889e',
   lightBrightness: 1,
+  useIcosaFaceLights: false,
+  environmentEnabled: false,
+  backdropAnimationSpeed: 0.12,
+  glassEnabled: false,
+  glassStrength: 1,
+  glassBend: 0.55,
+  glassAberration: 0.18,
+  glassFresnelStrength: 0.7,
+  glassTint: '#b8ecff',
+  mirrorTint: '#7f7f7f',
+  mirrorTintStrength: 0,
   spatialSmoothing: 1,
   temporalSmoothing: 0.85,
-  observationTailLength: 0.07,
+  observationTailLength: 0,
   observationStrokeOpacity: 0,
   observationCornerRadius: 24,
   observationEdgeFeather: 24,
@@ -1303,7 +1892,9 @@ const BASE_RENDER_DISPLAY_PARAMS = Object.freeze({
   observationTintColor: '#081018',
   observationTintOpacity: 0.33,
   observationSlimeTriggerThreshold: 0.05,
+  storyBoxesEnabled: true,
   showWireframe: false,
+  showLakeMirror: true,
 });
 
 function makeRenderDisplayPreset(id, label, note, overrides = {}) {
@@ -1331,7 +1922,7 @@ const RENDER_DISPLAY_PRESETS = Object.freeze([
       temporalSmoothing: 0.9,
       surfaceHeight: 1,
       surfaceBump: 5,
-      iridescenceStrength: 0.5,
+      iridescenceStrength: 0.8,
       slimeBaseColor: '#e0e0e0',
       iridescenceMinThickness: 220,
       iridescenceThickness: 760,
@@ -1905,10 +2496,11 @@ const renderer = new THREE.WebGLRenderer({
   canvas,
   antialias: false,
   alpha: false,
-  preserveDrawingBuffer: true,
+  preserveDrawingBuffer: false,
   powerPreference: 'high-performance',
 });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+// Keep the custom sky, glass shader, and Reflector background in one linear output path.
 renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
 renderer.autoClear = false;
 
@@ -1928,26 +2520,61 @@ if (!colorBufferFloat || !floatBlend) {
 
 const fieldFilter = linearFloat ? THREE.LinearFilter : THREE.NearestFilter;
 
+const skyEquirectRT = new THREE.WebGLRenderTarget(SKY_EQUIRECT_WIDTH, SKY_EQUIRECT_HEIGHT, {
+  depthBuffer: false,
+  stencilBuffer: false,
+  minFilter: THREE.LinearFilter,
+  magFilter: THREE.LinearFilter,
+  format: THREE.RGBAFormat,
+  type: colorBufferFloat ? THREE.HalfFloatType : THREE.UnsignedByteType,
+});
+skyEquirectRT.texture.generateMipmaps = false;
+skyEquirectRT.texture.colorSpace = THREE.NoColorSpace;
+skyEquirectRT.texture.mapping = THREE.EquirectangularReflectionMapping;
+skyEquirectRT.texture.wrapS = THREE.RepeatWrapping;
+skyEquirectRT.texture.wrapT = THREE.ClampToEdgeWrapping;
+skyEquirectRT.texture.name = 'storm-sky-equirect';
+
+const skyCubeRT = new THREE.WebGLCubeRenderTarget(SKY_CUBE_SIZE, {
+  depthBuffer: false,
+  stencilBuffer: false,
+  minFilter: THREE.LinearFilter,
+  magFilter: THREE.LinearFilter,
+  format: THREE.RGBAFormat,
+  type: colorBufferFloat ? THREE.HalfFloatType : THREE.UnsignedByteType,
+  generateMipmaps: false,
+  colorSpace: THREE.NoColorSpace,
+});
+skyCubeRT.texture.generateMipmaps = false;
+skyCubeRT.texture.colorSpace = THREE.NoColorSpace;
+skyCubeRT.texture.mapping = THREE.CubeReflectionMapping;
+skyCubeRT.texture.name = 'storm-sky-cube';
+
 // === scene / camera / controls / lights ===
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0.004, 0.006, 0.005);
+const flatEnvironmentBackgroundColor = new THREE.Color(0.004, 0.006, 0.005);
+scene.background = skyCubeRT.texture;
 
 const camera = new THREE.PerspectiveCamera(
   THREE.MathUtils.radToDeg(SURFACE_FOV),
   canvas.clientWidth / Math.max(canvas.clientHeight, 1),
   0.04,
-  12 * WORLD_LINEAR_SCALE,
+  LAKE_CAMERA_FAR,
 );
+camera.far = LAKE_CAMERA_FAR;
+camera.updateProjectionMatrix();
 
-// Default side view.
+// Default intro view.
 const initialCameraPose = (() => {
-  const distance = 2.95 * WORLD_LINEAR_SCALE;
   return {
-    position: new THREE.Vector3(-distance, 0.28 * WORLD_LINEAR_SCALE, 0),
+    position: new THREE.Vector3(-8.748944, 5.21918, -6.058922),
     target: new THREE.Vector3(0, 0, 0),
+    fovDeg: 42.8571,
   };
 })();
 camera.position.copy(initialCameraPose.position);
+camera.fov = initialCameraPose.fovDeg;
+camera.updateProjectionMatrix();
 camera.lookAt(initialCameraPose.target);
 
 const controls = new OrbitControls(camera, canvas);
@@ -2155,7 +2782,19 @@ function handleOpticalZoomWheel(event) {
 
 canvas.addEventListener('wheel', handleOpticalZoomWheel, { capture: true, passive: false });
 
+const ICOSA_VERTEX_LIGHT_COUNT = 12;
+const ICOSA_FACE_LIGHT_COUNT = 20;
+const ICOSA_LIGHT_COUNT = ICOSA_VERTEX_LIGHT_COUNT + ICOSA_FACE_LIGHT_COUNT;
 const ICOSA_LIGHT_RADIUS = SURFACE_WORLD_SIZE * 1.85;
+
+function getActiveIcosaLightCount(settings = params) {
+  return settings.useIcosaFaceLights === false ? ICOSA_VERTEX_LIGHT_COUNT : ICOSA_LIGHT_COUNT;
+}
+
+function getActiveIcosaLightRadianceScale(settings = params) {
+  return ICOSA_VERTEX_LIGHT_COUNT / getActiveIcosaLightCount(settings);
+}
+
 function makeIcosahedronLightPositions() {
   const phi = (1 + Math.sqrt(5)) * 0.5;
   const vertices = [
@@ -2163,11 +2802,35 @@ function makeIcosahedronLightPositions() {
     [1, phi, 0], [-1, phi, 0], [1, -phi, 0], [-1, -phi, 0],
     [phi, 0, 1], [-phi, 0, 1], [phi, 0, -1], [-phi, 0, -1],
   ];
-  return vertices.map(([x, y, z]) =>
-    new THREE.Vector3(x, y, z).normalize().multiplyScalar(ICOSA_LIGHT_RADIUS),
+  const rawVertices = vertices.map(([x, y, z]) => new THREE.Vector3(x, y, z));
+  const vertexPositions = rawVertices.map((position) =>
+    position.clone().normalize().multiplyScalar(ICOSA_LIGHT_RADIUS),
   );
+  const faceIndices = [
+    [0, 1, 8], [0, 1, 9], [0, 4, 5], [0, 4, 8],
+    [0, 5, 9], [1, 6, 7], [1, 6, 8], [1, 7, 9],
+    [2, 3, 10], [2, 3, 11], [2, 4, 5], [2, 4, 10],
+    [2, 5, 11], [3, 6, 7], [3, 6, 10], [3, 7, 11],
+    [4, 8, 10], [5, 9, 11], [6, 8, 10], [7, 9, 11],
+  ];
+  const faceCenterPositions = faceIndices.map(([a, b, c]) =>
+    vertexPositions[a]
+      .clone()
+      .add(vertexPositions[b])
+      .add(vertexPositions[c])
+      .multiplyScalar(1 / 3),
+  );
+  return [
+    ...vertexPositions,
+    ...faceCenterPositions,
+  ];
 }
 const icosahedronLightPositions = makeIcosahedronLightPositions();
+if (icosahedronLightPositions.length !== ICOSA_LIGHT_COUNT) {
+  console.warn(
+    `Expected ${ICOSA_LIGHT_COUNT} icosahedron lights, got ${icosahedronLightPositions.length}.`,
+  );
+}
 
 // === full-screen pass infra ===
 const quadCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
@@ -2180,6 +2843,96 @@ function runFullscreenPass(material, target) {
   quadMesh.material = material;
   renderer.setRenderTarget(target);
   renderer.render(quadScene, quadCamera);
+}
+
+function getMirrorRenderTargetSize() {
+  return {
+    width: Math.max(1, Math.floor(canvas.width * MIRROR_REFLECTION_SCALE)),
+    height: Math.max(1, Math.floor(canvas.height * MIRROR_REFLECTION_SCALE)),
+  };
+}
+
+function resizeReflectorTarget() {
+  if (!lakeMirror?.isReflector) return;
+  const rt = lakeMirror.getRenderTarget?.() ?? lakeMirror.renderTarget ?? lakeMirror.userData?.renderTarget;
+  if (!rt) return;
+  const { width, height } = getMirrorRenderTargetSize();
+  if (rt.width !== width || rt.height !== height) rt.setSize(width, height);
+}
+
+function isEnvironmentEnabled() {
+  return params.environmentEnabled !== false;
+}
+
+function isGlassEnabled() {
+  return params.glassEnabled !== false && isEnvironmentEnabled();
+}
+
+function syncLakeMirrorVisibility() {
+  if (lakeMirror) lakeMirror.visible = isEnvironmentEnabled() && !!params.showLakeMirror;
+}
+
+const MIRROR_NEUTRAL_COLOR = new THREE.Color(0x7f7f7f);
+const mirrorTintTargetColor = new THREE.Color();
+const mirrorTintResolvedColor = new THREE.Color();
+
+function getLakeMirrorTintColor() {
+  const strength = THREE.MathUtils.clamp(Number(params.mirrorTintStrength ?? 0), 0, 1);
+  mirrorTintTargetColor.set(params.mirrorTint ?? '#7f7f7f');
+  return mirrorTintResolvedColor.copy(MIRROR_NEUTRAL_COLOR).lerp(mirrorTintTargetColor, strength);
+}
+
+function syncLakeMirrorTint() {
+  if (!lakeMirror?.material?.uniforms?.color?.value) return;
+  lakeMirror.material.uniforms.color.value.copy(getLakeMirrorTintColor());
+}
+
+function syncGlassMaterialMode() {
+  if (goldWaferBodyMaterial) {
+    syncGoldWaferBodyMaterialUniforms();
+    syncGoldWaferBodyMode();
+  }
+  if (!slimeMaterial) return;
+  const enabled = isGlassEnabled();
+  const value = enabled ? 1 : 0;
+  if (slimeMaterial.defines?.GLASS_ENABLED === value) return;
+  slimeMaterial.defines = { ...(slimeMaterial.defines ?? {}), GLASS_ENABLED: value };
+  slimeMaterial.needsUpdate = true;
+}
+
+function syncEnvironmentEnabled({ forceSky = false } = {}) {
+  if (isEnvironmentEnabled()) {
+    scene.background = skyCubeRT.texture;
+    if (forceSky) updateStormSkyTexture(performance.now(), { force: true });
+  } else {
+    scene.background = flatEnvironmentBackgroundColor;
+  }
+  syncLakeMirrorVisibility();
+  syncGlassMaterialMode();
+}
+
+function createLakeMirror(bounds) {
+  if (!bounds) return null;
+  const lakeY = bounds.min.y - MIRROR_Y_EPSILON;
+  const { width, height } = getMirrorRenderTargetSize();
+  const geometry = new THREE.PlaneGeometry(LAKE_MIRROR_SIZE, LAKE_MIRROR_SIZE);
+  lakeMirror = new Reflector(geometry, {
+    clipBias: 0.003,
+    textureWidth: width,
+    textureHeight: height,
+    color: getLakeMirrorTintColor(),
+    multisample: 0,
+  });
+  lakeMirror.name = 'reflector-lake';
+  lakeMirror.rotation.x = -Math.PI * 0.5;
+  lakeMirror.position.set(controls.target.x, lakeY, controls.target.z);
+  lakeMirror.frustumCulled = false;
+  lakeMirror.renderOrder = -900;
+  scene.add(lakeMirror);
+  syncLakeMirrorVisibility();
+  syncLakeMirrorTint();
+  resizeReflectorTarget();
+  return lakeMirror;
 }
 
 // === RT pairs ===
@@ -2313,6 +3066,7 @@ class RTPair {
 }
 
 const agentRT = new RTPair(makeAgentRT);
+const agentSeedRT = makeAgentRT();
 const agentParentNextRT = makeAgentRT();
 const agentCandidateRT = makeAgentCandidateRT();
 const agentPrefixRT = new RTPair(makeAgentCandidateRT);
@@ -2321,6 +3075,35 @@ const fieldSampleViewRT = makeSampleViewFieldRT();
 const renderRT = new RTPair(makeCanonicalFieldRT);
 const renderSampleViewRT = new RTPair(makeSampleViewFieldRT);
 const renderScratchRT = makeSampleViewFieldRT();
+let goldWaferBodyMaxFoodRT = null;
+let goldWaferBodyMaxFoodInitialized = false;
+let goldWaferBodyMaxFoodNeedsUpdate = true;
+let goldWaferBodyMaterial = null;
+let goldWaferBodyMesh = null;
+let goldWaferBodyIcoEnvMaterial = null;
+let goldWaferBodyIcoEnvRT = null;
+let goldWaferBodyIcoEnvPmrem = null;
+function makeGoldWaferBodyZeroFoodTexture() {
+  const texture = new THREE.DataTexture(new Float32Array([0, 0, 0, 1]), 1, 1, THREE.RGBAFormat, THREE.FloatType);
+  texture.colorSpace = THREE.NoColorSpace;
+  texture.minFilter = THREE.NearestFilter;
+  texture.magFilter = THREE.NearestFilter;
+  texture.generateMipmaps = false;
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.needsUpdate = true;
+  return texture;
+}
+const goldWaferBodyZeroFoodTexture = makeGoldWaferBodyZeroFoodTexture();
+
+function makeGoldWaferBodyMaxFoodRT() {
+  const rt = makeSampleViewFieldRT();
+  const filter = linearFloat ? THREE.LinearFilter : THREE.NearestFilter;
+  rt.texture.minFilter = filter;
+  rt.texture.magFilter = filter;
+  rt.texture.needsUpdate = true;
+  return rt;
+}
 const oatRT = makeCanonicalFieldRT();
 const depositDensityRT = makeCanonicalFieldRT();
 const densityRT = makeDensityRT();
@@ -2376,6 +3159,153 @@ out vec2 v_uv;
 void main() {
   v_uv = position * 0.5 + 0.5;
   gl_Position = vec4(position, 0.0, 1.0);
+}
+`;
+
+const stormSkyGlsl = `
+const float PI = 3.141592653589793;
+float hash31(vec3 p) {
+  p = fract(p * 0.1031);
+  p += dot(p, p.yzx + 33.33);
+  return fract((p.x + p.y) * p.z);
+}
+float noise3(vec3 p) {
+  vec3 i = floor(p);
+  vec3 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  float n000 = hash31(i + vec3(0.0, 0.0, 0.0));
+  float n100 = hash31(i + vec3(1.0, 0.0, 0.0));
+  float n010 = hash31(i + vec3(0.0, 1.0, 0.0));
+  float n110 = hash31(i + vec3(1.0, 1.0, 0.0));
+  float n001 = hash31(i + vec3(0.0, 0.0, 1.0));
+  float n101 = hash31(i + vec3(1.0, 0.0, 1.0));
+  float n011 = hash31(i + vec3(0.0, 1.0, 1.0));
+  float n111 = hash31(i + vec3(1.0, 1.0, 1.0));
+  float nx00 = mix(n000, n100, f.x);
+  float nx10 = mix(n010, n110, f.x);
+  float nx01 = mix(n001, n101, f.x);
+  float nx11 = mix(n011, n111, f.x);
+  float nxy0 = mix(nx00, nx10, f.y);
+  float nxy1 = mix(nx01, nx11, f.y);
+  return mix(nxy0, nxy1, f.z);
+}
+float fbm3(vec3 p) {
+  float sum = 0.0;
+  float amp = 0.5;
+  mat3 rot = mat3(
+    0.00, 0.80, 0.60,
+    -0.80, 0.36, -0.48,
+    -0.60, -0.48, 0.64
+  );
+  for (int i = 0; i < 5; i++) {
+    sum += noise3(p) * amp;
+    p = rot * p * 2.03 + vec3(13.7, 4.2, 9.1);
+    amp *= 0.52;
+  }
+  return sum;
+}
+float ridged3(vec3 p) {
+  float sum = 0.0;
+  float amp = 0.58;
+  float norm = 0.0;
+  for (int i = 0; i < 5; i++) {
+    float n = 1.0 - abs(noise3(p) * 2.0 - 1.0);
+    n *= n;
+    sum += n * amp;
+    norm += amp;
+    p = p * 2.11 + vec3(5.4, 11.7, 2.9);
+    amp *= 0.48;
+  }
+  return sum / max(norm, 1e-4);
+}
+vec3 sampleStormEnvironment(vec3 dir, float time) {
+  dir = normalize(dir);
+  dir.y = abs(dir.y);
+  float y = clamp(dir.y, 0.0, 1.0);
+
+  vec3 wind = vec3(time * 0.035, time * 0.006, -time * 0.024);
+  vec3 p = dir * 3.2 + wind;
+  float broad = fbm3(p * 0.85 + vec3(0.0, 1.7, 0.0));
+  float curls = ridged3(p * 2.15 + broad * 1.35);
+  vec3 anvilDomain = vec3(
+    dot(dir, normalize(vec3(0.72, 0.10, -0.69))),
+    dot(dir, normalize(vec3(-0.28, 0.62, 0.73))),
+    y * 1.7
+  );
+  float anvils = fbm3(anvilDomain * 2.35 + dir.yzx * 0.9 + wind.zyx * 0.65);
+  float cloud = smoothstep(0.18, 0.92, broad * 0.72 + curls * 0.46 + anvils * 0.28);
+  float highCloud = smoothstep(0.48, 0.96, curls + y * 0.22);
+  float horizon = pow(1.0 - y, 2.0);
+  float zenith = pow(y, 0.72);
+
+  vec3 horizonColor = vec3(0.36, 0.43, 0.45);
+  vec3 upperColor = vec3(0.105, 0.145, 0.18);
+  vec3 stormCore = vec3(0.045, 0.058, 0.072);
+  vec3 silver = vec3(0.58, 0.66, 0.68);
+
+  vec3 color = mix(horizonColor, upperColor, zenith);
+  color = mix(color, stormCore, cloud * (0.64 + y * 0.26));
+  color += silver * highCloud * (0.12 + horizon * 0.08);
+  color += vec3(0.10, 0.14, 0.16) * horizon * (1.0 - cloud * 0.55);
+  color += vec3(0.18, 0.24, 0.27) * pow(max(0.0, dot(dir, normalize(vec3(-0.45, 0.28, 0.82)))), 24.0) * 0.35;
+  return max(color, vec3(0.018, 0.022, 0.028));
+}
+`;
+
+const stormSkyFragment = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+out vec4 outColor;
+uniform float uTime;
+uniform float uRotationAngle;
+uniform vec3 uRotationAxis;
+${stormSkyGlsl}
+vec3 rotateAroundAxis(vec3 v, vec3 axis, float angle) {
+  axis = normalize(axis);
+  float s = sin(angle);
+  float c = cos(angle);
+  return v * c + cross(axis, v) * s + axis * dot(axis, v) * (1.0 - c);
+}
+void main() {
+  float phi = v_uv.x * 2.0 * PI - PI;
+  float latitude = (v_uv.y - 0.5) * PI;
+  vec3 dir = normalize(vec3(
+    cos(latitude) * cos(phi),
+    sin(latitude),
+    cos(latitude) * sin(phi)
+  ));
+  vec3 sampleDir = normalize(rotateAroundAxis(dir, normalize(uRotationAxis), uRotationAngle));
+  vec3 color = sampleStormEnvironment(sampleDir, 0.0);
+  outColor = vec4(color, 1.0);
+}
+`;
+
+const goldWaferBodyIcoEnvFragment = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+out vec4 outColor;
+uniform vec3 u_lightDirections[${ICOSA_LIGHT_COUNT}];
+uniform int u_lightCount;
+uniform float u_lightRadianceScale;
+const float PI = 3.141592653589793;
+void main() {
+  float phi = v_uv.x * 2.0 * PI - PI;
+  float latitude = (v_uv.y - 0.5) * PI;
+  vec3 dir = normalize(vec3(
+    cos(latitude) * cos(phi),
+    sin(latitude),
+    cos(latitude) * sin(phi)
+  ));
+
+  vec3 color = vec3(0.018, 0.022, 0.026);
+  for (int i = 0; i < ${ICOSA_LIGHT_COUNT}; i++) {
+    if (i >= u_lightCount) break;
+    float alignment = max(dot(dir, normalize(u_lightDirections[i])), 0.0);
+    float broad = pow(alignment, 42.0) * 1.25;
+    float core = pow(alignment, 360.0) * 22.0;
+    color += vec3(1.0) * (broad + core) * u_lightRadianceScale;
+  }
+  outColor = vec4(color, 1.0);
 }
 `;
 
@@ -2956,6 +3886,35 @@ void main() {
 }
 `;
 
+const maxFoodHistoryFragment = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+out vec4 outColor;
+uniform sampler2D u_currentFood;
+uniform sampler2D u_previousMax;
+uniform sampler2D u_chartId;
+uniform sampler2D u_chartUnsafe;
+bool isOutsideAtlas(vec2 uv) {
+  return uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0;
+}
+float chartIdAt(vec2 uv) {
+  if (isOutsideAtlas(uv)) return -1.0;
+  return floor(texture(u_chartId, uv).r + 0.5);
+}
+bool isAuthoritativeChartTexel(vec2 uv) {
+  return chartIdAt(uv) > 0.5 && texture(u_chartUnsafe, uv).r < 0.5;
+}
+void main() {
+  if (!isAuthoritativeChartTexel(v_uv)) {
+    outColor = vec4(0.0, 0.0, 0.0, 1.0);
+    return;
+  }
+  float currentFood = max(texture(u_currentFood, v_uv).r, 0.0);
+  float previousMax = max(texture(u_previousMax, v_uv).r, 0.0);
+  outColor = vec4(max(currentFood, previousMax), 0.0, 0.0, 1.0);
+}
+`;
+
 const agentAllocatorCommonFragment = `#version 300 es
 precision highp float;
 precision highp sampler2D;
@@ -3332,6 +4291,31 @@ void main() {
     candidate.w = max(candidate.w - debitCount * childReserve, 0.0);
   }
   outColor = candidate;
+}
+`;
+
+const agentSeedInjectFragment = `#version 300 es
+precision highp float;
+precision highp sampler2D;
+in vec2 v_uv;
+out vec4 outColor;
+uniform sampler2D u_currentAgents;
+uniform sampler2D u_seedAgents;
+uniform int u_agentSide;
+uniform float u_revealSlotCount;
+void main() {
+  ivec2 pixel = ivec2(int(gl_FragCoord.x), int(gl_FragCoord.y));
+  int index = pixel.y * u_agentSide + pixel.x;
+  vec4 currentAgent = texelFetch(u_currentAgents, pixel, 0);
+  if (currentAgent.w > 0.0001) {
+    outColor = currentAgent;
+    return;
+  }
+  if (float(index) < u_revealSlotCount) {
+    outColor = texelFetch(u_seedAgents, pixel, 0);
+    return;
+  }
+  outColor = vec4(0.0);
 }
 `;
 
@@ -3889,12 +4873,17 @@ const slimeVertex = `
 out vec2 v_uv;
 out vec3 v_worldPos;
 out vec3 v_worldNormal;
+out vec3 v_viewPos;
+out vec3 v_viewNormal;
 void main() {
   v_uv = uv;
   vec4 worldPos = modelMatrix * vec4(position, 1.0);
+  vec4 viewPos = modelViewMatrix * vec4(position, 1.0);
   v_worldPos = worldPos.xyz;
   v_worldNormal = normalize(mat3(modelMatrix) * normal);
-  gl_Position = projectionMatrix * viewMatrix * worldPos;
+  v_viewPos = viewPos.xyz;
+  v_viewNormal = normalize(normalMatrix * normal);
+  gl_Position = projectionMatrix * viewPos;
 }
 `;
 
@@ -3903,9 +4892,17 @@ precision highp float;
 in vec2 v_uv;
 in vec3 v_worldPos;
 in vec3 v_worldNormal;
+in vec3 v_viewPos;
+in vec3 v_viewNormal;
 out vec4 outColor;
 uniform sampler2D u_food;
 uniform sampler2D u_agentDensity;
+#if GLASS_ENABLED
+uniform samplerCube u_skyCube;
+uniform vec2 u_resolution;
+uniform vec2 u_glassLensCenter;
+uniform float u_time;
+#endif
 uniform vec2 u_texel;
 uniform float u_heightScale;
 uniform float u_bumpStrength;
@@ -3913,17 +4910,43 @@ uniform float u_normalSampleRadius;
 uniform float u_iridescenceStrength;
 uniform float u_iridescenceMinThickness;
 uniform float u_iridescenceThickness;
+uniform float u_filmThicknessCurve;
 uniform float u_lightBrightness;
-uniform vec3 u_lightPositions[12];
+uniform float u_foodClamp;
+uniform sampler2D u_goldWaferLookup;
+uniform float u_goldLookupW;
+uniform float u_goldLookupH;
+uniform float u_goldLookupMinNm;
+uniform float u_goldLookupSpanNm;
+uniform vec3 u_lightPositions[${ICOSA_LIGHT_COUNT}];
+uniform int u_lightCount;
+uniform float u_lightRadianceScale;
 uniform vec3 u_cameraPos;
 uniform vec3 u_baseColor;
+#if GLASS_ENABLED
+uniform float u_glassStrength;
+uniform float u_glassBend;
+uniform float u_glassAberration;
+uniform float u_glassFresnelStrength;
+uniform vec3 u_glassTint;
+#endif
 uniform int u_meshOutlineEnabled;
 uniform int u_showAgentDots;
 uniform int u_bumpDiagonalTapsEnabled;
 uniform int u_filmFollowsSlimeHeight;
+uniform int u_useGoldWaferFilm;
+uniform int u_useGoldWaferBodyUnderlay;
 ${safeSamplingGlsl}
 float heightFromFood(float food) {
   return (1.0 - exp(-max(food, 0.0) * 4.0)) * u_heightScale;
+}
+float filmThickness01FromFood(float food) {
+  float maxFood = max(u_foodClamp, 0.0001);
+  float x = clamp(max(food, 0.0), 0.0, maxFood);
+  float curve = max(u_filmThicknessCurve, 0.0001);
+  float denom = 1.0 - exp(-curve * maxFood);
+  if (denom < 0.00001) return clamp(x / maxFood, 0.0, 1.0);
+  return clamp((1.0 - exp(-curve * x)) / denom, 0.0, 1.0);
 }
 float readFoodSafe(vec2 sampleUv, float fallback) {
   float valid = 0.0;
@@ -3944,7 +4967,7 @@ float readDensitySafe(vec2 baseUv, vec2 sampleUv, float fallback) {
   return max(texelFetch(u_agentDensity, densityPixel, 0).r, 0.0);
 }
 const float PI = 3.141592653589793;
-const int ICOSA_LIGHT_COUNT = 12;
+const int ICOSA_LIGHT_COUNT = ${ICOSA_LIGHT_COUNT};
 vec3 schlickFresnel(vec3 f0, float cosTheta) {
   float f = pow(1.0 - clamp(cosTheta, 0.0, 1.0), 5.0);
   return f0 + (vec3(1.0) - f0) * f;
@@ -3989,6 +5012,135 @@ vec3 thinFilmColor(float nDotV, float thicknessNm) {
   vec3 abaloneBias = vec3(1.08, 1.18, 1.32);
   return clamp(interference * abaloneBias, 0.0, 1.0);
 }
+const float GOLD_COS_P0 = 1.00000000;
+const float GOLD_COS_P1 = 0.98480775;
+const float GOLD_COS_P2 = 0.93969262;
+const float GOLD_COS_P3 = 0.86602540;
+const float GOLD_COS_P4 = 0.76604444;
+const float GOLD_COS_P5 = 0.64278761;
+const float GOLD_COS_P6 = 0.50000000;
+const float GOLD_COS_P7 = 0.34202014;
+const float GOLD_COS_P8 = 0.17364818;
+const float GOLD_COS_P9 = 0.08715574;
+float goldFindAngleSeg(float c) {
+  if (c >= GOLD_COS_P1) return 0.0;
+  if (c >= GOLD_COS_P2) return 1.0;
+  if (c >= GOLD_COS_P3) return 2.0;
+  if (c >= GOLD_COS_P4) return 3.0;
+  if (c >= GOLD_COS_P5) return 4.0;
+  if (c >= GOLD_COS_P6) return 5.0;
+  if (c >= GOLD_COS_P7) return 6.0;
+  if (c >= GOLD_COS_P8) return 7.0;
+  return 8.0;
+}
+float goldCosAt(int idx) {
+  idx = clamp(idx, 0, 9);
+  if (idx == 0) return GOLD_COS_P0;
+  if (idx == 1) return GOLD_COS_P1;
+  if (idx == 2) return GOLD_COS_P2;
+  if (idx == 3) return GOLD_COS_P3;
+  if (idx == 4) return GOLD_COS_P4;
+  if (idx == 5) return GOLD_COS_P5;
+  if (idx == 6) return GOLD_COS_P6;
+  if (idx == 7) return GOLD_COS_P7;
+  if (idx == 8) return GOLD_COS_P8;
+  return GOLD_COS_P9;
+}
+vec4 goldAngleHermiteWeights(float c, out float segOut) {
+  float seg = goldFindAngleSeg(c);
+  segOut = seg;
+  int iseg = int(seg);
+  float cL = goldCosAt(iseg);
+  float cR = goldCosAt(iseg + 1);
+  float cP = goldCosAt(iseg - 1);
+  float cN = goldCosAt(iseg + 2);
+  float h = cR - cL;
+  float alpha = h / (cR - cP);
+  float beta = h / (cN - cL);
+  float s = (cL - c) / (cL - cR);
+  float s2 = s * s;
+  float s3 = s2 * s;
+  float H00 = 2.0 * s3 - 3.0 * s2 + 1.0;
+  float H10 = s3 - 2.0 * s2 + s;
+  float H01 = -2.0 * s3 + 3.0 * s2;
+  float H11 = s3 - s2;
+  return vec4(
+    -alpha * H10,
+     H00 - beta * H11,
+     H01 + alpha * H10,
+     beta * H11
+  );
+}
+vec4 goldThicknessCubicW(float t) {
+  float t2 = t * t;
+  float t3 = t2 * t;
+  return 0.5 * vec4(
+    -t3 + 2.0 * t2 - t,
+     3.0 * t3 - 5.0 * t2 + 2.0,
+    -3.0 * t3 + 4.0 * t2 + t,
+     t3 - t2
+  );
+}
+vec3 goldLookupTap(float ti, float ai) {
+  ti = clamp(ti, 0.0, u_goldLookupW - 1.0);
+  ai = clamp(ai, 0.0, u_goldLookupH - 1.0);
+  vec2 uv = vec2((ti + 0.5) / u_goldLookupW, (ai + 0.5) / u_goldLookupH);
+  return texture(u_goldWaferLookup, uv).rgb;
+}
+vec3 goldWaferFilmColor(float nDotV, float thicknessNm) {
+  float c = clamp(nDotV, GOLD_COS_P9, GOLD_COS_P0);
+  float t = clamp(thicknessNm, u_goldLookupMinNm, u_goldLookupMinNm + u_goldLookupSpanNm);
+  float tIdx = (t - u_goldLookupMinNm) / u_goldLookupSpanNm * (u_goldLookupW - 1.0);
+  float ti0 = clamp(floor(tIdx), 0.0, u_goldLookupW - 2.0);
+  float ft = tIdx - ti0;
+  vec4 wt = goldThicknessCubicW(ft);
+  float seg;
+  vec4 wa = goldAngleHermiteWeights(c, seg);
+  vec3 r = vec3(0.0);
+  for (int j = 0; j < 4; j++) {
+    float ay = seg - 1.0 + float(j);
+    vec3 row = wt.x * goldLookupTap(ti0 - 1.0, ay)
+             + wt.y * goldLookupTap(ti0,        ay)
+             + wt.z * goldLookupTap(ti0 + 1.0,  ay)
+             + wt.w * goldLookupTap(ti0 + 2.0,  ay);
+    r += wa[j] * row;
+  }
+  return clamp(r, 0.0, 1.0);
+}
+#if GLASS_ENABLED
+vec3 sampleSky(vec3 dir) {
+  return texture(u_skyCube, normalize(dir)).rgb;
+}
+vec3 computeGlassBase(vec3 worldNormal, vec3 viewDir) {
+  vec3 N = normalize(worldNormal);
+  vec3 V = normalize(viewDir);
+
+  float fresnel = pow(1.0 - abs(dot(N, V)), 1.8);
+  float fresnelStrength = clamp(u_glassFresnelStrength, 0.0, 1.5);
+
+  vec3 baseDir = normalize(v_worldPos - u_cameraPos);
+  vec3 bendDir = normalize(baseDir + N * u_glassBend * (0.10 + fresnel * 0.20));
+
+  vec3 clean = sampleSky(bendDir);
+
+  float aberration = clamp(u_glassAberration, 0.0, 1.0) * abs(u_glassBend);
+  vec3 aberrated = vec3(
+    sampleSky(normalize(baseDir + N * u_glassBend * 0.115)).r,
+    sampleSky(normalize(baseDir + N * u_glassBend * 0.100)).g,
+    sampleSky(normalize(baseDir + N * u_glassBend * 0.085)).b
+  );
+
+  vec3 glassColor = mix(clean, aberrated, aberration);
+  vec3 tint = clamp(u_glassTint, 0.0, 1.0);
+
+  float edgeTintAmount = clamp(fresnel * fresnelStrength, 0.0, 1.0);
+  glassColor = mix(glassColor, glassColor * tint, edgeTintAmount * 0.22);
+  glassColor += tint * fresnel * fresnelStrength * 0.2;
+  glassColor += vec3(0.72, 0.86, 1.0) * fresnel * fresnelStrength * 0.075;
+
+  return max(glassColor, vec3(0.0));
+}
+#endif
 void main() {
   bool baseSafe = isAuthoritativeChartTexel(v_uv);
   float food = baseSafe ? max(texture(u_food, v_uv).r, 0.0) : 0.0;
@@ -4047,14 +5199,19 @@ void main() {
   if (u_filmFollowsSlimeHeight == 1) {
     float filmMin = min(u_iridescenceMinThickness, u_iridescenceThickness);
     float filmMax = max(u_iridescenceMinThickness, u_iridescenceThickness);
-    float centerHeight = heightFromFood(food);
-    float slimeHeight01 = clamp(centerHeight / max(u_heightScale, 0.001), 0.0, 1.0);
+    float slimeHeight01 = filmThickness01FromFood(food);
     filmThickness = mix(filmMin, filmMax, slimeHeight01);
   }
   vec3 filmColor = thinFilmColor(nDotV, filmThickness);
+  if (u_useGoldWaferFilm == 1) {
+    filmColor = goldWaferFilmColor(nDotV, filmThickness);
+  }
 
-  float iridescence = clamp(u_iridescenceStrength, 0.0, 1.0);
-  vec3 filmF0 = mix(vec3(0.045), vec3(0.065) + filmColor * 0.34, iridescence);
+  float iridescence = clamp(u_iridescenceStrength, 0.0, 2.0);
+  vec3 filmF0 = clamp(mix(vec3(0.045), vec3(0.065) + filmColor * 0.34, iridescence), 0.0, 1.0);
+  if (u_useGoldWaferFilm == 1) {
+    filmF0 = clamp(mix(vec3(0.045), filmColor, iridescence), 0.0, 1.0);
+  }
   vec3 filmFView = schlickFresnel(filmF0, nDotV) * slimePresence;
   vec3 clearFView = schlickFresnel(vec3(0.035), nDotV) * slimePresence * (0.22 + glossMask * 0.58);
   vec3 reflectedBudget = clamp(filmFView + clearFView * (vec3(1.0) - filmFView), vec3(0.0), vec3(0.92));
@@ -4066,7 +5223,7 @@ void main() {
   pearlBody = mix(pearlBody, pearlBody + filmColor * 0.11, slimePresence * (0.30 + trailCore * 0.35));
   pearlBody = clamp(pearlBody, 0.0, 1.0);
 
-  vec3 icosaLightRadiance = vec3(1.0) * u_lightBrightness;
+  vec3 icosaLightRadiance = vec3(1.0) * u_lightBrightness * u_lightRadianceScale;
   vec3 ambientRadiance = vec3(0.22, 0.24, 0.26);
   float bodyRoughness = mix(0.34, 0.105, glossMask);
   float clearRoughness = mix(0.18, 0.055, glossMask);
@@ -4075,6 +5232,7 @@ void main() {
   vec3 filmSpec = vec3(0.0);
   vec3 clearSpec = vec3(0.0);
   for (int i = 0; i < ICOSA_LIGHT_COUNT; i++) {
+    if (i >= u_lightCount) break;
     vec3 lightDir = normalize(u_lightPositions[i] - v_worldPos);
     float nDotLight = max(dot(normal, lightDir), 0.0);
     diffuseLight += icosaLightRadiance * nDotLight;
@@ -4089,20 +5247,57 @@ void main() {
   color += clearSpec;
   color += bodyBudget * filmColor * slimePresence * (0.018 + trailCore * 0.045);
 
+  float agentDotAlpha = 0.0;
   if (u_showAgentDots == 1) {
     float agentDensity = readDensitySafe(v_uv, v_uv, 0.0);
-    float agentDots = smoothstep(0.018, 0.11, agentDensity);
+    agentDotAlpha = smoothstep(0.018, 0.11, agentDensity);
     vec3 cyan = vec3(0.50, 1.0, 0.95);
-    color = mix(color, cyan, agentDots * 0.78);
-    color += cyan * agentDots * 0.38;
+    color = mix(color, cyan, agentDotAlpha * 0.78);
+    color += cyan * agentDotAlpha * 0.38;
   }
 
+  float outlineAlpha = 0.0;
   if (u_meshOutlineEnabled == 1) {
-    float fres = pow(1.0 - max(dot(N0, viewDir), 0.0), 3.0);
-    color += vec3(0.18, 0.36, 0.55) * fres * 0.34;
+    outlineAlpha = pow(1.0 - max(dot(N0, viewDir), 0.0), 3.0);
+    color += vec3(0.18, 0.36, 0.55) * outlineAlpha * 0.34;
   }
 
-  outColor = vec4(pow(color, vec3(0.78)), 1.0);
+  float slimeLayerAlpha = clamp(
+    max(max(slimePresence * 0.82, trail * 0.68), max(agentDotAlpha, outlineAlpha)),
+    0.0,
+    1.0
+  );
+
+  vec3 slimeColor = color;
+  vec3 legacySlimeOnly = pow(max(slimeColor, vec3(0.0)), vec3(0.78));
+
+#if GLASS_ENABLED
+  vec3 glassBase = computeGlassBase(N0, viewDir);
+  float slimeAlpha = slimeLayerAlpha;
+
+  vec3 slimeOverGlass = glassBase * (1.0 - 0.22 * slimeAlpha) + slimeColor;
+  vec3 composedRaw = mix(glassBase, slimeOverGlass, slimeAlpha);
+
+  vec3 composedDisplay = mix(
+    composedRaw,
+    pow(max(composedRaw, vec3(0.0)), vec3(0.78)),
+    slimeAlpha
+  );
+
+  vec3 finalColor = mix(
+    legacySlimeOnly,
+    composedDisplay,
+    clamp(u_glassStrength, 0.0, 1.0)
+  );
+#else
+  vec3 finalColor = legacySlimeOnly;
+#endif
+
+  if (u_useGoldWaferBodyUnderlay == 1) {
+    outColor = vec4(max(finalColor, vec3(0.0)), slimeLayerAlpha);
+    return;
+  }
+  outColor = vec4(max(finalColor, vec3(0.0)), 1.0);
 }
 `;
 
@@ -4123,6 +5318,98 @@ function makeRawShaderMaterial(fragment, uniforms, vertex = fullscreenVertex, ex
 function stripGlslVersion(shader) {
   return shader.replace(/^\s*#version\s+300\s+es\s*/, '');
 }
+
+const SKY_ROTATION_AXIS = new THREE.Vector3(0.38, 0.76, -0.53).normalize();
+const stormSkyMaterial = makeRawShaderMaterial(stormSkyFragment, {
+  uTime: { value: 0 },
+  uRotationAngle: { value: 0 },
+  uRotationAxis: { value: SKY_ROTATION_AXIS.clone() },
+});
+goldWaferBodyIcoEnvMaterial = makeRawShaderMaterial(goldWaferBodyIcoEnvFragment, {
+  u_lightDirections: { value: icosahedronLightPositions.map((position) => position.clone().normalize()) },
+  u_lightCount: { value: getActiveIcosaLightCount() },
+  u_lightRadianceScale: { value: getActiveIcosaLightRadianceScale() },
+});
+let skyTextureRendered = false;
+let lastSkyTextureUpdateMs = -Infinity;
+let skyRotationAngle = 0;
+let lastSkyRotationUpdateMs = performance.now();
+
+function ensureGoldWaferBodyEnvironmentMap() {
+  if (goldWaferBodyIcoEnvPmrem) return goldWaferBodyIcoEnvPmrem.texture;
+  if (!goldWaferBodyIcoEnvRT) {
+    goldWaferBodyIcoEnvRT = new THREE.WebGLRenderTarget(
+      GOLD_WAFER_BODY_ENV_EQUIRECT_WIDTH,
+      GOLD_WAFER_BODY_ENV_EQUIRECT_HEIGHT,
+      {
+        depthBuffer: false,
+        stencilBuffer: false,
+        minFilter: THREE.LinearFilter,
+        magFilter: THREE.LinearFilter,
+        format: THREE.RGBAFormat,
+        type: colorBufferFloat ? THREE.HalfFloatType : THREE.UnsignedByteType,
+      },
+    );
+    goldWaferBodyIcoEnvRT.texture.generateMipmaps = false;
+    goldWaferBodyIcoEnvRT.texture.colorSpace = THREE.NoColorSpace;
+    goldWaferBodyIcoEnvRT.texture.mapping = THREE.EquirectangularReflectionMapping;
+    goldWaferBodyIcoEnvRT.texture.name = 'gold-wafer-body-icosa-env-equirect';
+  }
+  const previousTarget = renderer.getRenderTarget();
+  runFullscreenPass(goldWaferBodyIcoEnvMaterial, goldWaferBodyIcoEnvRT);
+  renderer.setRenderTarget(previousTarget);
+  const pmremGenerator = new THREE.PMREMGenerator(renderer);
+  goldWaferBodyIcoEnvPmrem = pmremGenerator.fromEquirectangular(goldWaferBodyIcoEnvRT.texture);
+  goldWaferBodyIcoEnvPmrem.texture.name = 'gold-wafer-body-icosa-env';
+  pmremGenerator.dispose();
+  return goldWaferBodyIcoEnvPmrem.texture;
+}
+
+function updateSkyAnimation(nowMs = performance.now()) {
+  const speed = Math.max(0, Number(params.backdropAnimationSpeed ?? 0));
+  const dtSeconds = Math.max(0, Math.min((nowMs - lastSkyRotationUpdateMs) * 0.001, 0.25));
+  lastSkyRotationUpdateMs = nowMs;
+
+  if (speed > 0 && dtSeconds > 0) {
+    const radiansPerSecondAtFullSpeed = 0.18;
+    skyRotationAngle = THREE.MathUtils.euclideanModulo(
+      skyRotationAngle + dtSeconds * speed * radiansPerSecondAtFullSpeed,
+      Math.PI * 2,
+    );
+  }
+
+  return skyRotationAngle;
+}
+
+function updateStormSkyTexture(nowMs = performance.now(), { force = false } = {}) {
+  if (!isEnvironmentEnabled()) return false;
+  updateSkyAnimation(nowMs);
+
+  if (
+    !force &&
+    skyTextureRendered &&
+    nowMs - lastSkyTextureUpdateMs < SKY_UPDATE_INTERVAL_MS
+  ) {
+    return false;
+  }
+
+  if (!force && skyTextureRendered && Math.max(0, Number(params.backdropAnimationSpeed ?? 0)) <= 0) {
+    return false;
+  }
+
+  const previousTarget = renderer.getRenderTarget();
+  stormSkyMaterial.uniforms.uTime.value = 0;
+  stormSkyMaterial.uniforms.uRotationAngle.value = skyRotationAngle;
+  stormSkyMaterial.uniforms.uRotationAxis.value.copy(SKY_ROTATION_AXIS);
+  runFullscreenPass(stormSkyMaterial, skyEquirectRT);
+  skyCubeRT.fromEquirectangularTexture(renderer, skyEquirectRT.texture);
+  scene.background = skyCubeRT.texture;
+  renderer.setRenderTarget(previousTarget);
+  skyTextureRendered = true;
+  lastSkyTextureUpdateMs = nowMs;
+  return true;
+}
+updateStormSkyTexture(performance.now(), { force: true });
 
 const oatMaterial = makeRawShaderMaterial(oatFragment, {
   u_oatCount: { value: 0 },
@@ -4220,6 +5507,13 @@ const smoothMaterial = makeRawShaderMaterial(smoothFragment, {
   u_useZeroGutterTransitions: { value: 1 },
 });
 
+const maxFoodHistoryMaterial = makeRawShaderMaterial(maxFoodHistoryFragment, {
+  u_currentFood: { value: null },
+  u_previousMax: { value: goldWaferBodyZeroFoodTexture },
+  u_chartId: { value: chartIdRT.texture },
+  u_chartUnsafe: { value: chartUnsafeRT.texture },
+});
+
 const dilateMaterial = makeRawShaderMaterial(dilateFragment, {
   u_food: { value: null },
   u_islandMask: { value: uvIslandMaskRT.texture },
@@ -4311,6 +5605,13 @@ const agentCompactMaterial = makeRawShaderMaterial(agentCompactFragment, {
   u_allocationOffset: { value: 0 },
 });
 
+const agentSeedInjectMaterial = makeRawShaderMaterial(agentSeedInjectFragment, {
+  u_currentAgents: { value: null },
+  u_seedAgents: { value: agentSeedRT.texture },
+  u_agentSide: { value: AGENT_SIDE },
+  u_revealSlotCount: { value: 0 },
+});
+
 const deltaMaterial = makeRawShaderMaterial(deltaFragment, {
   u_food: { value: null },
   u_depositDensity: { value: depositDensityRT.texture },
@@ -4396,15 +5697,572 @@ const uvMaskMaterial = new THREE.RawShaderMaterial({
 // === slime cuttlefish material ===
 let slimeMaterial = null;
 
+function makeGoldWaferFallbackTexture() {
+  const data = new Uint8Array([255, 237, 160, 255]);
+  const texture = new THREE.DataTexture(data, 1, 1, THREE.RGBAFormat, THREE.UnsignedByteType);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.minFilter = THREE.NearestFilter;
+  texture.magFilter = THREE.NearestFilter;
+  texture.generateMipmaps = false;
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+const goldWaferFilmState = {
+  ready: false,
+  loading: false,
+  error: '',
+  texture: makeGoldWaferFallbackTexture(),
+  width: 1,
+  height: 1,
+  minNm: 10,
+  spanNm: 600,
+};
+const goldWaferBodyUniforms = {
+  uGoldBodyMaxFood: { value: goldWaferBodyZeroFoodTexture },
+  uGoldBodyLookup: { value: goldWaferFilmState.texture },
+  uGoldBodyLookupW: { value: goldWaferFilmState.width },
+  uGoldBodyLookupH: { value: goldWaferFilmState.height },
+  uGoldBodyLookupMinNm: { value: goldWaferFilmState.minNm },
+  uGoldBodyLookupSpanNm: { value: goldWaferFilmState.spanNm },
+  uGoldBodyFoodClamp: { value: params.foodClamp },
+  uGoldBodyFilmCurve: { value: params.filmThicknessCurve },
+  uGoldBodyMinThicknessNm: { value: params.iridescenceMinThickness },
+  uGoldBodyMaxThicknessNm: { value: params.iridescenceThickness },
+  uGoldBodyFadeFraction: { value: params.goldBodyFade },
+  uGoldBodyRoughness: { value: params.goldBodyRoughness },
+  uGoldBodyReflectivity: { value: params.goldBodyReflectivity },
+  uGoldBodyColor: { value: new THREE.Color(params.goldBodyColor) },
+  uGoldBodyDiscardUnvisited: { value: 0 },
+};
+
+const goldWaferBodyLutShaderHelpers = `
+       const float GOLD_BODY_COS_P0 = 1.00000000;
+       const float GOLD_BODY_COS_P1 = 0.98480775;
+       const float GOLD_BODY_COS_P2 = 0.93969262;
+       const float GOLD_BODY_COS_P3 = 0.86602540;
+       const float GOLD_BODY_COS_P4 = 0.76604444;
+       const float GOLD_BODY_COS_P5 = 0.64278761;
+       const float GOLD_BODY_COS_P6 = 0.50000000;
+       const float GOLD_BODY_COS_P7 = 0.34202014;
+       const float GOLD_BODY_COS_P8 = 0.17364818;
+       const float GOLD_BODY_COS_P9 = 0.08715574;
+
+       float goldBodyFindAngleSeg(float c) {
+         if (c >= GOLD_BODY_COS_P1) return 0.0;
+         if (c >= GOLD_BODY_COS_P2) return 1.0;
+         if (c >= GOLD_BODY_COS_P3) return 2.0;
+         if (c >= GOLD_BODY_COS_P4) return 3.0;
+         if (c >= GOLD_BODY_COS_P5) return 4.0;
+         if (c >= GOLD_BODY_COS_P6) return 5.0;
+         if (c >= GOLD_BODY_COS_P7) return 6.0;
+         if (c >= GOLD_BODY_COS_P8) return 7.0;
+         return 8.0;
+       }
+
+       float goldBodyCosAt(int idx) {
+         idx = clamp(idx, 0, 9);
+         if (idx == 0) return GOLD_BODY_COS_P0;
+         if (idx == 1) return GOLD_BODY_COS_P1;
+         if (idx == 2) return GOLD_BODY_COS_P2;
+         if (idx == 3) return GOLD_BODY_COS_P3;
+         if (idx == 4) return GOLD_BODY_COS_P4;
+         if (idx == 5) return GOLD_BODY_COS_P5;
+         if (idx == 6) return GOLD_BODY_COS_P6;
+         if (idx == 7) return GOLD_BODY_COS_P7;
+         if (idx == 8) return GOLD_BODY_COS_P8;
+         return GOLD_BODY_COS_P9;
+       }
+
+       vec4 goldBodyAngleHermiteWeights(float c, out float segOut) {
+         float seg = goldBodyFindAngleSeg(c);
+         segOut = seg;
+         int iseg = int(seg);
+         float cL = goldBodyCosAt(iseg);
+         float cR = goldBodyCosAt(iseg + 1);
+         float cP = goldBodyCosAt(iseg - 1);
+         float cN = goldBodyCosAt(iseg + 2);
+         float h = cR - cL;
+         float alpha = h / (cR - cP);
+         float beta = h / (cN - cL);
+         float s = (cL - c) / (cL - cR);
+         float s2 = s * s;
+         float s3 = s2 * s;
+         float H00 = 2.0 * s3 - 3.0 * s2 + 1.0;
+         float H10 = s3 - 2.0 * s2 + s;
+         float H01 = -2.0 * s3 + 3.0 * s2;
+         float H11 = s3 - s2;
+         return vec4(
+           -alpha * H10,
+            H00 - beta * H11,
+            H01 + alpha * H10,
+            beta * H11
+         );
+       }
+
+       vec4 goldBodyThicknessCubicW(float t) {
+         float t2 = t * t;
+         float t3 = t2 * t;
+         return 0.5 * vec4(
+           -t3 + 2.0 * t2 - t,
+            3.0 * t3 - 5.0 * t2 + 2.0,
+           -3.0 * t3 + 4.0 * t2 + t,
+            t3 - t2
+         );
+       }
+
+       vec3 goldBodyLookupTap(float ti, float ai) {
+         ti = clamp(ti, 0.0, uGoldBodyLookupW - 1.0);
+         ai = clamp(ai, 0.0, uGoldBodyLookupH - 1.0);
+         vec2 uv = vec2((ti + 0.5) / uGoldBodyLookupW, (ai + 0.5) / uGoldBodyLookupH);
+         return texture2D(uGoldBodyLookup, uv).rgb;
+       }
+
+       vec3 goldBodyFilmBicubic(float tIdx, float c) {
+         c = clamp(c, GOLD_BODY_COS_P9, GOLD_BODY_COS_P0);
+         float ti0 = clamp(floor(tIdx), 0.0, uGoldBodyLookupW - 2.0);
+         float ft = tIdx - ti0;
+         vec4 wt = goldBodyThicknessCubicW(ft);
+         float seg;
+         vec4 wa = goldBodyAngleHermiteWeights(c, seg);
+         vec3 r = vec3(0.0);
+         for (int j = 0; j < 4; j++) {
+           float ay = seg - 1.0 + float(j);
+           vec3 row = wt.x * goldBodyLookupTap(ti0 - 1.0, ay)
+                    + wt.y * goldBodyLookupTap(ti0,        ay)
+                    + wt.z * goldBodyLookupTap(ti0 + 1.0,  ay)
+                    + wt.w * goldBodyLookupTap(ti0 + 2.0,  ay);
+           r += wa[j] * row;
+         }
+         return r;
+       }
+
+       float goldBodyFilmThickness01FromFood(float food) {
+         float maxFood = max(uGoldBodyFoodClamp, 0.0001);
+         float x = clamp(max(food, 0.0), 0.0, maxFood);
+         float curve = max(uGoldBodyFilmCurve, 0.0001);
+         float denom = 1.0 - exp(-curve * maxFood);
+         if (denom < 0.00001) return clamp(x / maxFood, 0.0, 1.0);
+         return clamp((1.0 - exp(-curve * x)) / denom, 0.0, 1.0);
+       }
+
+       float goldBodyFadeFromFood(float food) {
+         float normalizedFood = clamp(max(food, 0.0) / max(uGoldBodyFoodClamp, 0.0001), 0.0, 1.0);
+         float fadeFraction = clamp(uGoldBodyFadeFraction, 0.0001, 1.0);
+         if (normalizedFood >= fadeFraction) return 1.0;
+         return smoothstep(0.0, fadeFraction, normalizedFood);
+       }
+
+       float goldBodyFadeAt(vec2 uv) {
+         return goldBodyFadeFromFood(texture2D(uGoldBodyMaxFood, uv).r);
+       }
+
+       vec3 goldBodyFilmColorFromFood(float food, float c) {
+         float filmMin = min(uGoldBodyMinThicknessNm, uGoldBodyMaxThicknessNm);
+         float filmMax = max(uGoldBodyMinThicknessNm, uGoldBodyMaxThicknessNm);
+         float thickNm = mix(filmMin, filmMax, goldBodyFilmThickness01FromFood(food));
+         thickNm = clamp(thickNm, uGoldBodyLookupMinNm, uGoldBodyLookupMinNm + uGoldBodyLookupSpanNm);
+         float tIdx = (thickNm - uGoldBodyLookupMinNm) / uGoldBodyLookupSpanNm * (uGoldBodyLookupW - 1.0);
+         return clamp(goldBodyFilmBicubic(tIdx, c), 0.0, 1.0);
+       }
+`;
+
+function validateGoldWaferTensor(tensor) {
+  const shape = tensor?.shape;
+  const axes = tensor?.axes;
+  if (!Array.isArray(shape) || shape.length !== 3 || shape[2] !== 3) {
+    throw new Error('gold wafer lookup must have shape [angle, thickness, 3]');
+  }
+  const [angleCount, thicknessCount] = shape;
+  if (!Number.isInteger(angleCount) || !Number.isInteger(thicknessCount) || angleCount !== 10) {
+    throw new Error(`gold wafer lookup expected 10 angle rows, got ${angleCount}`);
+  }
+  const expectedAngles = [0, 10, 20, 30, 40, 50, 60, 70, 80, 85];
+  const angles = axes?.angle_deg;
+  if (!Array.isArray(angles) || angles.length !== expectedAngles.length) {
+    throw new Error('gold wafer lookup angle axis does not match the shader');
+  }
+  for (let i = 0; i < expectedAngles.length; i++) {
+    if (Number(angles[i]) !== expectedAngles[i]) {
+      throw new Error(`gold wafer lookup angle ${i} must be ${expectedAngles[i]}, got ${angles[i]}`);
+    }
+  }
+  const thicknesses = axes?.thickness_nm;
+  if (!Array.isArray(thicknesses) || thicknesses.length !== thicknessCount) {
+    throw new Error('gold wafer lookup thickness axis does not match shape');
+  }
+  const minNm = Number(thicknesses[0]);
+  const maxNm = Number(thicknesses[thicknesses.length - 1]);
+  const spanNm = maxNm - minNm;
+  if (!Number.isFinite(minNm) || !Number.isFinite(spanNm) || spanNm <= 0) {
+    throw new Error('gold wafer lookup thickness axis must be increasing');
+  }
+  if (!Array.isArray(tensor.data) || tensor.data.length !== angleCount) {
+    throw new Error('gold wafer lookup data does not match angle count');
+  }
+  return { angleCount, thicknessCount, minNm, spanNm };
+}
+
+function buildGoldWaferLookupTexture(tensor, shapeInfo) {
+  const { angleCount, thicknessCount } = shapeInfo;
+  const data = new Uint8Array(angleCount * thicknessCount * 4);
+  for (let a = 0; a < angleCount; a++) {
+    const angleRow = tensor.data[a];
+    if (!Array.isArray(angleRow) || angleRow.length !== thicknessCount) {
+      throw new Error(`gold wafer lookup row ${a} does not match thickness count`);
+    }
+    for (let t = 0; t < thicknessCount; t++) {
+      const rgb = angleRow[t];
+      if (!Array.isArray(rgb) || rgb.length !== 3) {
+        throw new Error(`gold wafer lookup sample [${a}, ${t}] is not RGB`);
+      }
+      const o = (a * thicknessCount + t) * 4;
+      data[o] = rgb[0];
+      data[o + 1] = rgb[1];
+      data[o + 2] = rgb[2];
+      data[o + 3] = 255;
+    }
+  }
+  const texture = new THREE.DataTexture(data, thicknessCount, angleCount, THREE.RGBAFormat, THREE.UnsignedByteType);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.minFilter = THREE.NearestFilter;
+  texture.magFilter = THREE.NearestFilter;
+  texture.generateMipmaps = false;
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.flipY = false;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function ensureGoldWaferBodyMaxFoodRT() {
+  if (!goldWaferBodyMaxFoodRT) {
+    goldWaferBodyMaxFoodRT = new RTPair(makeGoldWaferBodyMaxFoodRT);
+    clearRT(goldWaferBodyMaxFoodRT.read);
+    clearRT(goldWaferBodyMaxFoodRT.write);
+    goldWaferBodyMaxFoodInitialized = false;
+    goldWaferBodyMaxFoodNeedsUpdate = true;
+  }
+  return goldWaferBodyMaxFoodRT;
+}
+
+function resetGoldWaferBodyHistory() {
+  goldWaferBodyMaxFoodInitialized = false;
+  goldWaferBodyMaxFoodNeedsUpdate = true;
+  if (goldWaferBodyMaxFoodRT) {
+    clearRT(goldWaferBodyMaxFoodRT.read);
+    clearRT(goldWaferBodyMaxFoodRT.write);
+  }
+  if (params.useGoldWaferBody || goldWaferBodyMesh?.visible) {
+    syncGoldWaferBodyMaterialUniforms();
+  }
+}
+
+function updateGoldWaferBodyMaxFoodTexture({ force = false } = {}) {
+  if (!params.useGoldWaferBody || (!force && !started && !goldWaferBodyMaxFoodNeedsUpdate)) return false;
+  const rt = ensureGoldWaferBodyMaxFoodRT();
+  maxFoodHistoryMaterial.uniforms.u_currentFood.value = renderSampleViewRT.read.texture;
+  maxFoodHistoryMaterial.uniforms.u_previousMax.value = goldWaferBodyMaxFoodInitialized
+    ? rt.read.texture
+    : goldWaferBodyZeroFoodTexture;
+  runFullscreenPass(maxFoodHistoryMaterial, rt.write);
+  rt.swap();
+  goldWaferBodyMaxFoodInitialized = true;
+  goldWaferBodyMaxFoodNeedsUpdate = false;
+  syncGoldWaferBodyMaterialUniforms();
+  return true;
+}
+
+function buildGoldWaferBodyMaterial() {
+  const material = new THREE.MeshPhysicalMaterial({
+    color: params.goldBodyColor,
+    metalness: 1.0,
+    roughness: params.goldBodyRoughness,
+    reflectivity: params.goldBodyReflectivity,
+    specularIntensity: 0.0,
+    side: THREE.DoubleSide,
+    envMapIntensity: params.lightBrightness,
+  });
+  material.name = 'gold-wafer-body-underlay';
+  material.defines = { ...(material.defines ?? {}), USE_UV: '' };
+  material.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, goldWaferBodyUniforms);
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>',
+        `#include <common>
+         varying vec2 vGoldBodyUv;`)
+      .replace('#include <uv_vertex>',
+        `#include <uv_vertex>
+         vGoldBodyUv = uv;`);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>',
+        `#include <common>
+         uniform sampler2D uGoldBodyMaxFood;
+         uniform sampler2D uGoldBodyLookup;
+         uniform float uGoldBodyLookupW;
+         uniform float uGoldBodyLookupH;
+         uniform float uGoldBodyLookupMinNm;
+         uniform float uGoldBodyLookupSpanNm;
+         uniform float uGoldBodyFoodClamp;
+         uniform float uGoldBodyFilmCurve;
+         uniform float uGoldBodyMinThicknessNm;
+         uniform float uGoldBodyMaxThicknessNm;
+         uniform float uGoldBodyFadeFraction;
+         uniform float uGoldBodyRoughness;
+         uniform float uGoldBodyReflectivity;
+         uniform vec3 uGoldBodyColor;
+         uniform int uGoldBodyDiscardUnvisited;
+         varying vec2 vGoldBodyUv;
+
+${goldWaferBodyLutShaderHelpers}`)
+      .replace('#include <color_fragment>',
+        `#include <color_fragment>
+         {
+           float _foodMax = texture2D(uGoldBodyMaxFood, vGoldBodyUv).r;
+           float _fade = goldBodyFadeFromFood(_foodMax);
+           if (_fade <= 0.00001) {
+             if (uGoldBodyDiscardUnvisited == 1) discard;
+             diffuseColor.rgb = vec3(0.0);
+           } else {
+             diffuseColor.rgb = clamp(uGoldBodyColor, 0.0, 1.0);
+             if (uGoldBodyDiscardUnvisited == 1) {
+               diffuseColor.a *= _fade;
+             } else {
+               diffuseColor.rgb *= _fade;
+             }
+           }
+         }`)
+      .replace('#include <roughnessmap_fragment>',
+        `#include <roughnessmap_fragment>
+         {
+           float _goldBodyFade = goldBodyFadeAt(vGoldBodyUv);
+           roughnessFactor = clamp(mix(1.0, uGoldBodyRoughness, _goldBodyFade), 0.04, 1.0);
+         }`)
+      .replace('#include <metalnessmap_fragment>',
+        `#include <metalnessmap_fragment>
+         metalnessFactor *= goldBodyFadeAt(vGoldBodyUv);`)
+      .replace('#include <lights_fragment_end>',
+        `#include <lights_fragment_end>
+         {
+           float _goldBodyReflectivity = clamp(uGoldBodyReflectivity, 0.0, 1.0);
+           float _goldBodyFade = goldBodyFadeAt(vGoldBodyUv);
+           vec3 _N = normalize(vNormal);
+           vec3 _V = normalize(vViewPosition);
+           float _c = clamp(abs(dot(_N, _V)), 0.0, 1.0);
+           float _foodMax = texture2D(uGoldBodyMaxFood, vGoldBodyUv).r;
+           vec3 _goldBodyFilmColor = goldBodyFilmColorFromFood(_foodMax, _c);
+           vec3 _goldBodyReflectionColor = mix(vec3(1.0), _goldBodyFilmColor, _goldBodyFade);
+           reflectedLight.directSpecular *= _goldBodyReflectionColor * _goldBodyReflectivity;
+           reflectedLight.indirectSpecular *= _goldBodyReflectionColor * _goldBodyReflectivity;
+         }`);
+  };
+  material.customProgramCacheKey = () => 'gold-wafer-body-underlay-v4';
+  return material;
+}
+
+function syncGoldWaferBodyMaterialUniforms() {
+  goldWaferBodyUniforms.uGoldBodyMaxFood.value = goldWaferBodyMaxFoodRT?.read?.texture ?? goldWaferBodyZeroFoodTexture;
+  goldWaferBodyUniforms.uGoldBodyLookup.value = goldWaferFilmState.texture;
+  goldWaferBodyUniforms.uGoldBodyLookupW.value = goldWaferFilmState.width;
+  goldWaferBodyUniforms.uGoldBodyLookupH.value = goldWaferFilmState.height;
+  goldWaferBodyUniforms.uGoldBodyLookupMinNm.value = goldWaferFilmState.minNm;
+  goldWaferBodyUniforms.uGoldBodyLookupSpanNm.value = goldWaferFilmState.spanNm;
+  goldWaferBodyUniforms.uGoldBodyFoodClamp.value = params.foodClamp;
+  goldWaferBodyUniforms.uGoldBodyFilmCurve.value = params.filmThicknessCurve;
+  goldWaferBodyUniforms.uGoldBodyMinThicknessNm.value = params.iridescenceMinThickness;
+  goldWaferBodyUniforms.uGoldBodyMaxThicknessNm.value = params.iridescenceThickness;
+  goldWaferBodyUniforms.uGoldBodyFadeFraction.value = params.goldBodyFade;
+  goldWaferBodyUniforms.uGoldBodyRoughness.value = params.goldBodyRoughness;
+  goldWaferBodyUniforms.uGoldBodyReflectivity.value = params.goldBodyReflectivity;
+  goldWaferBodyUniforms.uGoldBodyColor.value.set(params.goldBodyColor);
+  goldWaferBodyUniforms.uGoldBodyDiscardUnvisited.value = isGlassEnabled() ? 1 : 0;
+  if (goldWaferBodyMaterial) {
+    goldWaferBodyMaterial.roughness = params.goldBodyRoughness;
+    goldWaferBodyMaterial.reflectivity = params.goldBodyReflectivity;
+    goldWaferBodyMaterial.color.set(params.goldBodyColor);
+    goldWaferBodyMaterial.specularIntensity = 0.0;
+    goldWaferBodyMaterial.envMapIntensity = params.lightBrightness;
+  }
+}
+
+function syncIcosaLightRigUniforms() {
+  const lightCount = getActiveIcosaLightCount(params);
+  const lightRadianceScale = getActiveIcosaLightRadianceScale(params);
+  if (slimeMaterial) {
+    slimeMaterial.uniforms.u_lightCount.value = lightCount;
+    slimeMaterial.uniforms.u_lightRadianceScale.value = lightRadianceScale;
+  }
+  if (goldWaferBodyIcoEnvMaterial) {
+    goldWaferBodyIcoEnvMaterial.uniforms.u_lightCount.value = lightCount;
+    goldWaferBodyIcoEnvMaterial.uniforms.u_lightRadianceScale.value = lightRadianceScale;
+  }
+  if (goldWaferBodyIcoEnvPmrem) {
+    goldWaferBodyIcoEnvPmrem.dispose();
+    goldWaferBodyIcoEnvPmrem = null;
+    if (goldWaferBodyMaterial) {
+      goldWaferBodyMaterial.envMap = null;
+      goldWaferBodyMaterial.needsUpdate = true;
+    }
+  }
+  if (params.useGoldWaferBody) syncGoldWaferBodyMode();
+}
+
+function isGoldWaferBodyRenderActive() {
+  return !!(
+    params.useGoldWaferBody &&
+    goldWaferFilmState.ready &&
+    goldWaferBodyMesh &&
+    slimeMaterial &&
+    params.debugView === 'slime'
+  );
+}
+
+function syncGoldWaferBodyMode() {
+  const active = isGoldWaferBodyRenderActive();
+  if (active && goldWaferBodyMaterial) {
+    const envMap = ensureGoldWaferBodyEnvironmentMap();
+    if (goldWaferBodyMaterial.envMap !== envMap) {
+      goldWaferBodyMaterial.envMap = envMap;
+      goldWaferBodyMaterial.needsUpdate = true;
+    }
+  }
+  syncGoldWaferBodyMaterialUniforms();
+  if (goldWaferBodyMaterial) {
+    const shouldBeTransparent = active && isGlassEnabled();
+    if (goldWaferBodyMaterial.transparent !== shouldBeTransparent) {
+      goldWaferBodyMaterial.transparent = shouldBeTransparent;
+      goldWaferBodyMaterial.needsUpdate = true;
+    }
+    goldWaferBodyMaterial.depthWrite = !shouldBeTransparent;
+  }
+  if (goldWaferBodyMesh) {
+    goldWaferBodyMesh.visible = active;
+  }
+  if (slimeMaterial) {
+    slimeMaterial.uniforms.u_useGoldWaferBodyUnderlay.value = active ? 1 : 0;
+    const shouldBeTransparent = active;
+    const desiredBlending = active ? THREE.CustomBlending : THREE.NormalBlending;
+    const blendingChanged = slimeMaterial.blending !== desiredBlending;
+    if (slimeMaterial.transparent !== shouldBeTransparent) {
+      slimeMaterial.transparent = shouldBeTransparent;
+      slimeMaterial.needsUpdate = true;
+    }
+    slimeMaterial.depthWrite = !shouldBeTransparent;
+    slimeMaterial.blending = desiredBlending;
+    if (active) {
+      // Preserve slime radiance; alpha only reveals the gold underlay behind it.
+      slimeMaterial.blendEquation = THREE.AddEquation;
+      slimeMaterial.blendSrc = THREE.OneFactor;
+      slimeMaterial.blendDst = THREE.OneMinusSrcAlphaFactor;
+      slimeMaterial.blendSrcAlpha = THREE.OneFactor;
+      slimeMaterial.blendDstAlpha = THREE.OneMinusSrcAlphaFactor;
+    }
+    if (blendingChanged) slimeMaterial.needsUpdate = true;
+  }
+  if (mesh) {
+    mesh.renderOrder = active ? 2 : 0;
+  }
+}
+
+function syncGoldWaferFilmUniforms() {
+  if (slimeMaterial) {
+    const u = slimeMaterial.uniforms;
+    u.u_goldWaferLookup.value = goldWaferFilmState.texture;
+    u.u_goldLookupW.value = goldWaferFilmState.width;
+    u.u_goldLookupH.value = goldWaferFilmState.height;
+    u.u_goldLookupMinNm.value = goldWaferFilmState.minNm;
+    u.u_goldLookupSpanNm.value = goldWaferFilmState.spanNm;
+    u.u_useGoldWaferFilm.value = params.useGoldWaferFilm && goldWaferFilmState.ready ? 1 : 0;
+  }
+  if (params.useGoldWaferBody || goldWaferBodyMesh?.visible) {
+    syncGoldWaferBodyMaterialUniforms();
+  }
+}
+
+function syncGoldWaferFilmControlState() {
+  const input = document.getElementById('useGoldWaferFilm');
+  const bodyInput = document.getElementById('useGoldWaferBody');
+  const loadingTitle = 'Loading the gold-wafer lookup.';
+  const idleTitle = goldWaferFilmState.error || 'Check to load and use the gold-wafer thin-film lookup.';
+  if (input) {
+    input.disabled = goldWaferFilmState.loading;
+    input.title = goldWaferFilmState.ready
+      ? 'Use the expanded gold-wafer thin-film lookup for the slime film.'
+      : goldWaferFilmState.loading
+        ? loadingTitle
+        : idleTitle;
+    if (!goldWaferFilmState.ready && goldWaferFilmState.error && input.checked) {
+      input.checked = false;
+      params.useGoldWaferFilm = false;
+    }
+  }
+  if (bodyInput) {
+    bodyInput.disabled = goldWaferFilmState.loading;
+    bodyInput.title = goldWaferFilmState.ready
+      ? 'Render a MeshPhysicalMaterial gold-wafer body under the slime, driven by peak food.'
+      : goldWaferFilmState.loading
+        ? loadingTitle
+        : idleTitle;
+    if (!goldWaferFilmState.ready && goldWaferFilmState.error && bodyInput.checked) {
+      bodyInput.checked = false;
+      params.useGoldWaferBody = false;
+    }
+  }
+  syncGoldWaferBodyMode();
+}
+
+async function loadGoldWaferFilmLookup() {
+  if (goldWaferFilmState.loading || goldWaferFilmState.ready) return;
+  goldWaferFilmState.loading = true;
+  syncGoldWaferFilmControlState();
+  try {
+    const response = await fetch(GOLD_WAFER_LOOKUP_PATH);
+    if (!response.ok) throw new Error(`${GOLD_WAFER_LOOKUP_PATH}: HTTP ${response.status}`);
+    const tensor = await response.json();
+    const shapeInfo = validateGoldWaferTensor(tensor);
+    const texture = buildGoldWaferLookupTexture(tensor, shapeInfo);
+    const oldTexture = goldWaferFilmState.texture;
+    goldWaferFilmState.texture = texture;
+    goldWaferFilmState.width = shapeInfo.thicknessCount;
+    goldWaferFilmState.height = shapeInfo.angleCount;
+    goldWaferFilmState.minNm = shapeInfo.minNm;
+    goldWaferFilmState.spanNm = shapeInfo.spanNm;
+    goldWaferFilmState.ready = true;
+    goldWaferFilmState.error = '';
+    syncGoldWaferFilmUniforms();
+    syncGoldWaferFilmControlState();
+    if (params.useGoldWaferBody || goldWaferBodyMesh?.visible || slimeMaterial?.transparent) {
+      syncGoldWaferBodyMode();
+    }
+    oldTexture?.dispose?.();
+  } catch (err) {
+    goldWaferFilmState.error = `Gold wafer lookup unavailable: ${err.message}`;
+    console.warn(goldWaferFilmState.error);
+    params.useGoldWaferFilm = false;
+    params.useGoldWaferBody = false;
+    syncGoldWaferFilmUniforms();
+    syncGoldWaferFilmControlState();
+  } finally {
+    goldWaferFilmState.loading = false;
+    syncGoldWaferFilmControlState();
+  }
+}
+
 function buildSlimeMaterial() {
   return new THREE.ShaderMaterial({
     glslVersion: THREE.GLSL3,
     vertexShader: slimeVertex,
     fragmentShader: slimeFragment,
     side: THREE.DoubleSide,
+    defines: {
+      GLASS_ENABLED: isGlassEnabled() ? 1 : 0,
+    },
     uniforms: {
       u_food: { value: renderSampleViewRT.read.texture },
       u_agentDensity: { value: densityRT.texture },
+      u_skyCube: { value: skyCubeRT.texture },
       u_seamRedirectUv: { value: seamRedirectUvRT.texture },
       u_seamRedirectMeta: { value: seamRedirectMetaRT.texture },
       u_seamRedirectClaim: { value: seamRedirectClaimRT.texture },
@@ -4416,24 +6274,96 @@ function buildSlimeMaterial() {
       u_chartId: { value: chartIdRT.texture },
       u_chartUnsafe: { value: chartUnsafeRT.texture },
       u_texel: { value: new THREE.Vector2(1 / FIELD_SIZE, 1 / FIELD_SIZE) },
+      u_resolution: { value: new THREE.Vector2(canvas.width, canvas.height) },
+      u_glassLensCenter: { value: new THREE.Vector2(0.5, 0.5) },
+      u_time: { value: 0 },
       u_heightScale: { value: params.surfaceHeight },
       u_bumpStrength: { value: params.surfaceBump },
       u_normalSampleRadius: { value: getNormalSampleRadiusTexels(params) },
       u_iridescenceStrength: { value: params.iridescenceStrength },
       u_iridescenceMinThickness: { value: params.iridescenceMinThickness },
       u_iridescenceThickness: { value: params.iridescenceThickness },
+      u_filmThicknessCurve: { value: params.filmThicknessCurve },
       u_lightBrightness: { value: params.lightBrightness },
+      u_foodClamp: { value: params.foodClamp },
+      u_goldWaferLookup: { value: goldWaferFilmState.texture },
+      u_goldLookupW: { value: goldWaferFilmState.width },
+      u_goldLookupH: { value: goldWaferFilmState.height },
+      u_goldLookupMinNm: { value: goldWaferFilmState.minNm },
+      u_goldLookupSpanNm: { value: goldWaferFilmState.spanNm },
       u_lightPositions: { value: icosahedronLightPositions.map((position) => position.clone()) },
+      u_lightCount: { value: getActiveIcosaLightCount() },
+      u_lightRadianceScale: { value: getActiveIcosaLightRadianceScale() },
       u_cameraPos: { value: new THREE.Vector3() },
       u_baseColor: { value: new THREE.Color(params.slimeBaseColor) },
+      u_glassStrength: { value: params.glassStrength },
+      u_glassBend: { value: params.glassBend },
+      u_glassAberration: { value: params.glassAberration },
+      u_glassFresnelStrength: { value: params.glassFresnelStrength },
+      u_glassTint: { value: new THREE.Color(params.glassTint) },
       u_meshOutlineEnabled: { value: params.meshOutlineEnabled ? 1 : 0 },
       u_showAgentDots: { value: 0 },
       u_bumpDiagonalTapsEnabled: { value: getBumpDiagonalTapsEnabled(params) ? 1 : 0 },
       u_filmFollowsSlimeHeight: { value: params.filmFollowsSlimeHeight ? 1 : 0 },
+      u_useGoldWaferFilm: { value: 0 },
+      u_useGoldWaferBodyUnderlay: { value: 0 },
       u_useSeamStitching: { value: 1 },
       u_useZeroGutterTransitions: { value: 1 },
     },
   });
+}
+
+function syncSlimeMaterialForCamera(renderCamera, skyEnvironmentTexture, resolutionVector, nowMs = performance.now()) {
+  if (!slimeMaterial) return;
+  const u = slimeMaterial.uniforms;
+  const glassEnabled = isGlassEnabled();
+  u.u_food.value = renderSampleViewRT.read.texture;
+  u.u_agentDensity.value = densityRT.texture;
+  u.u_cameraPos.value.copy(renderCamera.position);
+  if (glassEnabled) {
+    u.u_skyCube.value = skyEnvironmentTexture;
+    u.u_resolution.value.copy(resolutionVector);
+    u.u_time.value = nowMs * 0.001;
+    glassLensCenterWorld.copy(controls.target).project(renderCamera);
+    if (
+      Number.isFinite(glassLensCenterWorld.x) &&
+      Number.isFinite(glassLensCenterWorld.y)
+    ) {
+      u.u_glassLensCenter.value.set(
+        glassLensCenterWorld.x * 0.5 + 0.5,
+        glassLensCenterWorld.y * 0.5 + 0.5,
+      );
+    } else {
+      u.u_glassLensCenter.value.set(0.5, 0.5);
+    }
+  }
+  u.u_meshOutlineEnabled.value = params.meshOutlineEnabled ? 1 : 0;
+  u.u_showAgentDots.value = params.showAgentDots ? 1 : 0;
+  u.u_bumpDiagonalTapsEnabled.value = getBumpDiagonalTapsEnabled(params) ? 1 : 0;
+  u.u_useSeamStitching.value = params.useSeamStitching ? 1 : 0;
+  u.u_useZeroGutterTransitions.value = params.useSeamStitching ? 1 : 0;
+  u.u_normalSampleRadius.value = getNormalSampleRadiusTexels(params);
+  u.u_heightScale.value = params.surfaceHeight;
+  u.u_bumpStrength.value = params.surfaceBump;
+  u.u_iridescenceStrength.value = params.iridescenceStrength;
+  u.u_iridescenceMinThickness.value = params.iridescenceMinThickness;
+  u.u_iridescenceThickness.value = params.iridescenceThickness;
+  u.u_filmThicknessCurve.value = params.filmThicknessCurve;
+  u.u_lightBrightness.value = params.lightBrightness;
+  u.u_lightCount.value = getActiveIcosaLightCount(params);
+  u.u_lightRadianceScale.value = getActiveIcosaLightRadianceScale(params);
+  u.u_foodClamp.value = params.foodClamp;
+  u.u_baseColor.value.set(params.slimeBaseColor);
+  if (glassEnabled) {
+    u.u_glassStrength.value = params.glassStrength;
+    u.u_glassBend.value = params.glassBend;
+    u.u_glassAberration.value = params.glassAberration;
+    u.u_glassFresnelStrength.value = params.glassFresnelStrength;
+    u.u_glassTint.value.set(params.glassTint);
+  }
+  u.u_filmFollowsSlimeHeight.value = params.filmFollowsSlimeHeight ? 1 : 0;
+  u.u_useGoldWaferBodyUnderlay.value = isGoldWaferBodyRenderActive() ? 1 : 0;
+  syncGoldWaferFilmUniforms();
 }
 
 // === oat glow markers ===
@@ -4485,6 +6415,7 @@ const oatGlowLift = 0;
 const OBSERVATION_VIEW_MARGIN_PX = 14;
 const OBSERVATION_BOX_WIDTH_PX = 230;
 const OBSERVATION_BOX_HEIGHT_PX = 126;
+const OBSERVATION_MIN_SCREEN_GAP_PX = 8;
 const OBSERVATION_STROKE_WIDTH_PX = 1.5;
 const OBSERVATION_LEADER_BORDER_OVERLAP_PX = 2;
 const OBSERVATION_Z_INDEX_RANGE = 100000;
@@ -4496,10 +6427,24 @@ const OBSERVATION_SLIME_TRIGGER_INTERVAL_MS = 220;
 const OBSERVATION_SLIME_TRIGGER_READS_PER_FRAME = 4;
 const OBSERVATION_CHAR_STEP_MS = 70;
 const OBSERVATION_CHAR_FADE_MS = 620;
+const OBSERVATION_TEXT_REVEAL_MASK_SCALE = 2.6;
+const OBSERVATION_TEXT_REVEAL_SOLID_STOP = 0.48;
+const OBSERVATION_TEXT_REVEAL_SOLID_STOP_PERCENT = OBSERVATION_TEXT_REVEAL_SOLID_STOP * 100;
+// Stop at the first fully opaque mask position; the remaining travel to 0% is visually inert.
+const OBSERVATION_TEXT_REVEAL_END_PERCENT = (
+  ((OBSERVATION_TEXT_REVEAL_MASK_SCALE * OBSERVATION_TEXT_REVEAL_SOLID_STOP) - 1) /
+  (OBSERVATION_TEXT_REVEAL_MASK_SCALE - 1)
+) * 100;
+const OBSERVATION_TEXT_REVEAL_ACTIVE_FRACTION = (100 - OBSERVATION_TEXT_REVEAL_END_PERCENT) / 100;
+const OBSERVATION_TEXT_REVEAL_MASK_IMAGE = `linear-gradient(90deg, #000 0%, #000 ${OBSERVATION_TEXT_REVEAL_SOLID_STOP_PERCENT.toFixed(0)}%, rgba(0, 0, 0, 0.72) 51%, rgba(0, 0, 0, 0.28) 54%, transparent 58%, transparent 100%)`;
+const OBSERVATION_TEXT_REVEAL_MASK_SIZE = `${(OBSERVATION_TEXT_REVEAL_MASK_SCALE * 100).toFixed(0)}% 100%`;
+const OBSERVATION_TEXT_REVEAL_START_POSITION = '100% 0';
+const OBSERVATION_TEXT_REVEAL_END_POSITION = `${OBSERVATION_TEXT_REVEAL_END_PERCENT.toFixed(3)}% 0`;
 const OBSERVATION_EXIT_LINE_COUNT = 5;
 const OBSERVATION_BOX_FADE_IN_MS = 2600;
 const OBSERVATION_TEXT_START_DELAY_MS = OBSERVATION_BOX_FADE_IN_MS;
 const OBSERVATION_BOX_FADE_OUT_MS = 2600;
+const OBSERVATION_OAT_FADE_IN_MS = 900;
 const OBSERVATION_OAT_FADE_OUT_MS = 1800;
 const OBSERVATION_PLACEHOLDER_TEXT = [
   'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.',
@@ -4541,6 +6486,8 @@ function createOatGlowMarker(surfacePos, surfaceNormal = null) {
   marker.userData.surfacePos = surfacePos.clone();
   marker.userData.surfaceNormal = normal.clone();
   marker.userData.baseScale = 0.15 * WORLD_LINEAR_SCALE;
+  marker.userData.createdAt = performance.now();
+  marker.userData.fadeInMs = OBSERVATION_OAT_FADE_IN_MS;
   marker.userData.occlusionOpacity = 1;
   marker.userData.occlusionUpdatedAt = performance.now();
   marker.userData.occlusionPhaseMs = (nextObservationId * 19) % OBSERVATION_OCCLUSION_REFRESH_MS;
@@ -4559,17 +6506,174 @@ function disposeOatMarker(marker) {
   });
 }
 
+async function requestIntroStart() {
+  if (introSequenceState.requested || introSequenceState.completed) return;
+  introSequenceState.requested = true;
+  introSequenceState.requestedAt = 0;
+  introSequenceState.seedSoundPlayed = false;
+  if (startScreen) startScreen.classList.add('is-armed');
+  if (startButton) startButton.disabled = true;
+  const introClip = SOUND_CHECK_CLIPS.find((clip) => clip.id === 'intro');
+  const soundStart = introClip ? await playSoundCheckOneShot(introClip) : null;
+  const nowAfterSoundStart = performance.now();
+  const reportedSoundStart = soundStart?.startedAtPerformanceMs;
+  if (
+    Number.isFinite(reportedSoundStart) &&
+    Math.abs(reportedSoundStart - nowAfterSoundStart) <= 250
+  ) {
+    introSequenceState.requestedAt = reportedSoundStart;
+  } else {
+    if (Number.isFinite(reportedSoundStart)) {
+      console.warn('Ignoring implausible Web Audio start timestamp for intro timing.', {
+        reportedSoundStart,
+        nowAfterSoundStart,
+        deltaMs: reportedSoundStart - nowAfterSoundStart,
+      });
+    }
+    introSequenceState.requestedAt = nowAfterSoundStart;
+  }
+  const stretchClip = SOUND_CHECK_CLIPS.find((clip) => clip.id === 'slime-appear-stretch');
+  if (stretchClip) {
+    loadSoundCheckBuffer(stretchClip.path).catch((err) => {
+      console.warn(`Failed to preload ${getSoundFileName(stretchClip.path)}:`, err);
+    });
+  }
+  initEnvAudio().catch((err) => {
+    console.warn('Failed to preload ambience loop:', err);
+  });
+  if (startScreen) startScreen.classList.add('is-running');
+  maybeBeginIntroSequence(performance.now());
+}
+
+function getInitialOatUv() {
+  return initialOatUv ?? FALLBACK_INITIAL_OAT_UV;
+}
+
+function getIntroOatTargetPosition() {
+  const target = initialOatSurfaceHit?.worldPos?.clone?.() ??
+    uvToWorld(getInitialOatUv(), new THREE.Vector3());
+  if (!target) return null;
+  const normal = initialOatSurfaceHit?.worldNormal?.clone?.() ?? target.clone();
+  if (normal.lengthSq() < 1e-8) normal.set(0, 1, 0);
+  normal.normalize();
+  return target.addScaledVector(normal, 0.035 * WORLD_LINEAR_SCALE);
+}
+
+function getIntroOatStartPosition(targetPos) {
+  camera.updateMatrixWorld(true);
+  camera.updateProjectionMatrix();
+  const targetNdc = targetPos.clone().project(camera);
+  if (!Number.isFinite(targetNdc.x) || !Number.isFinite(targetNdc.y) || !Number.isFinite(targetNdc.z)) {
+    return targetPos.clone().add(new THREE.Vector3(0, 0.7 * WORLD_LINEAR_SCALE, 0));
+  }
+  return new THREE.Vector3(targetNdc.x, INTRO_OAT_START_SCREEN_Y, targetNdc.z).unproject(camera);
+}
+
+function maybeBeginIntroSequence(now = performance.now()) {
+  if (
+    !startScreenReady ||
+    !started ||
+    !introSequenceState.requested ||
+    !Number.isFinite(introSequenceState.requestedAt) ||
+    introSequenceState.requestedAt <= 0 ||
+    introSequenceState.active ||
+    introSequenceState.completed
+  ) {
+    return false;
+  }
+  if (now - introSequenceState.requestedAt < INTRO_OAT_SPRITE_DELAY_MS) return false;
+
+  const targetPos = getIntroOatTargetPosition();
+  if (!targetPos) return false;
+  introSequenceState.active = true;
+  introSequenceState.startedAt = introSequenceState.requestedAt + INTRO_OAT_SPRITE_DELAY_MS;
+  introSequenceState.seedSoundPlayed = false;
+  startEnvAudio().catch((err) => {
+    console.warn('Failed to start ambience loop:', err);
+  });
+  introSequenceState.targetPos.copy(targetPos);
+  introSequenceState.startPos.copy(getIntroOatStartPosition(targetPos));
+
+  const sprite = makeOatGlowSprite(oatGlowTexture, oatGlowTint, 1.0, 0.24 * WORLD_LINEAR_SCALE, {
+    depthTest: false,
+  });
+  sprite.userData.baseScale = sprite.scale.x;
+  sprite.position.copy(introSequenceState.startPos);
+  sprite.renderOrder = 20;
+  scene.add(sprite);
+  introSequenceState.sprite = sprite;
+  return true;
+}
+
+function updateIntroSequence(now) {
+  if (introSequenceState.requested && !introSequenceState.active && !introSequenceState.completed) {
+    maybeBeginIntroSequence(now);
+  }
+  if (!introSequenceState.active || !introSequenceState.sprite) return;
+  const progress = Math.max(0, Math.min(1, (now - introSequenceState.startedAt) / INTRO_OAT_SEQUENCE_MS));
+  const descent = smoothUnit(Math.min(1, progress / INTRO_OAT_LAND_AT));
+  introSequenceState.sprite.position.lerpVectors(
+    introSequenceState.startPos,
+    introSequenceState.targetPos,
+    descent,
+  );
+
+  const glow = progress <= INTRO_OAT_LAND_AT
+    ? 0
+    : smoothUnit(
+      (Math.min(progress, INTRO_OAT_BRIGHTEN_END) - INTRO_OAT_LAND_AT) /
+        Math.max(0.001, INTRO_OAT_BRIGHTEN_END - INTRO_OAT_LAND_AT),
+    );
+  const fade = progress <= INTRO_OAT_BRIGHTEN_END
+    ? 0
+    : smoothUnit((progress - INTRO_OAT_BRIGHTEN_END) / Math.max(0.001, 1 - INTRO_OAT_BRIGHTEN_END));
+  const opacity = (1 + glow * 0.72) * (1 - fade);
+  introSequenceState.sprite.material.opacity = opacity;
+  introSequenceState.sprite.material.color.setScalar(1);
+  introSequenceState.sprite.scale.setScalar(
+    introSequenceState.sprite.userData.baseScale * (1.12 - descent * 0.16 + glow * 0.38),
+  );
+  const seedSoundAt = INTRO_OAT_SEQUENCE_MS - INITIAL_AGENT_SEED_SOUND_LEAD_MS;
+  if (
+    !introSequenceState.seedSoundPlayed &&
+    now - introSequenceState.startedAt >= seedSoundAt
+  ) {
+    playInitialAgentSeedSound();
+    introSequenceState.seedSoundPlayed = true;
+  }
+  if (progress >= 1) finishIntroSequence();
+}
+
+function finishIntroSequence() {
+  if (introSequenceState.sprite) {
+    scene.remove(introSequenceState.sprite);
+    introSequenceState.sprite.material?.dispose?.();
+    introSequenceState.sprite = null;
+  }
+  introSequenceState.active = false;
+  introSequenceState.completed = true;
+  if (startScreen) {
+    startScreen.classList.add('is-complete');
+    startScreen.setAttribute('aria-hidden', 'true');
+  }
+  if (started) {
+    statsReadbackCooldownUntil = performance.now() + STATS_READBACK_RESET_COOLDOWN_MS;
+    replayInitialAgentSeed({ playSound: !introSequenceState.seedSoundPlayed });
+  }
+}
+
 function updateOatMarkerOcclusionOpacity(marker, target, now) {
   return updateOcclusionOpacity(marker.userData, target, now, 14);
 }
 
 function getOatStorySpriteOpacity(oat, now) {
   const observation = oat?.observation;
-  const timeline = observation?.textTimeline;
-  if (!observation?.triggered || !timeline) return 1;
-  const elapsedMs = now - timeline.startTime;
-  if (elapsedMs <= timeline.totalDurationMs) return 1;
-  return 1 - smoothUnit((elapsedMs - timeline.totalDurationMs) / OBSERVATION_OAT_FADE_OUT_MS);
+  const createdAt = oat?.sphere?.userData?.createdAt ?? now - OBSERVATION_OAT_FADE_IN_MS;
+  const fadeIn = smoothUnit((now - createdAt) / OBSERVATION_OAT_FADE_IN_MS);
+  if (observation?.completed) return 0;
+  if (!observation?.triggered || !Number.isFinite(observation.oatFadeOutStartedAt)) return fadeIn;
+  const fadeOut = smoothUnit((now - observation.oatFadeOutStartedAt) / OBSERVATION_OAT_FADE_OUT_MS);
+  return fadeIn * (1 - fadeOut);
 }
 
 function updateOcclusionOpacity(cache, target, now, responseRate = 10) {
@@ -4726,23 +6830,30 @@ function buildObservationTextAnimation(observation, text = OBSERVATION_PLACEHOLD
     const line = document.createElement('span');
     line.className = 'observation-line';
     const chars = splitObservationGraphemes(lineText);
-    const lineDurationMs = chars.length * OBSERVATION_CHAR_STEP_MS + OBSERVATION_CHAR_FADE_MS;
+    const maskTravelDurationMs = chars.length * OBSERVATION_CHAR_STEP_MS + OBSERVATION_CHAR_FADE_MS;
+    const lineDurationMs = Math.max(240, maskTravelDurationMs * OBSERVATION_TEXT_REVEAL_ACTIVE_FRACTION);
     lineDurations.push(lineDurationMs);
     line.textContent = lineText || '\u00a0';
-    line.style.maskImage = 'linear-gradient(90deg, #000 0%, #000 48%, rgba(0, 0, 0, 0.72) 51%, rgba(0, 0, 0, 0.28) 54%, transparent 58%, transparent 100%)';
+    line.style.maskImage = OBSERVATION_TEXT_REVEAL_MASK_IMAGE;
     line.style.webkitMaskImage = line.style.maskImage;
-    line.style.maskSize = '260% 100%';
+    line.style.maskSize = OBSERVATION_TEXT_REVEAL_MASK_SIZE;
     line.style.webkitMaskSize = line.style.maskSize;
     line.style.maskRepeat = 'no-repeat';
     line.style.webkitMaskRepeat = line.style.maskRepeat;
-    line.style.maskPosition = '100% 0';
+    line.style.maskPosition = OBSERVATION_TEXT_REVEAL_START_POSITION;
     line.style.webkitMaskPosition = line.style.maskPosition;
     roll.append(line);
     const revealAnimation = line.animate([
-      { maskPosition: '100% 0', WebkitMaskPosition: '100% 0' },
-      { maskPosition: '0% 0', WebkitMaskPosition: '0% 0' },
+      {
+        maskPosition: OBSERVATION_TEXT_REVEAL_START_POSITION,
+        WebkitMaskPosition: OBSERVATION_TEXT_REVEAL_START_POSITION,
+      },
+      {
+        maskPosition: OBSERVATION_TEXT_REVEAL_END_POSITION,
+        WebkitMaskPosition: OBSERVATION_TEXT_REVEAL_END_POSITION,
+      },
     ], {
-      duration: Math.max(240, lineDurationMs),
+      duration: lineDurationMs,
       delay: OBSERVATION_TEXT_START_DELAY_MS + cumulativeMs,
       easing: 'linear',
       fill: 'forwards',
@@ -4803,6 +6914,20 @@ function buildObservationTextAnimation(observation, text = OBSERVATION_PLACEHOLD
   });
 }
 
+function maybeStartOatObservationText(oat, now = performance.now()) {
+  const observation = oat?.observation;
+  if (
+    !observation?.triggered ||
+    observation.completed ||
+    observation.textTimeline ||
+    now < (observation.textBoxStartAt ?? 0)
+  ) {
+    return observation?.textTimeline ?? null;
+  }
+  buildObservationTextAnimation(observation, observation.text ?? oat.storyText ?? OBSERVATION_PLACEHOLDER_TEXT);
+  return observation.textTimeline;
+}
+
 function smoothUnit(value) {
   const t = Math.max(0, Math.min(1, value));
   return t * t * (3 - 2 * t);
@@ -4832,7 +6957,7 @@ function getObservationEnvelope(observation, now) {
 function setObservationText(observation, text = '', { restart = true } = {}) {
   if (!observation) return null;
   observation.text = String(text ?? '');
-  if (restart && observation.triggered) {
+  if (restart && observation.triggered && observation.textTimeline) {
     buildObservationTextAnimation(observation, observation.text);
   } else if (!observation.triggered) {
     cancelObservationTextAnimation(observation);
@@ -4855,13 +6980,19 @@ function setAllOatObservationText(text = '', options = {}) {
 }
 
 function triggerOatObservation(oatOrIndex, { force = false } = {}) {
+  if (!isStoryBoxesEnabled() && !force) return null;
   const oat = typeof oatOrIndex === 'number' ? oats[oatOrIndex] : oatOrIndex;
   const observation = oat?.observation;
   if (!observation || (observation.triggered && !force)) return null;
+  const now = performance.now();
   observation.triggered = true;
   observation.completed = false;
-  observation.triggeredAt = performance.now();
-  buildObservationTextAnimation(observation, observation.text ?? oat.storyText ?? OBSERVATION_PLACEHOLDER_TEXT);
+  observation.triggeredAt = now;
+  observation.oatFadeOutStartedAt = now;
+  observation.textBoxStartAt = now + OBSERVATION_OAT_FADE_OUT_MS;
+  cancelObservationTextAnimation(observation);
+  if (observation.body) observation.body.textContent = '';
+  observation.textTimeline = null;
   return observation;
 }
 
@@ -4873,6 +7004,8 @@ function completeOatObservation(oatOrIndex) {
   observation.triggered = true;
   observation.completed = true;
   observation.triggeredAt = now - OBSERVATION_BOX_FADE_OUT_MS - OBSERVATION_OAT_FADE_OUT_MS;
+  observation.oatFadeOutStartedAt = now - OBSERVATION_OAT_FADE_OUT_MS;
+  observation.textBoxStartAt = now;
   cancelObservationTextAnimation(observation);
   if (observation.body) observation.body.textContent = '';
   observation.textTimeline = {
@@ -4921,6 +7054,8 @@ function createOatObservation(oat) {
     triggered: false,
     completed: false,
     triggeredAt: 0,
+    oatFadeOutStartedAt: null,
+    textBoxStartAt: null,
     slimeTriggerScore: 0,
     slimeTriggerMean: 0,
     slimeTriggerMax: 0,
@@ -4933,7 +7068,7 @@ function createOatObservation(oat) {
   annotationLayer.append(callout);
   body.textContent = '';
   document.fonts?.ready?.then(() => {
-    if (observation.callout.isConnected && observation.triggered && !observation.completed) {
+    if (observation.callout.isConnected && observation.triggered && !observation.completed && observation.textTimeline) {
       buildObservationTextAnimation(observation, observation.text);
     }
   });
@@ -5022,6 +7157,15 @@ function hideOatObservation(observation, { preserveEnvelope = false } = {}) {
   if (observation.tail) observation.tail.style.opacity = '0';
 }
 
+function isStoryBoxesEnabled() {
+  return params.storyBoxesEnabled !== false;
+}
+
+function syncStoryBoxesEnabled() {
+  if (isStoryBoxesEnabled()) return;
+  for (const oat of oats) hideOatObservation(oat.observation);
+}
+
 function getOatAnnotationAnchorPos(oat, observation) {
   if (oat?.sphere?.position) return oat.sphere.position.clone();
   return observation.surfacePos.clone().addScaledVector(observation.surfaceNormal, oatGlowLift);
@@ -5071,6 +7215,18 @@ function measureOatSlimeTriggerScore(oat) {
 }
 
 function updateObservationSlimeTriggers(now = performance.now()) {
+  if (!isStoryBoxesEnabled()) {
+    nextObservationTriggerCheckAt = now + OBSERVATION_SLIME_TRIGGER_INTERVAL_MS;
+    lastObservationTriggerDiagnostics = {
+      checked: 0,
+      triggered: 0,
+      pending: 0,
+      threshold: Math.max(0, params.observationSlimeTriggerThreshold ?? 0),
+      lastCheckedAt: now,
+      disabled: true,
+    };
+    return lastObservationTriggerDiagnostics;
+  }
   if (!oats.length || now < nextObservationTriggerCheckAt) return lastObservationTriggerDiagnostics;
   nextObservationTriggerCheckAt = now + OBSERVATION_SLIME_TRIGGER_INTERVAL_MS;
 
@@ -5113,6 +7269,10 @@ function updateObservationSlimeTriggers(now = performance.now()) {
 
 function updateOatAnnotations() {
   if (!annotationLayer || !mesh) return;
+  if (!isStoryBoxesEnabled()) {
+    for (const oat of oats) hideOatObservation(oat.observation);
+    return;
+  }
   const now = performance.now();
   camera.updateMatrixWorld(true);
   camera.matrixWorldInverse.copy(camera.matrixWorld).invert();
@@ -5124,6 +7284,7 @@ function updateOatAnnotations() {
   for (const oat of oats) {
     const observation = oat.observation;
     if (!observation) continue;
+    maybeStartOatObservationText(oat, now);
     const envelope = getObservationEnvelope(observation, now);
     if (envelope.glassOpacity <= 0.005) {
       hideOatObservation(observation, { preserveEnvelope: observation.triggered });
@@ -5133,10 +7294,7 @@ function updateOatAnnotations() {
     const surfacePos = observation.surfacePos;
     const surfaceNormal = observation.surfaceNormal;
     const anchorPos = getOatAnnotationAnchorPos(oat, observation);
-    const tailLength = Math.max(0, params.observationTailLength ?? 0.48) * WORLD_LINEAR_SCALE;
-    const tetherTip = anchorPos.clone().addScaledVector(surfaceNormal, tailLength);
     const anchorScreen = projectWorldToScreen(anchorPos);
-    const tipScreen = projectWorldToScreen(tetherTip);
     const toCamera = camera.position.clone().sub(surfacePos).normalize();
     const facing = surfaceNormal.dot(toCamera);
     const facingVisibility = THREE.MathUtils.smoothstep(facing, -0.14, 0.2);
@@ -5144,22 +7302,24 @@ function updateOatAnnotations() {
     const occlusionTarget = getCachedMeshOcclusionTarget(occlusionCache, anchorPos, facingVisibility, now);
     const visibility = facingVisibility * updateObservationOcclusionOpacity(occlusionCache, occlusionTarget, now);
 
-    if (!anchorScreen.inClip || !tipScreen.inClip) {
+    if (!anchorScreen.inClip) {
       hideOatObservation(observation, { preserveEnvelope: true });
       continue;
     }
 
     const boxWidth = Math.min(OBSERVATION_BOX_WIDTH_PX, Math.max(1, viewportWidth - OBSERVATION_VIEW_MARGIN_PX * 2));
     const boxHeight = OBSERVATION_BOX_HEIGHT_PX;
-    const desiredCenterX = tipScreen.x;
-    const desiredCenterY = tipScreen.y;
+    const screenGap = Math.max(
+      OBSERVATION_MIN_SCREEN_GAP_PX,
+      Math.max(0, params.observationTailLength ?? 0) * viewportHeight,
+    );
     const left = THREE.MathUtils.clamp(
-      desiredCenterX - boxWidth * 0.5,
+      anchorScreen.x - boxWidth * 0.5,
       OBSERVATION_VIEW_MARGIN_PX,
       viewportWidth - boxWidth - OBSERVATION_VIEW_MARGIN_PX,
     );
     const top = THREE.MathUtils.clamp(
-      desiredCenterY - boxHeight * 0.5,
+      anchorScreen.y - boxHeight - screenGap,
       OBSERVATION_VIEW_MARGIN_PX,
       viewportHeight - boxHeight - OBSERVATION_VIEW_MARGIN_PX,
     );
@@ -5170,7 +7330,7 @@ function updateOatAnnotations() {
     observation.callout.style.setProperty('--observation-glass-opacity', envelope.glassOpacity.toFixed(3));
     observation.callout.style.setProperty('--observation-text-opacity', envelope.textOpacity.toFixed(3));
     observation.callout.style.setProperty('--observation-spatial-opacity', visibility.toFixed(3));
-    const depth01 = THREE.MathUtils.clamp((tipScreen.z + 1) * 0.5, 0, 1);
+    const depth01 = THREE.MathUtils.clamp((anchorScreen.z + 1) * 0.5, 0, 1);
     observation.callout.style.zIndex = String(Math.round((1 - depth01) * OBSERVATION_Z_INDEX_RANGE));
     observation.callout.classList.add('is-visible');
 
@@ -5186,6 +7346,10 @@ function updateOatAnnotations() {
 // === state ===
 let mesh = null;
 let wireframeOverlay = null;
+let lakeMirror = null;
+const materialRenderResolution = new THREE.Vector2();
+const mainMaterialRenderResolution = new THREE.Vector2();
+const glassLensCenterWorld = new THREE.Vector3();
 let agentReadback = new Float32Array(AGENT_CAPACITY * 4);
 let slimeCoverageReadback = new Float32Array(FIELD_SIZE * FIELD_SIZE * 4);
 let coverageMaskReadback = new Uint8Array(FIELD_SIZE * FIELD_SIZE * 4);
@@ -5212,6 +7376,7 @@ let surfaceCoverageBuildDiagnostics = {
 let lastFrameTime = performance.now();
 let fpsSmoothed = 60;
 let lastStatsRead = 0;
+let statsReadbackCooldownUntil = performance.now() + STATS_READBACK_RESET_COOLDOWN_MS;
 let visibleAgents = INITIAL_AGENTS;
 let agentHistorySamples = [];
 let agentAllocationFrame = 0;
@@ -5230,26 +7395,52 @@ let debugBaseMaterial = null;
 let chartOwnership = null;
 let uvDiagnostics = null;
 let authoritativeSpawnTexels = null;
-let lastAgentCreationDiagnostics = {
-  requestedAgents: 0,
-  createdAgents: 0,
-  failedAgents: 0,
-  localRetryAttempts: 0,
-  localAccepted: 0,
-  localRejectedOutsideAtlas: 0,
-  localRejectedWrongChart: 0,
-  localRejectedUnsafeOrUnowned: 0,
-  globalRetryAttempts: 0,
-  globalAccepted: 0,
-  deterministicFallbackAccepted: 0,
-  deterministicFallbackFailed: 0,
-  initialOatGaussianAccepted: 0,
-  initialOatGaussianFailed: 0,
-  initialOatCenterFallbackAccepted: 0,
-  initialOatUv: null,
-  initialOatSpawnSigma: 0,
-  invalidCreatedAgents: 0,
-  note: 'Agent creation has not run yet.',
+function makeEmptyAgentCreationDiagnostics(note = 'Agent creation has not run yet.') {
+  return {
+    requestedAgents: 0,
+    createdAgents: 0,
+    failedAgents: 0,
+    localRetryAttempts: 0,
+    localAccepted: 0,
+    localRejectedOutsideAtlas: 0,
+    localRejectedWrongChart: 0,
+    localRejectedUnsafeOrUnowned: 0,
+    globalRetryAttempts: 0,
+    globalAccepted: 0,
+    deterministicFallbackAccepted: 0,
+    deterministicFallbackFailed: 0,
+    initialOatGaussianAccepted: 0,
+    initialOatGaussianFailed: 0,
+    initialOatCenterFallbackAccepted: 0,
+    initialOatUv: null,
+    initialOatSpawnSigma: 0,
+    invalidCreatedAgents: 0,
+    note,
+  };
+}
+let lastAgentCreationDiagnostics = makeEmptyAgentCreationDiagnostics();
+const introSequenceState = {
+  requested: false,
+  active: false,
+  completed: false,
+  requestedAt: 0,
+  startedAt: 0,
+  seedSoundPlayed: false,
+  sprite: null,
+  startPos: new THREE.Vector3(),
+  targetPos: new THREE.Vector3(),
+};
+const initialAgentSeedState = {
+  pending: false,
+  pendingStartAt: 0,
+  active: false,
+  startedAt: 0,
+  durationMs: INITIAL_AGENT_SEED_DURATION_MS,
+  data: null,
+  liveAgentIndices: [],
+  diagnostics: null,
+  visibleCount: 0,
+  revealSlotCount: 0,
 };
 let lastTransitionCandidatePackingDiagnostics = {
   rawCandidateClaims: 0,
@@ -5294,6 +7485,859 @@ let lastSeamPaddingDiagnostics = {
 
 const oats = [];
 // Each oat: { uv: {x,y}, chartId, worldPos: Vector3, worldNormal: Vector3, radius, power, sphere: Object3D }
+
+const soundCheckAudioState = {
+  context: null,
+  output: null,
+  compressor: null,
+  buffers: new Map(),
+  bufferPromises: new Map(),
+  oneShots: [],
+};
+
+const envAudioState = {
+  path: ENV_AUDIO_PATH,
+  buffer: null,
+  output: null,
+  sources: [],
+  duration: 0,
+  interval: 0,
+  crossfadeSeconds: ENV_AUDIO_CROSSFADE_SECONDS,
+  nextStartTime: 0,
+  schedulerId: null,
+  running: false,
+};
+
+function clampFinite(value, min, max, fallback = min) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.max(min, Math.min(max, number));
+}
+
+function getClipMaxVolume(clip) {
+  return Math.max(0.01, Number(clip?.maxGain) || 1);
+}
+
+function getSoundFileName(path) {
+  return String(path || '').split('/').pop() || String(path || '');
+}
+
+function getSoundClip(soundId) {
+  return SOUND_CHECK_CLIPS.find((clip) => clip.id === soundId) ?? null;
+}
+
+const soundSettingsState = new Map(SOUND_CHECK_CLIPS.map((clip) => {
+  const maxVolume = getClipMaxVolume(clip);
+  return [clip.id, {
+    volume: clampFinite(clip.gain ?? 1, 0, maxVolume, Math.min(1, maxVolume)),
+    maxVolume,
+    loop: Boolean(clip.loop),
+    fadeInSeconds: clampFinite(
+      clip.fadeInSeconds ?? SOUND_DEFAULT_FADE_IN_SECONDS,
+      0,
+      SOUND_FADE_SECONDS_MAX,
+      SOUND_DEFAULT_FADE_IN_SECONDS,
+    ),
+    fadeOutSeconds: clampFinite(
+      clip.fadeOutSeconds ?? SOUND_DEFAULT_FADE_OUT_SECONDS,
+      0,
+      SOUND_FADE_SECONDS_MAX,
+      SOUND_DEFAULT_FADE_OUT_SECONDS,
+    ),
+  }];
+}));
+
+const soundCompressorState = { ...SOUND_COMPRESSOR_DEFAULTS };
+
+function getSoundCheckButton(soundId) {
+  if (!soundCheckGrid) return null;
+  return Array.from(soundCheckGrid.querySelectorAll('[data-sound-id]'))
+    .find((button) => button.dataset.soundId === soundId) ?? null;
+}
+
+function getSoundCheckRow(soundId) {
+  if (!soundCheckGrid) return null;
+  return Array.from(soundCheckGrid.querySelectorAll('[data-sound-row-id]'))
+    .find((row) => row.dataset.soundRowId === soundId) ?? null;
+}
+
+function setButtonLoading(button, loading) {
+  if (!button) return;
+  button.classList.toggle('is-loading', loading);
+  button.disabled = loading;
+}
+
+function isSoundActive(soundId) {
+  return getOneShotSources(soundId).length > 0 || (soundId === 'env' && envAudioState.running);
+}
+
+function setSoundButtonState(soundId, { loading = false } = {}) {
+  const button = getSoundCheckButton(soundId);
+  if (!button) return;
+  const clip = getSoundClip(soundId);
+  const filename = getSoundFileName(clip?.path);
+  const active = isSoundActive(soundId);
+  button.textContent = loading ? 'Loading' : active ? 'Stop' : 'Play';
+  button.title = loading ? `Loading ${filename}` : active ? `Stop ${filename}` : `Play ${filename}`;
+  button.setAttribute('aria-pressed', String(active));
+  button.classList.toggle('is-active', active);
+  setButtonLoading(button, loading);
+}
+
+function setEnvLoopButtonState({ loading = false } = {}) {
+  setSoundButtonState('env', { loading });
+}
+
+function isPanelShortcutEditableTarget(target) {
+  const element = target instanceof Element ? target : null;
+  return Boolean(element?.closest('input, textarea, select, button, [contenteditable=""], [contenteditable="true"]'));
+}
+
+function syncPanelVisibilityState() {
+  if (appEl) appEl.dataset.panelsVisible = String(uiPanelsVisible);
+  const panel = document.querySelector('.panel');
+  panel?.setAttribute('aria-hidden', String(!uiPanelsVisible));
+  if (soundCheckPanel) {
+    soundCheckPanel.setAttribute('aria-hidden', String(!uiPanelsVisible || soundCheckPanel.hidden));
+  }
+}
+
+function setUiPanelsVisible(visible) {
+  uiPanelsVisible = Boolean(visible);
+  syncPanelVisibilityState();
+  if (uiPanelsVisible) drawAgentCharts();
+}
+
+function toggleUiPanelsVisible() {
+  setUiPanelsVisible(!uiPanelsVisible);
+}
+
+function handlePanelVisibilityKeydown(event) {
+  if (event.key?.toLowerCase() !== 'p' || event.altKey || event.ctrlKey || event.metaKey) return;
+  if (event.repeat) return;
+  if (isPanelShortcutEditableTarget(event.target)) return;
+  event.preventDefault();
+  toggleUiPanelsVisible();
+}
+
+function setSoundCheckOpen(open) {
+  if (!soundCheckPanel || !soundCheckToggleButton) return;
+  soundCheckPanel.hidden = !open;
+  soundCheckToggleButton.setAttribute('aria-expanded', String(open));
+  soundCheckToggleButton.title = open ? 'Hide sound check' : 'Show sound check';
+  syncPanelVisibilityState();
+}
+
+function toggleSoundCheckPanel() {
+  setSoundCheckOpen(soundCheckPanel?.hidden ?? true);
+}
+
+function getSoundSettings(soundId) {
+  const clip = getSoundClip(soundId);
+  if (!clip) return null;
+  if (!soundSettingsState.has(soundId)) {
+    const maxVolume = getClipMaxVolume(clip);
+    soundSettingsState.set(soundId, {
+      volume: clampFinite(clip.gain ?? 1, 0, maxVolume, Math.min(1, maxVolume)),
+      maxVolume,
+      loop: Boolean(clip.loop),
+      fadeInSeconds: clampFinite(
+        clip.fadeInSeconds ?? SOUND_DEFAULT_FADE_IN_SECONDS,
+        0,
+        SOUND_FADE_SECONDS_MAX,
+        SOUND_DEFAULT_FADE_IN_SECONDS,
+      ),
+      fadeOutSeconds: clampFinite(
+        clip.fadeOutSeconds ?? SOUND_DEFAULT_FADE_OUT_SECONDS,
+        0,
+        SOUND_FADE_SECONDS_MAX,
+        SOUND_DEFAULT_FADE_OUT_SECONDS,
+      ),
+    });
+  }
+  return soundSettingsState.get(soundId);
+}
+
+function getSoundVolume(soundId) {
+  const settings = getSoundSettings(soundId);
+  if (!settings) return 1;
+  return clampFinite(settings.volume, 0, settings.maxVolume, Math.min(1, settings.maxVolume));
+}
+
+function getSoundLoopEnabled(soundId) {
+  return Boolean(getSoundSettings(soundId)?.loop);
+}
+
+function getSoundFadeInSeconds(soundId) {
+  return clampFinite(
+    getSoundSettings(soundId)?.fadeInSeconds,
+    0,
+    SOUND_FADE_SECONDS_MAX,
+    SOUND_DEFAULT_FADE_IN_SECONDS,
+  );
+}
+
+function getSoundFadeOutSeconds(soundId) {
+  return clampFinite(
+    getSoundSettings(soundId)?.fadeOutSeconds,
+    0,
+    SOUND_FADE_SECONDS_MAX,
+    SOUND_DEFAULT_FADE_OUT_SECONDS,
+  );
+}
+
+function formatSoundVolume(volume) {
+  return `${Math.round(volume * 100)}%`;
+}
+
+function syncSoundRowControls(soundId) {
+  const row = getSoundCheckRow(soundId);
+  const settings = getSoundSettings(soundId);
+  if (!row || !settings) return;
+  const volumeInput = row.querySelector('[data-sound-volume-id]');
+  const volumeOutput = row.querySelector('[data-sound-volume-output-id]');
+  const loopInput = row.querySelector('[data-sound-loop-id]');
+  const fadeInInput = row.querySelector('[data-sound-fade-in-id]');
+  const fadeOutInput = row.querySelector('[data-sound-fade-out-id]');
+  if (volumeInput) {
+    volumeInput.max = settings.maxVolume.toFixed(4);
+    volumeInput.value = getSoundVolume(soundId).toFixed(2);
+    volumeInput.title = `Peak-safe max ${formatSoundVolume(settings.maxVolume)}`;
+  }
+  if (volumeOutput) volumeOutput.value = formatSoundVolume(getSoundVolume(soundId));
+  if (loopInput) loopInput.checked = getSoundLoopEnabled(soundId);
+  if (fadeInInput) fadeInInput.value = getSoundFadeInSeconds(soundId).toFixed(2);
+  if (fadeOutInput) fadeOutInput.value = getSoundFadeOutSeconds(soundId).toFixed(2);
+}
+
+function getEnvAudioVolume() {
+  return getSoundVolume('env');
+}
+
+function getEnvAudioCrossfadeSeconds(duration = envAudioState.duration) {
+  const maxCrossfade = Math.max(0, Math.min(SOUND_FADE_SECONDS_MAX, (Number(duration) || 0) - 0.001));
+  return clampFinite(getSoundFadeOutSeconds('env'), 0, maxCrossfade, Math.min(ENV_AUDIO_CROSSFADE_SECONDS, maxCrossfade));
+}
+
+function applyAudioParamValue(audioParam, value, { smooth = true } = {}) {
+  const context = soundCheckAudioState.context;
+  if (!audioParam || !context) return;
+  const now = context.currentTime;
+  audioParam.cancelScheduledValues(now);
+  if (smooth) {
+    audioParam.setValueAtTime(audioParam.value, now);
+    audioParam.setTargetAtTime(value, now, SOUND_VOLUME_RAMP_SECONDS);
+  } else {
+    audioParam.setValueAtTime(value, now);
+  }
+}
+
+function getAudioOutputTimestamp(context) {
+  if (!context?.getOutputTimestamp) return null;
+  const timestamp = context.getOutputTimestamp();
+  if (
+    !timestamp ||
+    !Number.isFinite(timestamp.contextTime) ||
+    !Number.isFinite(timestamp.performanceTime)
+  ) {
+    return null;
+  }
+  return timestamp;
+}
+
+function performanceMsToAudioContextTime(context, performanceMs) {
+  const targetMs = Number(performanceMs);
+  if (!Number.isFinite(targetMs)) return context.currentTime;
+  const timestamp = getAudioOutputTimestamp(context);
+  if (timestamp) {
+    return Math.max(
+      context.currentTime,
+      timestamp.contextTime + ((targetMs - timestamp.performanceTime) / 1000),
+    );
+  }
+  return Math.max(context.currentTime, context.currentTime + ((targetMs - performance.now()) / 1000));
+}
+
+function audioContextTimeToPerformanceMs(context, audioTime) {
+  const targetAudioTime = Number(audioTime);
+  if (!Number.isFinite(targetAudioTime)) return performance.now();
+  const timestamp = getAudioOutputTimestamp(context);
+  if (timestamp) {
+    return timestamp.performanceTime + ((targetAudioTime - timestamp.contextTime) * 1000);
+  }
+  return performance.now() + ((targetAudioTime - context.currentTime) * 1000);
+}
+
+function ensureEnvAudioOutput(context) {
+  if (!envAudioState.output) {
+    envAudioState.output = context.createGain();
+    envAudioState.output.gain.setValueAtTime(getEnvAudioVolume(), context.currentTime);
+    envAudioState.output.connect(soundCheckAudioState.output);
+  }
+  return envAudioState.output;
+}
+
+function setSoundVolume(soundId, volume, { smooth = true } = {}) {
+  const settings = getSoundSettings(soundId);
+  if (!settings) return 1;
+  settings.volume = clampFinite(volume, 0, settings.maxVolume, getSoundVolume(soundId));
+  if (soundId === 'env' && envAudioState.output) {
+    applyAudioParamValue(envAudioState.output.gain, settings.volume, { smooth });
+  }
+  for (const sourceRecord of getOneShotSources(soundId)) {
+    applyAudioParamValue(sourceRecord.gain?.gain, settings.volume, { smooth });
+  }
+  syncSoundRowControls(soundId);
+  return settings.volume;
+}
+
+function setEnvAudioVolume(volume, options) {
+  return setSoundVolume('env', volume, options);
+}
+
+function setSoundLoopEnabled(soundId, enabled) {
+  const settings = getSoundSettings(soundId);
+  if (!settings) return false;
+  settings.loop = Boolean(enabled);
+  syncSoundRowControls(soundId);
+  return settings.loop;
+}
+
+function setSoundFadeInSeconds(soundId, seconds) {
+  const settings = getSoundSettings(soundId);
+  if (!settings) return 0;
+  settings.fadeInSeconds = clampFinite(seconds, 0, SOUND_FADE_SECONDS_MAX, settings.fadeInSeconds);
+  syncSoundRowControls(soundId);
+  return settings.fadeInSeconds;
+}
+
+function setSoundFadeOutSeconds(soundId, seconds) {
+  const settings = getSoundSettings(soundId);
+  if (!settings) return 0;
+  settings.fadeOutSeconds = clampFinite(seconds, 0, SOUND_FADE_SECONDS_MAX, settings.fadeOutSeconds);
+  syncSoundRowControls(soundId);
+  return settings.fadeOutSeconds;
+}
+
+function safeDisconnectAudioNode(node) {
+  try {
+    node?.disconnect?.();
+  } catch (err) {
+    // Disconnect throws when no connections exist; that state is harmless here.
+  }
+}
+
+function ensureSoundCompressorNode(context) {
+  if (!soundCheckAudioState.compressor) {
+    soundCheckAudioState.compressor = context.createDynamicsCompressor();
+  }
+  applySoundCompressorSettings({ smooth: false });
+  return soundCheckAudioState.compressor;
+}
+
+function connectSoundOutputGraph() {
+  const context = soundCheckAudioState.context;
+  const output = soundCheckAudioState.output;
+  if (!context || !output) return;
+  safeDisconnectAudioNode(output);
+  safeDisconnectAudioNode(soundCheckAudioState.compressor);
+  if (soundCompressorState.enabled) {
+    const compressor = ensureSoundCompressorNode(context);
+    output.connect(compressor);
+    compressor.connect(context.destination);
+  } else {
+    output.connect(context.destination);
+  }
+}
+
+function applySoundCompressorSettings({ smooth = true } = {}) {
+  const compressor = soundCheckAudioState.compressor;
+  if (!compressor) return;
+  for (const control of SOUND_COMPRESSOR_CONTROLS) {
+    const value = clampFinite(
+      soundCompressorState[control.key],
+      control.min,
+      control.max,
+      SOUND_COMPRESSOR_DEFAULTS[control.key],
+    );
+    applyAudioParamValue(compressor[control.key], value, { smooth });
+  }
+}
+
+function setSoundCompressorEnabled(enabled) {
+  soundCompressorState.enabled = Boolean(enabled);
+  connectSoundOutputGraph();
+  syncSoundCompressorControls();
+  return soundCompressorState.enabled;
+}
+
+function setSoundCompressorParam(key, value, { smooth = true } = {}) {
+  const control = SOUND_COMPRESSOR_CONTROLS.find((item) => item.key === key);
+  if (!control) return null;
+  soundCompressorState[key] = clampFinite(value, control.min, control.max, SOUND_COMPRESSOR_DEFAULTS[key]);
+  applySoundCompressorSettings({ smooth });
+  syncSoundCompressorControls();
+  return soundCompressorState[key];
+}
+
+function formatCompressorValue(control, value) {
+  const digits = Number(control.digits ?? 2);
+  return `${value.toFixed(digits)}${control.suffix ?? ''}`;
+}
+
+function syncSoundCompressorControls() {
+  if (soundCompressorEnabledInput) soundCompressorEnabledInput.checked = soundCompressorState.enabled;
+  if (!soundCompressorGrid) return;
+  for (const control of SOUND_COMPRESSOR_CONTROLS) {
+    const input = Array.from(soundCompressorGrid.querySelectorAll('[data-compressor-param]'))
+      .find((item) => item.dataset.compressorParam === control.key);
+    const output = Array.from(soundCompressorGrid.querySelectorAll('[data-compressor-output]'))
+      .find((item) => item.dataset.compressorOutput === control.key);
+    const value = clampFinite(
+      soundCompressorState[control.key],
+      control.min,
+      control.max,
+      SOUND_COMPRESSOR_DEFAULTS[control.key],
+    );
+    if (input) input.value = String(value);
+    if (output) output.value = formatCompressorValue(control, value);
+  }
+}
+
+async function ensureSoundCheckAudioContext({ resume = true } = {}) {
+  if (!soundCheckAudioState.context) {
+    const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextCtor) throw new Error('Web Audio is not available in this browser.');
+    soundCheckAudioState.context = new AudioContextCtor();
+    soundCheckAudioState.output = soundCheckAudioState.context.createGain();
+    connectSoundOutputGraph();
+  }
+  if (resume && soundCheckAudioState.context.state !== 'running') {
+    await soundCheckAudioState.context.resume();
+  }
+  return soundCheckAudioState.context;
+}
+
+async function loadSoundCheckBuffer(path, { resumeContext = true } = {}) {
+  if (soundCheckAudioState.buffers.has(path)) return soundCheckAudioState.buffers.get(path);
+  if (!soundCheckAudioState.bufferPromises.has(path)) {
+    const promise = (async () => {
+      const context = await ensureSoundCheckAudioContext({ resume: resumeContext });
+      const response = await fetch(path);
+      if (!response.ok) throw new Error(`Failed to load ${path}: ${response.status}`);
+      const arrayBuffer = await response.arrayBuffer();
+      const buffer = await context.decodeAudioData(arrayBuffer);
+      soundCheckAudioState.buffers.set(path, buffer);
+      return buffer;
+    })().catch((err) => {
+      soundCheckAudioState.bufferPromises.delete(path);
+      throw err;
+    });
+    soundCheckAudioState.bufferPromises.set(path, promise);
+  }
+  return soundCheckAudioState.bufferPromises.get(path);
+}
+
+async function loadEnvAudioBuffer({ resumeContext = true } = {}) {
+  try {
+    const buffer = await loadSoundCheckBuffer(ENV_AUDIO_PATH, { resumeContext });
+    envAudioState.path = ENV_AUDIO_PATH;
+    return buffer;
+  } catch (primaryError) {
+    if (!ENV_AUDIO_FALLBACK_PATH || ENV_AUDIO_FALLBACK_PATH === ENV_AUDIO_PATH) {
+      throw primaryError;
+    }
+    try {
+      const buffer = await loadSoundCheckBuffer(ENV_AUDIO_FALLBACK_PATH, { resumeContext });
+      envAudioState.path = ENV_AUDIO_FALLBACK_PATH;
+      console.warn(`Failed to load ${getSoundFileName(ENV_AUDIO_PATH)}; using ${getSoundFileName(ENV_AUDIO_FALLBACK_PATH)} instead.`, primaryError);
+      return buffer;
+    } catch (fallbackError) {
+      throw new Error(
+        `Failed to load ${getSoundFileName(ENV_AUDIO_PATH)} or fallback ${getSoundFileName(ENV_AUDIO_FALLBACK_PATH)}: ${fallbackError.message}`,
+      );
+    }
+  }
+}
+
+async function preloadSoundPack() {
+  await Promise.all(SOUND_CHECK_CLIPS.map((clip) =>
+    clip.id === 'env'
+      ? loadEnvAudioBuffer({ resumeContext: false })
+      : loadSoundCheckBuffer(clip.path, { resumeContext: false })
+  ));
+  await initEnvAudio({ resumeContext: false });
+}
+
+async function initEnvAudio({ resumeContext = true } = {}) {
+  envAudioState.buffer = await loadEnvAudioBuffer({ resumeContext });
+  const duration = envAudioState.buffer?.duration ?? 0;
+  if (!Number.isFinite(duration) || duration <= 0) {
+    throw new Error(`Invalid ambience duration: ${duration}`);
+  }
+  const crossfadeSeconds = getEnvAudioCrossfadeSeconds(duration);
+  envAudioState.duration = duration;
+  envAudioState.crossfadeSeconds = crossfadeSeconds;
+  envAudioState.interval = Math.max(0.001, duration - crossfadeSeconds);
+  return envAudioState;
+}
+
+function removeEnvAudioSource(sourceRecord) {
+  if (sourceRecord.removed) return;
+  sourceRecord.removed = true;
+  const index = envAudioState.sources.indexOf(sourceRecord);
+  if (index >= 0) envAudioState.sources.splice(index, 1);
+  safeDisconnectAudioNode(sourceRecord.source);
+  safeDisconnectAudioNode(sourceRecord.gain);
+}
+
+function scheduleEnvAudioCopy(startTime) {
+  const context = soundCheckAudioState.context;
+  if (!context || !envAudioState.buffer) return;
+  const fadeStart = startTime + envAudioState.interval;
+  const stopTime = startTime + envAudioState.duration;
+  const crossfadeSeconds = Math.max(0, envAudioState.crossfadeSeconds);
+  const source = context.createBufferSource();
+  const gain = context.createGain();
+  const sourceRecord = { source, gain, startTime, stopTime, removed: false };
+
+  source.buffer = envAudioState.buffer;
+  source.connect(gain);
+  gain.connect(ensureEnvAudioOutput(context));
+  gain.gain.setValueAtTime(1, startTime);
+  if (crossfadeSeconds > 0) {
+    gain.gain.setValueAtTime(1, fadeStart);
+    gain.gain.linearRampToValueAtTime(0.0001, stopTime);
+  }
+  source.start(startTime, 0);
+  source.stop(stopTime + 0.05);
+  source.addEventListener('ended', () => removeEnvAudioSource(sourceRecord), { once: true });
+  envAudioState.sources.push(sourceRecord);
+}
+
+function scheduleEnvAudioUntil(untilTime) {
+  while (envAudioState.running && envAudioState.nextStartTime <= untilTime) {
+    scheduleEnvAudioCopy(envAudioState.nextStartTime);
+    envAudioState.nextStartTime += envAudioState.interval;
+  }
+}
+
+function pumpEnvAudioSchedule() {
+  if (!envAudioState.running) return;
+  scheduleEnvAudioUntil(soundCheckAudioState.context.currentTime + ENV_AUDIO_SCHEDULE_LOOKAHEAD_SECONDS);
+}
+
+async function startEnvAudio() {
+  if (envAudioState.running) return;
+  setEnvLoopButtonState({ loading: true });
+  const context = await ensureSoundCheckAudioContext();
+  await initEnvAudio();
+  const output = ensureEnvAudioOutput(context);
+  const fadeInSeconds = getSoundFadeInSeconds('env');
+  output.gain.cancelScheduledValues(context.currentTime);
+  if (fadeInSeconds > 0) {
+    output.gain.setValueAtTime(0.0001, context.currentTime);
+    output.gain.linearRampToValueAtTime(getEnvAudioVolume(), context.currentTime + fadeInSeconds);
+  } else {
+    output.gain.setValueAtTime(getEnvAudioVolume(), context.currentTime);
+  }
+  envAudioState.running = true;
+  envAudioState.nextStartTime = context.currentTime + ENV_AUDIO_START_DELAY_SECONDS;
+  scheduleEnvAudioUntil(context.currentTime + ENV_AUDIO_SCHEDULE_LOOKAHEAD_SECONDS);
+  envAudioState.schedulerId = window.setInterval(pumpEnvAudioSchedule, ENV_AUDIO_SCHEDULE_INTERVAL_MS);
+  setEnvLoopButtonState();
+}
+
+function stopEnvAudio() {
+  envAudioState.running = false;
+  if (envAudioState.schedulerId) {
+    window.clearInterval(envAudioState.schedulerId);
+    envAudioState.schedulerId = null;
+  }
+  const now = soundCheckAudioState.context?.currentTime ?? 0;
+  const fadeOutSeconds = getSoundFadeOutSeconds('env');
+  for (const sourceRecord of [...envAudioState.sources]) {
+    sourceRecord.gain.gain.cancelScheduledValues(now);
+    if (fadeOutSeconds > 0) {
+      sourceRecord.gain.gain.setValueAtTime(sourceRecord.gain.gain.value, now);
+      sourceRecord.gain.gain.linearRampToValueAtTime(0.0001, now + fadeOutSeconds);
+    } else {
+      sourceRecord.gain.gain.setValueAtTime(0.0001, now);
+    }
+    try {
+      sourceRecord.source.stop(now + fadeOutSeconds + 0.02);
+    } catch (err) {
+      removeEnvAudioSource(sourceRecord);
+    }
+  }
+  setEnvLoopButtonState();
+}
+
+async function toggleEnvAudio() {
+  if (envAudioState.running) {
+    stopEnvAudio();
+    return;
+  }
+  try {
+    await startEnvAudio();
+  } catch (err) {
+    console.error('Failed to start ambience audio:', err);
+    envAudioState.running = false;
+    setEnvLoopButtonState();
+    const button = getSoundCheckButton('env');
+    if (button) button.title = `Ambience failed to start: ${err.message}`;
+  }
+}
+
+function removeOneShotSource(sourceRecord) {
+  if (sourceRecord.removed) return;
+  sourceRecord.removed = true;
+  const index = soundCheckAudioState.oneShots.indexOf(sourceRecord);
+  if (index >= 0) soundCheckAudioState.oneShots.splice(index, 1);
+  safeDisconnectAudioNode(sourceRecord.source);
+  safeDisconnectAudioNode(sourceRecord.envelopeGain);
+  safeDisconnectAudioNode(sourceRecord.gain);
+  setSoundButtonState(sourceRecord.soundId);
+}
+
+function getOneShotSources(soundId) {
+  return soundCheckAudioState.oneShots.filter((sourceRecord) => sourceRecord.soundId === soundId);
+}
+
+function setOneShotButtonState(soundId) {
+  setSoundButtonState(soundId);
+}
+
+function stopSoundCheckOneShot(soundId) {
+  const context = soundCheckAudioState.context;
+  if (!context) return;
+  const now = context.currentTime;
+  const fadeOutSeconds = getSoundFadeOutSeconds(soundId);
+  for (const sourceRecord of getOneShotSources(soundId)) {
+    if (sourceRecord.stopping) continue;
+    sourceRecord.stopping = true;
+    const envelope = sourceRecord.envelopeGain?.gain ?? sourceRecord.gain.gain;
+    envelope.cancelScheduledValues(now);
+    if (fadeOutSeconds > 0) {
+      envelope.setValueAtTime(envelope.value, now);
+      envelope.linearRampToValueAtTime(0.0001, now + fadeOutSeconds);
+    } else {
+      envelope.setValueAtTime(0.0001, now);
+    }
+    try {
+      sourceRecord.source.stop(now + fadeOutSeconds + 0.02);
+    } catch (err) {
+      removeOneShotSource(sourceRecord);
+    }
+  }
+}
+
+async function playSoundCheckOneShot(
+  clip,
+  { restart = false, audition = false, startAtPerformanceMs = null } = {},
+) {
+  const button = getSoundCheckButton(clip.id);
+  const activeSources = getOneShotSources(clip.id);
+  if (activeSources.length > 0) {
+    stopSoundCheckOneShot(clip.id);
+    if (!restart) return null;
+  }
+  try {
+    setButtonLoading(button, true);
+    const context = await ensureSoundCheckAudioContext();
+    const buffer = clip.id === 'env'
+      ? await loadEnvAudioBuffer()
+      : await loadSoundCheckBuffer(clip.path);
+    setButtonLoading(button, false);
+
+    const startTime = Number.isFinite(startAtPerformanceMs)
+      ? performanceMsToAudioContextTime(context, startAtPerformanceMs)
+      : context.currentTime;
+    const shouldLoop = Boolean(audition && getSoundLoopEnabled(clip.id));
+    const fadeInSeconds = Math.min(getSoundFadeInSeconds(clip.id), Math.max(0, buffer.duration - 0.001));
+    const fadeOutSeconds = shouldLoop
+      ? 0
+      : Math.min(
+        getSoundFadeOutSeconds(clip.id),
+        Math.max(0, buffer.duration - fadeInSeconds - 0.001),
+      );
+    const source = context.createBufferSource();
+    const envelopeGain = context.createGain();
+    const gain = context.createGain();
+    const sourceRecord = { source, envelopeGain, gain, button, soundId: clip.id, removed: false, stopping: false };
+    source.buffer = buffer;
+    source.loop = shouldLoop;
+    source.connect(envelopeGain);
+    envelopeGain.connect(gain);
+    gain.gain.setValueAtTime(getSoundVolume(clip.id), startTime);
+    envelopeGain.gain.setValueAtTime(fadeInSeconds > 0 ? 0.0001 : 1, startTime);
+    if (fadeInSeconds > 0) {
+      envelopeGain.gain.linearRampToValueAtTime(1, startTime + fadeInSeconds);
+    }
+    if (fadeOutSeconds > 0) {
+      const fadeStart = startTime + Math.max(fadeInSeconds, buffer.duration - fadeOutSeconds);
+      envelopeGain.gain.setValueAtTime(1, fadeStart);
+      envelopeGain.gain.linearRampToValueAtTime(0.0001, startTime + buffer.duration);
+    }
+    gain.connect(soundCheckAudioState.output);
+    source.addEventListener('ended', () => removeOneShotSource(sourceRecord), { once: true });
+    soundCheckAudioState.oneShots.push(sourceRecord);
+    setOneShotButtonState(clip.id);
+    sourceRecord.startedAtAudioTime = startTime;
+    sourceRecord.startedAtPerformanceMs = audioContextTimeToPerformanceMs(context, startTime);
+    source.start(startTime);
+    return sourceRecord;
+  } catch (err) {
+    console.error(`Failed to play ${getSoundFileName(clip.path)}:`, err);
+    setButtonLoading(button, false);
+    if (button) button.title = `Failed to play: ${err.message}`;
+    return null;
+  }
+}
+
+function initSoundCheckPanel() {
+  if (!soundCheckGrid) return;
+  soundCheckGrid.textContent = '';
+  for (const clip of SOUND_CHECK_CLIPS) {
+    const row = document.createElement('div');
+    row.className = 'sound-check-row';
+    row.dataset.soundRowId = clip.id;
+
+    const filename = getSoundFileName(clip.path);
+    const name = document.createElement('span');
+    name.className = 'sound-file-label';
+    name.textContent = filename;
+    name.title = clip.path;
+    row.append(name);
+
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.dataset.soundId = clip.id;
+    button.textContent = 'Play';
+    button.title = `Play ${filename}`;
+    button.setAttribute('aria-pressed', 'false');
+    button.addEventListener('click', () => {
+      if (isSoundActive(clip.id)) {
+        if (clip.id === 'env' && envAudioState.running) stopEnvAudio();
+        stopSoundCheckOneShot(clip.id);
+        return;
+      }
+      if (clip.id === 'env' && getSoundLoopEnabled(clip.id)) toggleEnvAudio();
+      else playSoundCheckOneShot(clip, { audition: true });
+    });
+    row.append(button);
+
+    const volumeCell = document.createElement('label');
+    volumeCell.className = 'sound-volume-cell';
+    const volumeText = document.createElement('span');
+    volumeText.textContent = 'Vol';
+    const volumeInput = document.createElement('input');
+    volumeInput.type = 'range';
+    volumeInput.min = '0';
+    volumeInput.step = '0.01';
+    volumeInput.dataset.soundVolumeId = clip.id;
+    volumeInput.setAttribute('aria-label', `${filename} volume`);
+    const volumeOutput = document.createElement('output');
+    volumeOutput.dataset.soundVolumeOutputId = clip.id;
+    volumeInput.addEventListener('input', () => setSoundVolume(clip.id, volumeInput.value));
+    volumeCell.append(volumeText, volumeInput, volumeOutput);
+    row.append(volumeCell);
+
+    const loopCell = document.createElement('label');
+    loopCell.className = 'sound-loop-cell';
+    const loopText = document.createElement('span');
+    loopText.textContent = 'Loop';
+    const loopInput = document.createElement('input');
+    loopInput.type = 'checkbox';
+    loopInput.dataset.soundLoopId = clip.id;
+    loopInput.setAttribute('aria-label', `${filename} loop in sound check`);
+    loopInput.addEventListener('change', () => setSoundLoopEnabled(clip.id, loopInput.checked));
+    loopCell.append(loopText, loopInput);
+    row.append(loopCell);
+
+    const fadeInCell = document.createElement('label');
+    fadeInCell.className = 'sound-time-cell';
+    const fadeInText = document.createElement('span');
+    fadeInText.textContent = 'In';
+    const fadeInInput = document.createElement('input');
+    fadeInInput.type = 'number';
+    fadeInInput.min = '0';
+    fadeInInput.max = String(SOUND_FADE_SECONDS_MAX);
+    fadeInInput.step = '0.01';
+    fadeInInput.dataset.soundFadeInId = clip.id;
+    fadeInInput.setAttribute('aria-label', `${filename} fade in seconds`);
+    fadeInInput.addEventListener('change', () => setSoundFadeInSeconds(clip.id, fadeInInput.value));
+    fadeInCell.append(fadeInText, fadeInInput);
+    row.append(fadeInCell);
+
+    const fadeOutCell = document.createElement('label');
+    fadeOutCell.className = 'sound-time-cell';
+    const fadeOutText = document.createElement('span');
+    fadeOutText.textContent = 'Out';
+    const fadeOutInput = document.createElement('input');
+    fadeOutInput.type = 'number';
+    fadeOutInput.min = '0';
+    fadeOutInput.max = String(SOUND_FADE_SECONDS_MAX);
+    fadeOutInput.step = '0.01';
+    fadeOutInput.dataset.soundFadeOutId = clip.id;
+    fadeOutInput.setAttribute('aria-label', `${filename} fade out seconds`);
+    fadeOutInput.addEventListener('change', () => setSoundFadeOutSeconds(clip.id, fadeOutInput.value));
+    fadeOutCell.append(fadeOutText, fadeOutInput);
+    row.append(fadeOutCell);
+
+    soundCheckGrid.append(row);
+    syncSoundRowControls(clip.id);
+    setSoundButtonState(clip.id);
+  }
+}
+
+function initSoundCompressorControls() {
+  if (soundCompressorEnabledInput) {
+    soundCompressorEnabledInput.addEventListener('change', () => {
+      setSoundCompressorEnabled(soundCompressorEnabledInput.checked);
+    });
+  }
+  if (soundCompressorGrid) {
+    soundCompressorGrid.textContent = '';
+    for (const control of SOUND_COMPRESSOR_CONTROLS) {
+      const label = document.createElement('label');
+      label.className = 'sound-compressor-control';
+      const name = document.createElement('span');
+      name.textContent = control.label;
+      const input = document.createElement('input');
+      input.type = 'range';
+      input.min = String(control.min);
+      input.max = String(control.max);
+      input.step = String(control.step);
+      input.dataset.compressorParam = control.key;
+      input.setAttribute('aria-label', `Compressor ${control.label.toLowerCase()}`);
+      const output = document.createElement('output');
+      output.dataset.compressorOutput = control.key;
+      input.addEventListener('input', () => setSoundCompressorParam(control.key, input.value));
+      label.append(name, input, output);
+      soundCompressorGrid.append(label);
+    }
+  }
+  syncSoundCompressorControls();
+}
+
+function getEnvAudioState() {
+  return {
+    path: envAudioState.path,
+    primaryPath: ENV_AUDIO_PATH,
+    fallbackPath: ENV_AUDIO_FALLBACK_PATH,
+    crossfadeSeconds: envAudioState.crossfadeSeconds,
+    durationSeconds: envAudioState.duration,
+    intervalSeconds: envAudioState.interval,
+    volume: getEnvAudioVolume(),
+    fadeInSeconds: getSoundFadeInSeconds('env'),
+    fadeOutSeconds: getSoundFadeOutSeconds('env'),
+    running: envAudioState.running,
+    loaded: Boolean(envAudioState.buffer),
+    scheduledSourceCount: envAudioState.sources.length,
+    oneShotSourceCount: soundCheckAudioState.oneShots.length,
+  };
+}
 
 function runReadbackDiagnostic(
   name,
@@ -5342,9 +8386,47 @@ function runReadbackDiagnostic(
 }
 
 // === fail ===
+function setStartScreenLoadingProgress(percent = null, label = 'loading') {
+  if (!startScreenStatus || startScreenReady) return;
+  startScreenStatus.hidden = false;
+  startScreenStatus.classList.remove('error');
+  startScreenStatus.textContent = 'loading...';
+}
+
+function showStartScreenError(message) {
+  startScreenReady = false;
+  if (startScreen) {
+    startScreen.classList.remove('is-armed', 'is-running', 'is-complete');
+    startScreen.removeAttribute('aria-hidden');
+  }
+  if (startScreenStatus) {
+    startScreenStatus.hidden = false;
+    startScreenStatus.classList.add('error');
+    startScreenStatus.textContent = String(message || 'loading failed');
+  }
+  if (startButton) {
+    startButton.hidden = true;
+    startButton.disabled = true;
+  }
+}
+
+function showStartButton() {
+  startScreenReady = true;
+  if (startScreenStatus) {
+    startScreenStatus.hidden = true;
+    startScreenStatus.classList.remove('error');
+  }
+  if (startButton) {
+    startButton.hidden = false;
+    startButton.disabled = false;
+  }
+  maybeBeginIntroSequence();
+}
+
 function fail(message) {
   statusEl.textContent = message;
   statusEl.classList.add('error');
+  showStartScreenError(message);
 }
 
 // === UV → world (for initial oat seed) ===
@@ -5377,6 +8459,95 @@ function uvToWorld(uv, target = new THREE.Vector3()) {
     return target;
   }
   return null;
+}
+
+function updateInitialOatFromCameraRotationCenter(targetMesh = mesh) {
+  if (!targetMesh) {
+    initialOatUv = { ...FALLBACK_INITIAL_OAT_UV };
+    initialOatSurfaceHit = null;
+    return null;
+  }
+
+  targetMesh.updateMatrixWorld(true);
+  const geom = targetMesh.geometry;
+  const posAttr = geom.attributes.position;
+  const uvAttr = geom.attributes.uv;
+  const idx = geom.index;
+  if (!posAttr || !uvAttr) {
+    initialOatUv = { ...FALLBACK_INITIAL_OAT_UV };
+    initialOatSurfaceHit = null;
+    console.warn('Mesh position/UV attributes unavailable for initial oat; using fallback UV.', initialOatUv);
+    return null;
+  }
+
+  const rotationCenter = controls?.target?.clone?.() ?? new THREE.Vector3();
+  const tri = new THREE.Triangle();
+  const a = new THREE.Vector3();
+  const b = new THREE.Vector3();
+  const c = new THREE.Vector3();
+  const closest = new THREE.Vector3();
+  const bary = new THREE.Vector3();
+  const bestPoint = new THREE.Vector3();
+  const bestNormal = new THREE.Vector3();
+  let bestDistanceSq = Infinity;
+  let bestUv = null;
+  const triCount = idx ? idx.count / 3 : posAttr.count / 3;
+
+  for (let faceIndex = 0; faceIndex < triCount; faceIndex++) {
+    const i0 = idx ? idx.getX(faceIndex * 3) : faceIndex * 3;
+    const i1 = idx ? idx.getX(faceIndex * 3 + 1) : faceIndex * 3 + 1;
+    const i2 = idx ? idx.getX(faceIndex * 3 + 2) : faceIndex * 3 + 2;
+    a.fromBufferAttribute(posAttr, i0).applyMatrix4(targetMesh.matrixWorld);
+    b.fromBufferAttribute(posAttr, i1).applyMatrix4(targetMesh.matrixWorld);
+    c.fromBufferAttribute(posAttr, i2).applyMatrix4(targetMesh.matrixWorld);
+    tri.set(a, b, c);
+    tri.closestPointToPoint(rotationCenter, closest);
+    const distanceSq = closest.distanceToSquared(rotationCenter);
+    if (distanceSq >= bestDistanceSq) continue;
+
+    THREE.Triangle.getBarycoord(closest, a, b, c, bary);
+    const uvX =
+      uvAttr.getX(i0) * bary.x +
+      uvAttr.getX(i1) * bary.y +
+      uvAttr.getX(i2) * bary.z;
+    const uvY =
+      uvAttr.getY(i0) * bary.x +
+      uvAttr.getY(i1) * bary.y +
+      uvAttr.getY(i2) * bary.z;
+    tri.getNormal(bestNormal);
+    bestPoint.copy(closest);
+    bestDistanceSq = distanceSq;
+    bestUv = { x: uvX, y: uvY };
+  }
+
+  if (!bestUv || !Number.isFinite(bestDistanceSq)) {
+    initialOatUv = { ...FALLBACK_INITIAL_OAT_UV };
+    initialOatSurfaceHit = null;
+    console.warn('No closest mesh point found for initial oat; using fallback UV.', initialOatUv);
+    return null;
+  }
+
+  if (bestNormal.lengthSq() < 1e-8) bestNormal.copy(bestPoint).normalize();
+  initialOatUv = bestUv;
+  initialOatSurfaceHit = {
+    uv: { ...initialOatUv },
+    worldPos: bestPoint.clone(),
+    worldNormal: bestNormal.clone().normalize(),
+    distanceToRotationCenter: Math.sqrt(bestDistanceSq),
+  };
+  return initialOatSurfaceHit;
+}
+
+function addInitialOat(opts = {}) {
+  const hit = initialOatSurfaceHit ?? updateInitialOatFromCameraRotationCenter();
+  const uv = hit?.uv ?? getInitialOatUv();
+  return addOat(uv.x, uv.y, {
+    initial: true,
+    observationCompleted: true,
+    worldPos: hit?.worldPos,
+    worldNormal: hit?.worldNormal,
+    ...opts,
+  });
 }
 
 // === fixed-UV safety diagnostics ===
@@ -10307,21 +13478,30 @@ function createPerfHelpers() {
 new GLTFLoader().load(
   GLB_PATH,
   (gltf) => {
-    try {
-      onLoad(gltf);
-    } catch (err) {
-      console.error(err);
-      fail(`init failed: ${err.message}`);
+    Promise.resolve()
+      .then(() => {
+        setStartScreenLoadingProgress(72, 'preparing');
+        return onLoad(gltf);
+      })
+      .catch((err) => {
+        console.error(err);
+        fail(`init failed: ${err.message}`);
+      });
+  },
+  (progress) => {
+    if (progress?.lengthComputable && progress.total > 0) {
+      setStartScreenLoadingProgress((progress.loaded / progress.total) * 70, 'loading');
+    } else {
+      setStartScreenLoadingProgress(null, 'loading');
     }
   },
-  () => { /* progress no-op; status text stays */ },
   (err) => {
     console.error(err);
     fail(`failed to load ${GLB_PATH}`);
   },
 );
 
-function onLoad(gltf) {
+async function onLoad(gltf) {
   let foundMesh = null;
   gltf.scene.traverse((obj) => {
     if (!foundMesh && obj.isMesh) foundMesh = obj;
@@ -10330,6 +13510,7 @@ function onLoad(gltf) {
     fail('GLB has no mesh.');
     return;
   }
+  setStartScreenLoadingProgress(74, 'preparing');
   mesh = foundMesh;
   const geom = mesh.geometry;
   if (!geom.index) {
@@ -10365,20 +13546,50 @@ function onLoad(gltf) {
   mesh.frustumCulled = false;
 
   scene.add(mesh);
+  updateInitialOatFromCameraRotationCenter(mesh);
+  setStartScreenLoadingProgress(80, 'mapping');
 
   // Build UV mask
   buildUvMask(mesh);
   cacheCoverageMask();
   const uvTopology = buildUvChartTopology(mesh);
   chartOwnership = buildChartOwnershipTextures(uvTopology);
+  setStartScreenLoadingProgress(88, 'mapping');
   // Build seam data
   seamPairs = buildSeamData(mesh, uvTopology);
   uvDiagnostics = createUvDiagnostics(mesh, uvTopology, chartOwnership);
+  setStartScreenLoadingProgress(92, 'shading');
 
   // Build slime material
   slimeMaterial = buildSlimeMaterial();
   debugBaseMaterial = slimeMaterial;
   mesh.material = slimeMaterial;
+  goldWaferBodyMaterial = buildGoldWaferBodyMaterial();
+  goldWaferBodyMesh = new THREE.Mesh(geom, goldWaferBodyMaterial);
+  goldWaferBodyMesh.name = 'gold-wafer-body-underlay';
+  goldWaferBodyMesh.frustumCulled = false;
+  goldWaferBodyMesh.renderOrder = 0;
+  goldWaferBodyMesh.visible = false;
+  scene.add(goldWaferBodyMesh);
+  mesh.onBeforeRender = function onCuttlefishBeforeRender(renderer, scene, renderCamera) {
+    if (!mesh || mesh.material !== slimeMaterial) return;
+
+    const currentTarget = renderer.getRenderTarget();
+    if (currentTarget) {
+      materialRenderResolution.set(currentTarget.width, currentTarget.height);
+    } else {
+      renderer.getDrawingBufferSize(materialRenderResolution);
+    }
+
+    syncSlimeMaterialForCamera(
+      renderCamera,
+      skyCubeRT.texture,
+      materialRenderResolution,
+      performance.now(),
+    );
+  };
+  syncGoldWaferBodyMode();
+  setStartScreenLoadingProgress(95, 'shading');
 
   // Cache debug-view materials
   debugMaterials.slime = slimeMaterial;
@@ -10467,6 +13678,10 @@ function onLoad(gltf) {
   wireframeOverlay.visible = false;
   scene.add(wireframeOverlay);
 
+  createLakeMirror(geom.boundingBox);
+  setStartScreenLoadingProgress(98, 'starting');
+  await preloadSoundPack();
+
   // Status reflects renderer + slot count, with "loading cuttlefish..." dropped.
   const info = renderer.getContext().getParameter(
     renderer.getContext().getExtension('WEBGL_debug_renderer_info')?.UNMASKED_RENDERER_WEBGL ?? 0x1F01,
@@ -10475,7 +13690,7 @@ function onLoad(gltf) {
   statusEl.textContent = baseStatus;
 
   // Reset & start frame loop
-  resetSimulation({ resetOats: true });
+  resetSimulation({ resetOats: true, spawnAgents: false });
   started = true;
   lastFrameTime = performance.now();
   requestAnimationFrame(frame);
@@ -10487,11 +13702,59 @@ function onLoad(gltf) {
     scene,
     camera,
     controls,
+    audio: {
+      startEnvAudio,
+      stopEnvAudio,
+      toggleEnvAudio,
+      getSoundVolume,
+      setSoundVolume,
+      setSoundLoopEnabled,
+      setSoundFadeInSeconds,
+      setSoundFadeOutSeconds,
+      setEnvAudioVolume,
+      setSoundCompressorEnabled,
+      setSoundCompressorParam,
+      playSoundCheckOneShot,
+      getEnvAudioState,
+      soundSettings: soundSettingsState,
+      soundCompressorState,
+      soundCheckClips: SOUND_CHECK_CLIPS,
+    },
+    skyEquirectRT,
+    skyCubeRT,
     getCameraPose,
     getCameraPoseCommand,
     setCameraPose,
     setCameraAngles,
+    replayInitialAgentSeed,
+    getIntroSequenceState: () => ({
+      requested: introSequenceState.requested,
+      active: introSequenceState.active,
+      completed: introSequenceState.completed,
+      requestedAt: introSequenceState.requestedAt,
+      startedAt: introSequenceState.startedAt,
+      seedSoundPlayed: introSequenceState.seedSoundPlayed,
+      now: performance.now(),
+      elapsedSinceRequestMs: performance.now() - introSequenceState.requestedAt,
+      elapsedSinceSpriteMs: performance.now() - introSequenceState.startedAt,
+    }),
+    getInitialAgentSeedState: () => ({
+      pending: initialAgentSeedState.pending,
+      pendingStartAt: initialAgentSeedState.pendingStartAt,
+      active: initialAgentSeedState.active,
+      startedAt: initialAgentSeedState.startedAt,
+      durationMs: initialAgentSeedState.durationMs,
+      visibleCount: initialAgentSeedState.visibleCount,
+      revealSlotCount: initialAgentSeedState.revealSlotCount,
+      now: performance.now(),
+      elapsedMs: performance.now() - initialAgentSeedState.startedAt,
+      pendingMs: initialAgentSeedState.pending
+        ? initialAgentSeedState.pendingStartAt - performance.now()
+        : 0,
+    }),
     mesh,
+    lakeMirror,
+    syncSlimeMaterialForCamera,
     params,
     agentRT,
     agentParentNextRT,
@@ -10633,6 +13896,7 @@ function onLoad(gltf) {
       return runNamedPass(passName);
     },
   };
+  showStartButton();
 }
 
 // === buildUvMask ===
@@ -11574,7 +14838,8 @@ function addOat(x, y, opts = {}) {
     return null;
   }
   const radius = opts.radius ?? DEFAULT_OAT_RADIUS;
-  const power = opts.power ?? params.oatPower ?? DEFAULT_OAT_POWER;
+  const initial = !!opts.initial;
+  const power = opts.power ?? (initial ? getInitialOatPower() : getDefaultOatPower());
   const uv = { x, y };
   const chartId = chartIdAt(uv);
   if (chartId <= 0 || isOwnershipUnsafe(uv)) {
@@ -11604,7 +14869,7 @@ function addOat(x, y, opts = {}) {
     oatGroup.add(sphere);
   }
   const storyText = String(opts.storyText ?? opts.text ?? OBSERVATION_PLACEHOLDER_TEXT);
-  const oat = { uv, chartId, worldPos, worldNormal, radius, power, sphere, storyText, observation: null };
+  const oat = { uv, chartId, worldPos, worldNormal, radius, power, initial, sphere, storyText, observation: null };
   if (sphere) sphere.userData.oat = oat;
   oat.observation = createOatObservation(oat);
   if (opts.observationCompleted) completeOatObservation(oat);
@@ -11612,6 +14877,21 @@ function addOat(x, y, opts = {}) {
   oatDirty = true;
   oatCountEl.textContent = String(oats.length);
   return oat;
+}
+
+function getDefaultOatPower() {
+  return params.oatPower ?? DEFAULT_OAT_POWER;
+}
+
+function getInitialOatPower() {
+  return getDefaultOatPower() * INITIAL_OAT_POWER_MULTIPLIER;
+}
+
+function syncOatPowersFromParams() {
+  for (const oat of oats) {
+    oat.power = oat.initial ? getInitialOatPower() : getDefaultOatPower();
+  }
+  oatDirty = true;
 }
 
 function clearAllOats() {
@@ -11625,6 +14905,7 @@ function clearAllOats() {
   oats.length = 0;
   nextObservationId = 1;
   oatDirty = true;
+  oatCountEl.textContent = '0';
 }
 
 function clearRT(rt) {
@@ -11634,8 +14915,16 @@ function clearRT(rt) {
   renderer.setRenderTarget(null);
 }
 
+function clearAgentRT(rt) {
+  renderer.setRenderTarget(rt);
+  renderer.setClearColor(0x000000, 0);
+  renderer.clear(true, false, false);
+  renderer.setRenderTarget(null);
+}
+
 function createAgentInitialData() {
   const data = new Float32Array(AGENT_CAPACITY * 4);
+  const liveAgentIndices = [];
   const spawnTexels = getAuthoritativeSpawnTexels();
   const diagnostics = {
     requestedAgents: INITIAL_AGENTS,
@@ -11676,6 +14965,7 @@ function createAgentInitialData() {
     data[p + 2] = angle;
     data[p + 3] = reserve;
     diagnostics.createdAgents++;
+    liveAgentIndices.push(index);
     return true;
   }
 
@@ -11756,10 +15046,11 @@ function createAgentInitialData() {
   }
 
   lastAgentCreationDiagnostics = diagnostics;
-  return { data, diagnostics };
+  return { data, diagnostics, liveAgentIndices };
 }
 
 function initAgents() {
+  cancelInitialAgentSeeding();
   const { data, diagnostics } = createAgentInitialData();
   uploadAgentDataToRT(data, agentRT.read);
   uploadAgentDataToRT(data, agentRT.write);
@@ -11768,10 +15059,135 @@ function initAgents() {
   resetAgentHistory(visibleAgents);
 }
 
-function resetSimulation({ resetOats = false } = {}) {
+function cancelInitialAgentSeeding() {
+  initialAgentSeedState.pending = false;
+  initialAgentSeedState.pendingStartAt = 0;
+  initialAgentSeedState.active = false;
+  initialAgentSeedState.data = null;
+  initialAgentSeedState.liveAgentIndices = [];
+  initialAgentSeedState.diagnostics = null;
+  initialAgentSeedState.visibleCount = 0;
+  initialAgentSeedState.revealSlotCount = 0;
+}
+
+function injectInitialAgentSeedSlots(revealSlotCount) {
+  const state = initialAgentSeedState;
+  const nextSlotCount = Math.max(0, Math.min(INITIAL_AGENTS, Math.floor(revealSlotCount)));
+  if (nextSlotCount <= state.revealSlotCount) return;
+  state.revealSlotCount = nextSlotCount;
+  while (
+    state.visibleCount < state.liveAgentIndices.length &&
+    state.liveAgentIndices[state.visibleCount] < state.revealSlotCount
+  ) {
+    state.visibleCount++;
+  }
+  agentSeedInjectMaterial.uniforms.u_currentAgents.value = agentRT.read.texture;
+  agentSeedInjectMaterial.uniforms.u_seedAgents.value = agentSeedRT.texture;
+  agentSeedInjectMaterial.uniforms.u_revealSlotCount.value = state.revealSlotCount;
+  runFullscreenPass(agentSeedInjectMaterial, agentRT.write);
+  agentRT.swap();
+  visibleAgents = state.visibleCount;
+  agentCountEl.textContent = visibleAgents.toLocaleString();
+  if (state.diagnostics) {
+    lastAgentCreationDiagnostics = {
+      ...state.diagnostics,
+      createdAgents: state.visibleCount,
+      note: `Initial agents are populating over ${(state.durationMs / 1000).toFixed(2)} seconds.`,
+    };
+  }
+}
+
+function beginInitialAgentSeeding({
+  durationMs = INITIAL_AGENT_SEED_DURATION_MS,
+  startedAt = performance.now(),
+} = {}) {
+  const { data, diagnostics, liveAgentIndices } = createAgentInitialData();
+  initialAgentSeedState.pending = false;
+  initialAgentSeedState.pendingStartAt = 0;
+  initialAgentSeedState.active = true;
+  initialAgentSeedState.startedAt = startedAt;
+  initialAgentSeedState.durationMs = Math.max(0, Number(durationMs) || 0);
+  initialAgentSeedState.data = data;
+  initialAgentSeedState.liveAgentIndices = liveAgentIndices;
+  initialAgentSeedState.diagnostics = diagnostics;
+  initialAgentSeedState.visibleCount = 0;
+  initialAgentSeedState.revealSlotCount = 0;
+  uploadAgentDataToRT(data, agentSeedRT);
+  clearAgentRT(agentRT.read);
+  clearAgentRT(agentRT.write);
+  visibleAgents = 0;
+  agentCountEl.textContent = '0';
+  resetAgentHistory(0);
+  lastAgentCreationDiagnostics = {
+    ...diagnostics,
+    createdAgents: 0,
+    note: `Initial agents are populating over ${(initialAgentSeedState.durationMs / 1000).toFixed(2)} seconds.`,
+  };
+}
+
+function updateInitialAgentSeeding(now) {
+  const state = initialAgentSeedState;
+  if (state.pending && now >= state.pendingStartAt) {
+    beginInitialAgentSeeding({ startedAt: now });
+    agentAllocationFrame = 0;
+    lastAgentAllocationOffset = 0;
+  }
+  if (!state.active) return false;
+  const wasActive = true;
+  const progress = state.durationMs <= 0
+    ? 1
+    : Math.max(0, Math.min(1, (now - state.startedAt) / state.durationMs));
+  injectInitialAgentSeedSlots(INITIAL_AGENTS * progress);
+  if (progress >= 1) {
+    injectInitialAgentSeedSlots(INITIAL_AGENTS);
+    lastAgentCreationDiagnostics = state.diagnostics;
+    resetAgentHistory(visibleAgents);
+    cancelInitialAgentSeeding();
+  }
+  return wasActive;
+}
+
+function playInitialAgentSeedSound() {
+  const stretchClip = SOUND_CHECK_CLIPS.find((clip) => clip.id === 'slime-appear-stretch');
+  if (!stretchClip) return null;
+  return playSoundCheckOneShot(stretchClip, {
+    restart: true,
+  });
+}
+
+function replayInitialAgentSeed({
+  playSound = true,
+  seedDelayMs = 0,
+} = {}) {
+  cancelInitialAgentSeeding();
+  const delayMs = Math.max(0, Number(seedDelayMs) || 0);
+  if (playSound) {
+    playInitialAgentSeedSound();
+  }
+  if (delayMs > 0) {
+    initialAgentSeedState.pending = true;
+    initialAgentSeedState.pendingStartAt = performance.now() + delayMs;
+    clearAgentRT(agentRT.read);
+    clearAgentRT(agentRT.write);
+    visibleAgents = 0;
+    agentCountEl.textContent = '0';
+    resetAgentHistory(0);
+    lastAgentCreationDiagnostics = makeEmptyAgentCreationDiagnostics(
+      `Initial agents are waiting ${(delayMs / 1000).toFixed(2)} seconds for the seed sound lead-in.`,
+    );
+  } else {
+    beginInitialAgentSeeding();
+  }
+  agentAllocationFrame = 0;
+  lastAgentAllocationOffset = 0;
+}
+
+function resetSimulation({ resetOats = false, spawnAgents = true } = {}) {
+  cancelInitialAgentSeeding();
+  statsReadbackCooldownUntil = performance.now() + STATS_READBACK_RESET_COOLDOWN_MS;
   if (resetOats) {
     clearAllOats();
-    addOat(INITIAL_OAT_UV.x, INITIAL_OAT_UV.y, { observationCompleted: true });
+    addInitialOat();
   }
   clearRT(fieldRT.read);
   clearRT(fieldRT.write);
@@ -11783,11 +15199,13 @@ function resetSimulation({ resetOats = false } = {}) {
   clearRT(renderScratchRT);
   clearRT(densityRT);
   clearRT(depositDensityRT);
-  clearRT(agentParentNextRT);
-  clearRT(agentCandidateRT);
-  clearRT(agentPrefixRT.read);
-  clearRT(agentPrefixRT.write);
+  clearAgentRT(agentParentNextRT);
+  clearAgentRT(agentCandidateRT);
+  clearAgentRT(agentPrefixRT.read);
+  clearAgentRT(agentPrefixRT.write);
+  clearAgentRT(agentSeedRT);
   clearRT(seamPaddingDebugRT);
+  resetGoldWaferBodyHistory();
   lastSeamPaddingDiagnostics = {
     fieldKind: 'render',
     requestedPadTexels: 0,
@@ -11810,7 +15228,16 @@ function resetSimulation({ resetOats = false } = {}) {
     paddingBudgetCollisionTexels: 0,
     note: 'Safe seam padding has not run yet.',
   };
-  initAgents();
+  if (spawnAgents) {
+    initAgents();
+  } else {
+    clearAgentRT(agentRT.read);
+    clearAgentRT(agentRT.write);
+    visibleAgents = 0;
+    agentCountEl.textContent = '0';
+    resetAgentHistory(0);
+    lastAgentCreationDiagnostics = makeEmptyAgentCreationDiagnostics('Initial agents are waiting for the intro sequence.');
+  }
   agentAllocationFrame = 0;
   lastAgentAllocationOffset = 0;
   oatDirty = true;
@@ -12190,6 +15617,7 @@ function initControls() {
     minSpeed: 'minMoveScale',
     decay: 'fieldDecay',
     steps: 'simulationSteps',
+    foodClamp: 'foodClamp',
     oatPower: 'oatPower',
     oatSupply: 'oatSupplyRate',
     spatialSmooth: 'spatialSmoothing',
@@ -12199,7 +15627,17 @@ function initControls() {
     iridescenceStrength: 'iridescenceStrength',
     iridescenceMinThickness: 'iridescenceMinThickness',
     iridescenceThickness: 'iridescenceThickness',
+    filmThicknessCurve: 'filmThicknessCurve',
+    goldBodyFade: 'goldBodyFade',
+    goldBodyRoughness: 'goldBodyRoughness',
+    goldBodyReflectivity: 'goldBodyReflectivity',
     lightBrightness: 'lightBrightness',
+    backdropAnimationSpeed: 'backdropAnimationSpeed',
+    glassStrength: 'glassStrength',
+    glassBend: 'glassBend',
+    glassAberration: 'glassAberration',
+    glassFresnelStrength: 'glassFresnelStrength',
+    mirrorTintStrength: 'mirrorTintStrength',
     observationTailLength: 'observationTailLength',
     observationStrokeOpacity: 'observationStrokeOpacity',
     observationCornerRadius: 'observationCornerRadius',
@@ -12222,10 +15660,7 @@ function initControls() {
         : Number(input.dataset.digits);
       output.value = `${value.toFixed(digits)}${suffix}`;
       if (key === 'oatPower') {
-        for (const oat of oats) {
-          oat.power = params.oatPower;
-        }
-        oatDirty = true;
+        syncOatPowersFromParams();
       }
       if (
         key === 'observationStrokeOpacity' ||
@@ -12235,6 +15670,12 @@ function initControls() {
         key === 'observationTintOpacity'
       ) {
         syncObservationCssVars();
+      }
+      if (key === 'mirrorTintStrength') {
+        syncLakeMirrorTint();
+      }
+      if (key === 'goldBodyFade' || key === 'goldBodyRoughness' || key === 'goldBodyReflectivity') {
+        syncGoldWaferBodyMaterialUniforms();
       }
       if (markCustom && SIMULATION_PRESET_KEY_SET.has(key)) {
         setActiveSimulationPreset('custom');
@@ -12310,6 +15751,22 @@ function initControls() {
   boundParamControls.set('slimeBaseColor', syncBaseColorFromParams);
   syncBaseColorFromParams();
 
+  const goldBodyColorInput = document.getElementById('goldBodyColor');
+  const goldBodyColorOutput = goldBodyColorInput.parentElement.querySelector('output');
+  const syncGoldBodyColor = ({ markCustom = true } = {}) => {
+    params.goldBodyColor = goldBodyColorInput.value;
+    goldBodyColorOutput.value = goldBodyColorInput.value.toUpperCase();
+    syncGoldWaferBodyMaterialUniforms();
+    if (markCustom) setActiveRenderDisplayPreset('custom');
+  };
+  const syncGoldBodyColorFromParams = () => {
+    goldBodyColorInput.value = params.goldBodyColor;
+    syncGoldBodyColor({ markCustom: false });
+  };
+  goldBodyColorInput.addEventListener('input', () => syncGoldBodyColor());
+  boundParamControls.set('goldBodyColor', syncGoldBodyColorFromParams);
+  syncGoldBodyColorFromParams();
+
   const tintColorInput = document.getElementById('observationTintColor');
   const tintColorOutput = tintColorInput.parentElement.querySelector('output');
   const syncTintColor = ({ markCustom = true } = {}) => {
@@ -12325,6 +15782,37 @@ function initControls() {
   tintColorInput.addEventListener('input', () => syncTintColor());
   boundParamControls.set('observationTintColor', syncTintColorFromParams);
   syncTintColorFromParams();
+
+  const glassTintInput = document.getElementById('glassTint');
+  const glassTintOutput = glassTintInput.parentElement.querySelector('output');
+  const syncGlassTint = ({ markCustom = true } = {}) => {
+    params.glassTint = glassTintInput.value;
+    glassTintOutput.value = glassTintInput.value.toUpperCase();
+    if (markCustom) setActiveRenderDisplayPreset('custom');
+  };
+  const syncGlassTintFromParams = () => {
+    glassTintInput.value = params.glassTint;
+    syncGlassTint({ markCustom: false });
+  };
+  glassTintInput.addEventListener('input', () => syncGlassTint());
+  boundParamControls.set('glassTint', syncGlassTintFromParams);
+  syncGlassTintFromParams();
+
+  const mirrorTintInput = document.getElementById('mirrorTint');
+  const mirrorTintOutput = mirrorTintInput.parentElement.querySelector('output');
+  const syncMirrorTint = ({ markCustom = true } = {}) => {
+    params.mirrorTint = mirrorTintInput.value;
+    mirrorTintOutput.value = mirrorTintInput.value.toUpperCase();
+    syncLakeMirrorTint();
+    if (markCustom) setActiveRenderDisplayPreset('custom');
+  };
+  const syncMirrorTintFromParams = () => {
+    mirrorTintInput.value = params.mirrorTint;
+    syncMirrorTint({ markCustom: false });
+  };
+  mirrorTintInput.addEventListener('input', () => syncMirrorTint());
+  boundParamControls.set('mirrorTint', syncMirrorTintFromParams);
+  syncMirrorTintFromParams();
 
   for (const tip of document.querySelectorAll('.help-tip')) {
     tip.addEventListener('pointerdown', (event) => {
@@ -12361,6 +15849,12 @@ function initControls() {
   bindToggle('showAgents', 'showAgentDots');
   bindToggle('showOats', 'showOats');
   bindToggle('meshOutline', 'meshOutlineEnabled');
+  bindToggle('environmentEnabled', 'environmentEnabled', {
+    onChange: () => syncEnvironmentEnabled({ forceSky: isEnvironmentEnabled() }),
+  });
+  bindToggle('glassEnabled', 'glassEnabled', { onChange: syncGlassMaterialMode });
+  bindToggle('showLakeMirror', 'showLakeMirror', { onChange: syncLakeMirrorVisibility });
+  bindToggle('storyBoxesEnabled', 'storyBoxesEnabled', { onChange: syncStoryBoxesEnabled });
   bindToggle('useSeamStitching', 'useSeamStitching');
   bindToggle('useIslandMasking', 'useIslandMasking');
   bindToggle('useHeadingRotation', 'useHeadingRotation');
@@ -12368,15 +15862,46 @@ function initControls() {
   bindToggle('useOatRationing', 'useOatRationing');
   bindToggle('showWireframe', 'showWireframe');
   bindToggle('filmFollowsSlimeHeight', 'filmFollowsSlimeHeight');
+  bindToggle('useGoldWaferFilm', 'useGoldWaferFilm', {
+    onChange: () => {
+      if (params.useGoldWaferFilm && !goldWaferFilmState.ready) {
+        loadGoldWaferFilmLookup();
+      }
+      syncGoldWaferFilmUniforms();
+      syncGoldWaferFilmControlState();
+    },
+  });
+  bindToggle('useGoldWaferBody', 'useGoldWaferBody', {
+    onChange: () => {
+      if (params.useGoldWaferBody && !goldWaferFilmState.ready) {
+        loadGoldWaferFilmLookup();
+      }
+      if (params.useGoldWaferBody) {
+        goldWaferBodyMaxFoodNeedsUpdate = true;
+        ensureGoldWaferBodyMaxFoodRT();
+      }
+      syncGoldWaferFilmControlState();
+      syncGoldWaferBodyMode();
+    },
+  });
+  bindToggle('useIcosaFaceLights', 'useIcosaFaceLights', { onChange: syncIcosaLightRigUniforms });
 
   const debugViewSelect = document.getElementById('debugView');
   debugViewSelect.value = params.debugView;
   debugViewSelect.addEventListener('change', () => {
     params.debugView = debugViewSelect.value;
+    if (params.useGoldWaferBody || goldWaferBodyMesh?.visible || slimeMaterial?.transparent) {
+      syncGoldWaferBodyMode();
+    }
   });
   if (copyCameraPoseButton) {
     copyCameraPoseButton.addEventListener('click', copyCameraPoseToClipboard);
   }
+  if (startButton) {
+    startButton.addEventListener('click', requestIntroStart);
+  }
+  initSoundCheckPanel();
+  initSoundCompressorControls();
 
   const panel = document.querySelector('.panel');
   const panelBody = document.getElementById('panelBody');
@@ -12389,7 +15914,34 @@ function initControls() {
     panelBody.setAttribute('aria-hidden', String(collapsed));
     if (!collapsed) drawAgentCharts();
   });
+  setUiPanelsVisible(uiPanelsVisible);
+  window.addEventListener('keydown', handlePanelVisibilityKeydown);
   window.addEventListener('resize', drawAgentCharts);
+
+  if (soundCheckToggleButton && soundCheckPanel) {
+    soundCheckToggleButton.addEventListener('click', toggleSoundCheckPanel);
+  }
+  if (soundCheckCloseButton) {
+    soundCheckCloseButton.addEventListener('click', () => setSoundCheckOpen(false));
+  }
+  if (!(window.AudioContext || window.webkitAudioContext)) {
+    for (const button of soundCheckGrid?.querySelectorAll('button') ?? []) {
+      button.disabled = true;
+      button.title = 'Web Audio is not available';
+    }
+    for (const input of soundCheckGrid?.querySelectorAll('input') ?? []) {
+      input.disabled = true;
+      input.title = 'Web Audio is not available';
+    }
+    for (const input of soundCompressorGrid?.querySelectorAll('input') ?? []) {
+      input.disabled = true;
+      input.title = 'Web Audio is not available';
+    }
+    if (soundCompressorEnabledInput) {
+      soundCompressorEnabledInput.disabled = true;
+      soundCompressorEnabledInput.title = 'Web Audio is not available';
+    }
+  }
 
   document.getElementById('pause').addEventListener('click', () => {
     paused = !paused;
@@ -12397,12 +15949,14 @@ function initControls() {
   });
 
   document.getElementById('reset').addEventListener('click', () => {
-    if (started) resetSimulation({ resetOats: true });
+    if (!started) return;
+    resetSimulation({ resetOats: true, spawnAgents: false });
+    replayInitialAgentSeed({ seedDelayMs: INITIAL_AGENT_SEED_SOUND_LEAD_MS });
   });
   document.getElementById('resetCamera').addEventListener('click', () => {
     camera.position.copy(initialCameraPose.position);
     controls.target.copy(initialCameraPose.target);
-    camera.fov = THREE.MathUtils.radToDeg(SURFACE_FOV);
+    camera.fov = initialCameraPose.fovDeg;
     camera.updateProjectionMatrix();
     controls.update();
     cameraPoseReadoutDirty = true;
@@ -12414,7 +15968,7 @@ function initControls() {
   document.getElementById('clearOats').addEventListener('click', () => {
     if (!started) return;
     clearAllOats();
-    addOat(INITIAL_OAT_UV.x, INITIAL_OAT_UV.y, { observationCompleted: true });
+    addInitialOat();
   });
 }
 initControls();
@@ -12423,6 +15977,8 @@ initControls();
 function frame(now) {
   const rawDt = Math.min((now - lastFrameTime) / 16.6667, FRAME_DT_CLAMP);
   lastFrameTime = now;
+
+  updateIntroSequence(now);
 
   if (started) {
     if (!paused) {
@@ -12437,7 +15993,11 @@ function frame(now) {
       renderOats();
       renderDensity();
     }
+    updateInitialAgentSeeding(now);
     smoothRenderField();
+    if (params.useGoldWaferBody && (!paused || goldWaferBodyMaxFoodNeedsUpdate)) {
+      updateGoldWaferBodyMaxFoodTexture({ force: goldWaferBodyMaxFoodNeedsUpdate });
+    }
     updateObservationSlimeTriggers(now);
   }
 
@@ -12474,45 +16034,33 @@ function frame(now) {
     if (mesh.material !== mat) mesh.material = mat;
 
     if (mat === slimeMaterial && slimeMaterial) {
-      slimeMaterial.uniforms.u_food.value = renderSampleViewRT.read.texture;
-      slimeMaterial.uniforms.u_agentDensity.value = densityRT.texture;
-      slimeMaterial.uniforms.u_cameraPos.value.copy(camera.position);
-      slimeMaterial.uniforms.u_meshOutlineEnabled.value = params.meshOutlineEnabled ? 1 : 0;
-      slimeMaterial.uniforms.u_showAgentDots.value = params.showAgentDots ? 1 : 0;
-      slimeMaterial.uniforms.u_bumpDiagonalTapsEnabled.value =
-        getBumpDiagonalTapsEnabled(params) ? 1 : 0;
-      slimeMaterial.uniforms.u_useSeamStitching.value = params.useSeamStitching ? 1 : 0;
-      slimeMaterial.uniforms.u_useZeroGutterTransitions.value = params.useSeamStitching ? 1 : 0;
-      slimeMaterial.uniforms.u_normalSampleRadius.value = getNormalSampleRadiusTexels(params);
-      slimeMaterial.uniforms.u_heightScale.value = params.surfaceHeight;
-      slimeMaterial.uniforms.u_bumpStrength.value = params.surfaceBump;
-      slimeMaterial.uniforms.u_iridescenceStrength.value = params.iridescenceStrength;
-      slimeMaterial.uniforms.u_iridescenceMinThickness.value = params.iridescenceMinThickness;
-      slimeMaterial.uniforms.u_iridescenceThickness.value = params.iridescenceThickness;
-      slimeMaterial.uniforms.u_lightBrightness.value = params.lightBrightness;
-      slimeMaterial.uniforms.u_baseColor.value.set(params.slimeBaseColor);
-      slimeMaterial.uniforms.u_filmFollowsSlimeHeight.value =
-        params.filmFollowsSlimeHeight ? 1 : 0;
+      mainMaterialRenderResolution.set(canvas.width, canvas.height);
+      syncSlimeMaterialForCamera(camera, skyCubeRT.texture, mainMaterialRenderResolution, now);
+    }
+    if (params.useGoldWaferBody || goldWaferBodyMesh?.visible || slimeMaterial?.transparent) {
+      syncGoldWaferBodyMode();
     }
     if (wireframeOverlay) wireframeOverlay.visible = !!params.showWireframe;
+    syncLakeMirrorVisibility();
     oatGroup.visible = !!params.showOats;
     if (oatGroup.visible) updateOatGlowMarkers();
   }
 
-  renderSceneOnce();
+  renderSceneOnce(now);
 
   if (started) updateStats(now, rawDt);
   requestAnimationFrame(frame);
 }
 
-function renderSceneOnce() {
+function renderSceneOnce(now = performance.now()) {
   controls.update();
   resizeIfNeeded();
+  updateStormSkyTexture(now);
   updateCameraPoseReadout();
   updateOatAnnotations();
 
   renderer.setRenderTarget(null);
-  renderer.setClearColor(scene.background, 1);
+  renderer.setClearColor(0x000000, 1);
   renderer.clear(true, true, false);
   renderer.render(scene, camera);
 }
@@ -12793,6 +16341,14 @@ function updateStats(now, dt) {
   const statsDue = now - lastStatsRead >= STATS_UPDATE_INTERVAL_MS;
   if (!statsDue) return;
   lastStatsRead = now;
+  const readbackWouldStutter =
+    now < statsReadbackCooldownUntil ||
+    fpsSmoothed < STATS_READBACK_MIN_FPS ||
+    dt > STATS_READBACK_MAX_DT;
+  if (readbackWouldStutter) {
+    statusEl.textContent = baseStatus;
+    return;
+  }
   refreshRuntimeAgentFeedback({ recordHistory: true, now });
   statusEl.textContent = baseStatus;
 }
@@ -12815,8 +16371,27 @@ function applyRuntimeParams(overrides = {}) {
   Object.assign(params, overrides);
   syncObservationCssVars();
   if (Object.prototype.hasOwnProperty.call(overrides, 'oatPower')) {
-    for (const oat of oats) oat.power = params.oatPower;
-    oatDirty = true;
+    syncOatPowersFromParams();
+  }
+  if (
+    Object.prototype.hasOwnProperty.call(overrides, 'mirrorTint') ||
+    Object.prototype.hasOwnProperty.call(overrides, 'mirrorTintStrength')
+  ) {
+    syncLakeMirrorTint();
+  }
+  if (Object.prototype.hasOwnProperty.call(overrides, 'environmentEnabled')) {
+    syncEnvironmentEnabled({ forceSky: isEnvironmentEnabled() });
+  } else if (Object.prototype.hasOwnProperty.call(overrides, 'glassEnabled')) {
+    syncGlassMaterialMode();
+  }
+  if (Object.prototype.hasOwnProperty.call(overrides, 'showLakeMirror')) {
+    syncLakeMirrorVisibility();
+  }
+  if (Object.prototype.hasOwnProperty.call(overrides, 'useIcosaFaceLights')) {
+    syncIcosaLightRigUniforms();
+  }
+  if (Object.prototype.hasOwnProperty.call(overrides, 'storyBoxesEnabled')) {
+    syncStoryBoxesEnabled();
   }
   return { ...params };
 }
@@ -13198,6 +16773,7 @@ function resizeIfNeeded() {
     renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
     camera.aspect = canvas.clientWidth / Math.max(canvas.clientHeight, 1);
     camera.updateProjectionMatrix();
+    resizeReflectorTarget();
   }
 }
 
@@ -13208,8 +16784,9 @@ resizeIfNeeded();
 function waitFrame() {
   if (!started) {
     resizeIfNeeded();
+    updateStormSkyTexture(performance.now());
     renderer.setRenderTarget(null);
-    renderer.setClearColor(scene.background, 1);
+    renderer.setClearColor(0x000000, 1);
     renderer.clear(true, true, false);
     renderer.render(scene, camera);
     requestAnimationFrame(waitFrame);
