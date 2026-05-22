@@ -102,6 +102,44 @@ select {
   pointer-events: none;
 }
 
+.ending-fade-overlay {
+  position: absolute;
+  z-index: 8;
+  inset: 0;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ending-countdown-layer {
+  position: absolute;
+  z-index: 9;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ending-countdown {
+  position: absolute;
+  bottom: 10px;
+  color: rgba(238, 245, 242, 0.24);
+  font-family: var(--font-ui);
+  font-size: 0.48rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-shadow: 0 0 8px rgba(255, 255, 255, 0.12);
+}
+
+.ending-countdown.left {
+  left: 10px;
+}
+
+.ending-countdown.right {
+  right: 10px;
+}
+
 .start-screen-copy {
   position: relative;
   width: min(720px, calc(100vw - 48px));
@@ -1026,6 +1064,11 @@ input[type="color"] {
     <main id="app" data-panels-visible="false">
       <canvas id="sim" aria-label="Slime mold on cuttlefish skin"></canvas>
       <div id="annotationLayer" class="annotation-layer" aria-hidden="true"></div>
+      <div id="endingFadeOverlay" class="ending-fade-overlay" aria-hidden="true"></div>
+      <div id="endingCountdownLayer" class="ending-countdown-layer" aria-hidden="true">
+        <div id="endingCountdownLeft" class="ending-countdown left">00:00.0</div>
+        <div id="endingCountdownRight" class="ending-countdown right">00:00.0</div>
+      </div>
       <section id="startScreen" class="start-screen" aria-label="Start screen">
         <div class="start-screen-copy">
           <h1 id="startScreenTitle" class="start-screen-title">A Bestiary of Vanishings</h1>
@@ -1310,7 +1353,7 @@ input[type="color"] {
                   <strong>Temporal</strong>
                   <span class="help-tip" tabindex="0" aria-label="Blend with prior rendered field.">?<span role="tooltip">Blend with prior rendered field.</span></span>
                 </span>
-                <input id="temporalSmooth" type="range" min="0" max="0.95" step="0.01" value="0.85" data-scale="100" data-suffix="%" data-digits="0">
+                <input id="temporalSmooth" type="range" min="0" max="1" step="0.01" value="1" data-scale="100" data-suffix="%" data-digits="0">
                 <output for="temporalSmooth"></output>
               </label>
               <label class="control-row">
@@ -1525,7 +1568,7 @@ input[type="color"] {
                   <strong>Tail length</strong>
                   <span class="help-tip" tabindex="0" aria-label="Screen-space distance from each oat to its story textbox.">?<span role="tooltip">Screen-space distance from each oat to its story textbox.</span></span>
                 </span>
-                <input id="observationTailLength" type="range" min="0" max="0.9" step="0.01" value="0.1" data-scale="100" data-suffix="%" data-digits="0">
+                <input id="observationTailLength" type="range" min="0" max="0.9" step="0.01" value="0.15" data-scale="100" data-suffix="%" data-digits="0">
                 <output for="observationTailLength"></output>
               </label>
               <label class="control-row">
@@ -1731,6 +1774,10 @@ const startScreenIntroLine = document.getElementById('startScreenIntroLine');
 const startScreenIntroDots = Array.from(document.querySelectorAll('.start-screen-intro-dot'));
 const startScreenStatus = document.getElementById('startScreenStatus');
 const startButton = document.getElementById('startButton');
+const endingFadeOverlay = document.getElementById('endingFadeOverlay');
+const endingCountdownLayer = document.getElementById('endingCountdownLayer');
+const endingCountdownLeft = document.getElementById('endingCountdownLeft');
+const endingCountdownRight = document.getElementById('endingCountdownRight');
 let startScreenReady = false;
 const cameraAzimuthEl = document.getElementById('cameraAzimuth');
 const cameraElevationEl = document.getElementById('cameraElevation');
@@ -1831,12 +1878,16 @@ const SOUND_COMPRESSOR_CONTROLS = Object.freeze([
 const INTRO_OAT_SPRITE_DELAY_MS = 5500;
 const INTRO_UI_FADE_MS = 1000;
 const INTRO_BUTTON_HOVER_FADE_MS = 500;
+const INTRO_START_CLICK_SOUND_PEAK_MS = 826.23;
 const INTRO_START_SCREEN_FADE_MS = INTRO_UI_FADE_MS;
 const INTRO_START_SILENT_BEAT_MS = 1000;
 const INTRO_OAT_SEQUENCE_MS = 10000;
 const INTRO_OAT_FADE_MS = INTRO_UI_FADE_MS;
 const INITIAL_AGENT_SEED_DURATION_MS = 3460;
 const INITIAL_AGENT_SEED_SOUND_LEAD_MS = 1000;
+const ENDING_TOTAL_RUNTIME_MS = 120000;
+const ENDING_CAMOUFLAGE_FADE_DELAY_MS = 7000;
+const ENDING_FALLBACK_FADE_MS = 3000;
 const INTRO_OAT_LAND_AT = 0.68;
 const INTRO_OAT_BRIGHTEN_END = 1 - (INTRO_OAT_FADE_MS / INTRO_OAT_SEQUENCE_MS);
 const INTRO_OAT_START_SCREEN_Y = 1.55;
@@ -1850,7 +1901,7 @@ const SOUND_CHECK_CLIPS = Object.freeze([
   { id: 'slime-tumble', path: SLIME_TUMBLE_AUDIO_PATH, loop: false, gain: 0.5, maxGain: 1.9959 },
   { id: 'slime-tumble-complete', path: 'shen-soundpack/wav/slime-tumble-complete.wav', loop: false, maxGain: 3.0304 },
   { id: 'slime-fuse', path: 'shen-soundpack/wav/slime-fuse.wav', loop: false, maxGain: 1.7083 },
-  { id: 'cuttlefish-reveal', path: 'shen-soundpack/wav/cuttlefish-reveal.wav', loop: false, maxGain: 2.2347 },
+  { id: 'cuttlefish-reveal', path: 'shen-soundpack/wav/cuttlefish-reveal.wav', loop: false, gain: 0.5, maxGain: 2.2347 },
   { id: 'cuttlefish-camouflage', path: 'shen-soundpack/wav/cuttlefish-camouflage.wav', loop: false, maxGain: 1.6634 },
   { id: 'text-reveal', path: 'shen-soundpack/wav/text-reveal.wav', loop: false, maxGain: 5.2462 },
   { id: 'game-complete', path: 'shen-soundpack/wav/game-complete.wav', loop: false, maxGain: 2.4264 },
@@ -2083,8 +2134,8 @@ const BASE_RENDER_DISPLAY_PARAMS = Object.freeze({
   mirrorTint: '#7f7f7f',
   mirrorTintStrength: 0,
   spatialSmoothing: 1,
-  temporalSmoothing: 0.85,
-  observationTailLength: 0.1,
+  temporalSmoothing: 1,
+  observationTailLength: 0.15,
   observationStrokeOpacity: 0,
   observationCornerRadius: 24,
   observationEdgeFeather: 24,
@@ -2119,11 +2170,12 @@ const RENDER_DISPLAY_PRESETS = Object.freeze([
     'Screenshot render look: softer spatial blur, stronger temporal smoothing, white body, thinner film band.',
     {
       spatialSmoothing: 1,
-      temporalSmoothing: 0.9,
+      temporalSmoothing: 1,
       surfaceHeight: 1,
       surfaceBump: 5,
       iridescenceStrength: 0.8,
-      slimeBaseColor: '#e0e0e0',
+      slimeBaseColor: '#ffffff',
+      observationTailLength: 0.15,
       iridescenceMinThickness: 220,
       iridescenceThickness: 760,
       filmFollowsSlimeHeight: true,
@@ -4325,7 +4377,12 @@ void main() {
   float food = spatialFood;
   if (u_applyTemporal == 1) {
     float previousFood = isAuthoritativeChartTexel(v_uv) ? max(texture(u_previousFood, v_uv).r, 0.0) : 0.0;
-    food = mix(spatialFood, previousFood, clamp(u_temporalWeight, 0.0, 0.98));
+    float temporalAmount = max(u_temporalWeight, 0.0);
+    float temporalBlend = min(temporalAmount, 0.98);
+    if (temporalAmount > 1.0) {
+      temporalBlend = 1.0 - 0.02 / temporalAmount;
+    }
+    food = mix(spatialFood, previousFood, clamp(temporalBlend, 0.0, 0.995));
   }
   outColor = vec4(clamp(food, 0.0, u_foodClamp), 0.0, 0.0, 1.0);
 }
@@ -7206,9 +7263,26 @@ function setStartScreenOpacity(element, opacity) {
 
 function applyStartButtonVisual(now = performance.now()) {
   if (!startButton) return;
-  const isFadingOut = introSequenceState.requested || startScreenUiState.beginFadeOutAt > 0;
-  let hoverMix = isFadingOut ? 1 : 0;
-  if (!isFadingOut) {
+  const clickAt = startScreenUiState.clickedAt;
+  const fadeOutAt = startScreenUiState.beginFadeOutAt;
+  const hasStartClickGlow =
+    introSequenceState.requested &&
+    Number.isFinite(clickAt) &&
+    clickAt > 0 &&
+    Number.isFinite(fadeOutAt) &&
+    fadeOutAt > clickAt;
+  const fadeHasStarted = Number.isFinite(fadeOutAt) && fadeOutAt > 0 && now >= fadeOutAt;
+  let glowMix = 0;
+  let hoverMix = fadeHasStarted ? 1 : 0;
+  if (hasStartClickGlow) {
+    const riseDuration = Math.max(1, fadeOutAt - clickAt);
+    const riseMix = smoothUnit((now - clickAt) / riseDuration);
+    const fadeMix = fadeHasStarted
+      ? 1 - smoothUnit((now - fadeOutAt) / INTRO_UI_FADE_MS)
+      : 1;
+    glowMix = Math.max(0, Math.min(1, riseMix * fadeMix));
+    hoverMix = Math.max(startScreenUiState.hoverMix, 0.35 + 0.65 * riseMix);
+  } else if (!fadeHasStarted) {
     const hoverT = smoothUnit((now - startScreenUiState.hoverStartedAt) / INTRO_BUTTON_HOVER_FADE_MS);
     hoverMix = startScreenUiState.hoverFrom +
       (startScreenUiState.hoverTo - startScreenUiState.hoverFrom) * hoverT;
@@ -7218,8 +7292,15 @@ function applyStartButtonVisual(now = performance.now()) {
   const channel = Math.round(255 * (1 - hoverMix));
   const fillAlpha = hoverMix;
   const borderAlpha = 0.62 + 0.28 * hoverMix;
+  const idleGlow = hoverMix * 0.14;
+  const glowAlpha = hasStartClickGlow ? 0.16 + glowMix * 0.52 : idleGlow;
+  const glowRadius = hasStartClickGlow ? 8 + glowMix * 30 : hoverMix * 10;
+  const insetGlowAlpha = hasStartClickGlow ? 0.08 + glowMix * 0.22 : hoverMix * 0.05;
   startButton.style.backgroundColor = `rgba(255, 255, 255, ${fillAlpha.toFixed(3)})`;
   startButton.style.borderColor = `rgba(255, 255, 255, ${borderAlpha.toFixed(3)})`;
+  startButton.style.boxShadow = glowAlpha > 0.001
+    ? `0 0 ${glowRadius.toFixed(1)}px rgba(188, 255, 236, ${glowAlpha.toFixed(3)}), inset 0 0 ${(glowRadius * 0.42).toFixed(1)}px rgba(255, 255, 255, ${insetGlowAlpha.toFixed(3)})`
+    : 'none';
   startButton.style.color = `rgb(${channel}, ${channel}, ${channel})`;
 }
 
@@ -7232,6 +7313,75 @@ function setStartButtonHoverTarget(target, now = performance.now(), immediate = 
   startScreenUiState.hoverTo = value;
   startScreenUiState.hoverMix = startScreenUiState.hoverFrom;
   applyStartButtonVisual(now);
+}
+
+function setEndingFadeOpacity(opacity) {
+  if (!endingFadeOverlay) return;
+  const value = Math.max(0, Math.min(1, Number(opacity) || 0));
+  endingFadeOverlay.style.opacity = value.toFixed(3);
+}
+
+function setEndingCountdownVisible(visible) {
+  if (!endingCountdownLayer) return;
+  endingCountdownLayer.style.opacity = visible ? '1' : '0';
+  endingCountdownLayer.setAttribute('aria-hidden', String(!visible));
+}
+
+function formatEndingCountdown(ms) {
+  const seconds = Math.max(0, Number(ms) || 0) / 1000;
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds - minutes * 60;
+  return `${String(minutes).padStart(2, '0')}:${remainingSeconds.toFixed(1).padStart(4, '0')}`;
+}
+
+function syncEndingCountdownText(text) {
+  if (endingSequenceState.lastCountdownText === text) return;
+  endingSequenceState.lastCountdownText = text;
+  if (endingCountdownLeft) endingCountdownLeft.textContent = text;
+  if (endingCountdownRight) endingCountdownRight.textContent = text;
+}
+
+function resetIntroSequenceToStartScreen(now = performance.now()) {
+  if (introSequenceState.sprite) {
+    scene.remove(introSequenceState.sprite);
+    introSequenceState.sprite.material?.dispose?.();
+    introSequenceState.sprite = null;
+  }
+  introSequenceState.requested = false;
+  introSequenceState.active = false;
+  introSequenceState.completed = false;
+  introSequenceState.requestedAt = 0;
+  introSequenceState.startedAt = 0;
+  introSequenceState.topEdgeLeadMs = 0;
+  introSequenceState.seedSoundPlayed = false;
+  introSequenceState.envAudioStarted = false;
+  startScreenReady = true;
+  startScreenUiState.readyAt = now - INTRO_UI_FADE_MS * 2;
+  startScreenUiState.clickedAt = 0;
+  startScreenUiState.beginFadeOutAt = 0;
+  setStartButtonHoverTarget(0, now, true);
+  if (startScreen) {
+    startScreen.classList.remove('is-armed', 'is-running', 'is-complete');
+    startScreen.removeAttribute('aria-hidden');
+  }
+  if (startScreenStatus) {
+    startScreenStatus.classList.remove('error');
+    startScreenStatus.textContent = 'loading...';
+    startScreenStatus.hidden = true;
+  }
+  if (startButton) {
+    startButton.hidden = false;
+    startButton.disabled = false;
+  }
+  updateStartScreenUi(now);
+}
+
+function getEndingTargetReturnAt(now = performance.now()) {
+  const clickedAt = startScreenUiState.clickedAt;
+  if (Number.isFinite(clickedAt) && clickedAt > 0) {
+    return clickedAt + ENDING_TOTAL_RUNTIME_MS;
+  }
+  return now + ENDING_TOTAL_RUNTIME_MS;
 }
 
 function getIntroContentStartAt() {
@@ -7323,11 +7473,11 @@ function updateStartScreenUi(now = performance.now()) {
 async function requestIntroStart() {
   if (introSequenceState.requested || introSequenceState.completed) return;
   const clickedAt = performance.now();
-  startScreenUiState.beginFadeOutAt = clickedAt;
-  setStartButtonHoverTarget(1, clickedAt, true);
-  updateStartScreenUi(clickedAt);
+  const fadeOutAt = clickedAt + INTRO_START_CLICK_SOUND_PEAK_MS;
+  startScreenUiState.clickedAt = clickedAt;
+  startScreenUiState.beginFadeOutAt = fadeOutAt;
   introSequenceState.requested = true;
-  introSequenceState.requestedAt = clickedAt;
+  introSequenceState.requestedAt = fadeOutAt;
   introSequenceState.seedSoundPlayed = false;
   introSequenceState.envAudioStarted = false;
   if (startButton) {
@@ -7335,10 +7485,11 @@ async function requestIntroStart() {
     setStartButtonHoverTarget(1, clickedAt, true);
   }
   if (startScreen) startScreen.classList.add('is-armed');
-  const textRevealClip = getSoundClip('text-reveal');
-  if (textRevealClip) {
-    playSoundCheckOneShot(textRevealClip).catch((err) => {
-      console.warn('Failed to play start text reveal sound:', err);
+  updateStartScreenUi(clickedAt);
+  const startClickClip = getSoundClip('slime-fuse');
+  if (startClickClip) {
+    playSoundCheckOneShot(startClickClip).catch((err) => {
+      console.warn('Failed to play start click sound:', err);
     });
   }
   const contentStartAt = getIntroContentStartAt();
@@ -7370,6 +7521,12 @@ async function requestIntroStart() {
       console.warn(`Failed to preload ${getSoundFileName(tumbleClip.path)}:`, err);
     });
   }
+  const camouflageClip = getSoundClip('cuttlefish-camouflage');
+  if (camouflageClip) {
+    loadSoundCheckBuffer(camouflageClip.path).catch((err) => {
+      console.warn(`Failed to preload ${getSoundFileName(camouflageClip.path)}:`, err);
+    });
+  }
   initEnvAudio().catch((err) => {
     console.warn('Failed to preload ambience loop:', err);
   });
@@ -7379,21 +7536,23 @@ async function requestIntroStart() {
 
 function skipIntroSequence() {
   if (!startScreenReady || !started || introSequenceState.completed) return false;
-  startScreenUiState.beginFadeOutAt = performance.now();
-  setStartButtonHoverTarget(0, startScreenUiState.beginFadeOutAt, true);
-  if (!introSequenceState.requested) {
-    introSequenceState.requested = true;
-    introSequenceState.requestedAt = performance.now();
-    introSequenceState.seedSoundPlayed = false;
-  } else if (
+  const now = performance.now();
+  startScreenUiState.clickedAt = now;
+  startScreenUiState.beginFadeOutAt = now;
+  setStartButtonHoverTarget(0, now, true);
+  if (
+    !introSequenceState.requested ||
     !Number.isFinite(introSequenceState.requestedAt) ||
-    introSequenceState.requestedAt <= 0
+    introSequenceState.requestedAt <= 0 ||
+    introSequenceState.requestedAt > now
   ) {
-    introSequenceState.requestedAt = performance.now();
+    introSequenceState.requested = true;
+    introSequenceState.requestedAt = now;
+    introSequenceState.seedSoundPlayed = false;
   }
   if (startButton) startButton.disabled = true;
   if (startScreen) startScreen.classList.add('is-armed', 'is-running');
-  updateStartScreenUi(startScreenUiState.beginFadeOutAt);
+  updateStartScreenUi(now);
   stopSoundCheckOneShot('intro');
   introSequenceState.envAudioStarted = true;
   startEnvAudio().catch((err) => {
@@ -7621,6 +7780,160 @@ function finishIntroSequence() {
     statsReadbackCooldownUntil = performance.now() + STATS_READBACK_RESET_COOLDOWN_MS;
     replayInitialAgentSeed({ playSound: !introSequenceState.seedSoundPlayed });
   }
+}
+
+function cancelEndingSequence({ stopSound = false } = {}) {
+  endingSequenceState.active = false;
+  endingSequenceState.phase = 'idle';
+  endingSequenceState.sequenceId++;
+  endingSequenceState.armedAt = 0;
+  endingSequenceState.camouflageStartAt = 0;
+  endingSequenceState.camouflageStartedAt = 0;
+  endingSequenceState.camouflageDurationMs = 0;
+  endingSequenceState.fadeStartAt = 0;
+  endingSequenceState.endAt = 0;
+  endingSequenceState.targetReturnAt = 0;
+  endingSequenceState.lastCountdownText = '';
+  setEndingFadeOpacity(0);
+  setEndingCountdownVisible(false);
+  if (stopSound) stopSoundCheckOneShot('cuttlefish-camouflage');
+}
+
+function armEndingSequence(now = performance.now()) {
+  if (endingSequenceState.active) return;
+  endingSequenceState.active = true;
+  endingSequenceState.phase = 'preparing';
+  endingSequenceState.sequenceId++;
+  endingSequenceState.armedAt = now;
+  endingSequenceState.targetReturnAt = getEndingTargetReturnAt(now);
+  endingSequenceState.camouflageStartAt = 0;
+  endingSequenceState.camouflageStartedAt = 0;
+  endingSequenceState.camouflageDurationMs = 0;
+  endingSequenceState.fadeStartAt = 0;
+  endingSequenceState.endAt = endingSequenceState.targetReturnAt;
+  endingSequenceState.lastCountdownText = '';
+  setEndingFadeOpacity(0);
+  setEndingCountdownVisible(true);
+  prepareEndingCamouflageSchedule(endingSequenceState.sequenceId);
+}
+
+function useFallbackEndingFade(now = performance.now(), targetReturnAt = endingSequenceState.targetReturnAt) {
+  const boundedTarget = Number.isFinite(targetReturnAt) && targetReturnAt > now
+    ? targetReturnAt
+    : now + ENDING_FALLBACK_FADE_MS;
+  endingSequenceState.phase = 'fade';
+  endingSequenceState.camouflageStartAt = now;
+  endingSequenceState.camouflageStartedAt = 0;
+  endingSequenceState.camouflageDurationMs = ENDING_FALLBACK_FADE_MS;
+  endingSequenceState.fadeStartAt = Math.max(now, boundedTarget - ENDING_FALLBACK_FADE_MS);
+  endingSequenceState.endAt = boundedTarget;
+  endingSequenceState.targetReturnAt = boundedTarget;
+}
+
+async function prepareEndingCamouflageSchedule(sequenceId) {
+  const clip = getSoundClip('cuttlefish-camouflage');
+  const targetReturnAt = endingSequenceState.targetReturnAt || getEndingTargetReturnAt();
+  if (!clip) {
+    useFallbackEndingFade(performance.now(), targetReturnAt);
+    return;
+  }
+  try {
+    const buffer = await loadSoundCheckBuffer(clip.path);
+    if (!endingSequenceState.active || endingSequenceState.sequenceId !== sequenceId) return;
+    const now = performance.now();
+    const durationMs = Math.max(1, (buffer.duration ?? 0) * 1000);
+    const fadeDelayMs = Math.min(ENDING_CAMOUFLAGE_FADE_DELAY_MS, Math.max(0, durationMs - 1));
+    endingSequenceState.camouflageDurationMs = durationMs;
+    endingSequenceState.camouflageStartAt = targetReturnAt - durationMs;
+    endingSequenceState.fadeStartAt = endingSequenceState.camouflageStartAt + fadeDelayMs;
+    endingSequenceState.endAt = targetReturnAt;
+    endingSequenceState.targetReturnAt = targetReturnAt;
+    endingSequenceState.phase = now >= endingSequenceState.camouflageStartAt
+      ? 'camouflage-loading'
+      : 'gameplay';
+    if (endingSequenceState.phase === 'camouflage-loading') {
+      startEndingCamouflageSound(sequenceId);
+    }
+  } catch (err) {
+    console.warn('Failed to prepare ending camouflage timing:', err);
+    if (endingSequenceState.active && endingSequenceState.sequenceId === sequenceId) {
+      useFallbackEndingFade(performance.now(), targetReturnAt);
+    }
+  }
+}
+
+async function startEndingCamouflageSound(sequenceId) {
+  const clip = getSoundClip('cuttlefish-camouflage');
+  if (!clip) {
+    useFallbackEndingFade();
+    return;
+  }
+  try {
+    const sourceRecord = await playSoundCheckOneShot(clip, {
+      restart: true,
+      allowOverlap: false,
+      startAtPerformanceMs: endingSequenceState.camouflageStartAt,
+    });
+    if (!endingSequenceState.active || endingSequenceState.sequenceId !== sequenceId) return;
+    if (!sourceRecord) {
+      useFallbackEndingFade();
+      return;
+    }
+    endingSequenceState.phase = 'camouflage';
+    endingSequenceState.camouflageStartedAt = sourceRecord.startedAtPerformanceMs ?? performance.now();
+  } catch (err) {
+    console.warn('Failed to play ending camouflage sound:', err);
+    if (endingSequenceState.active && endingSequenceState.sequenceId === sequenceId) {
+      useFallbackEndingFade();
+    }
+  }
+}
+
+function completeEndingSequence(now = performance.now()) {
+  cancelEndingSequence({ stopSound: true });
+  resetSimulation({ resetOats: true, spawnAgents: false });
+  stopEnvAudio();
+  stopSlimeTumbleLoop({ fadeOutSeconds: 1.2 });
+  resetIntroSequenceToStartScreen(now);
+}
+
+function updateEndingSequence(now = performance.now()) {
+  if (!endingSequenceState.active) return;
+  let countdownTargetAt = endingSequenceState.camouflageStartAt || endingSequenceState.endAt;
+  if (endingSequenceState.endAt > 0 && now >= endingSequenceState.endAt) {
+    completeEndingSequence(now);
+    return;
+  }
+
+  if (endingSequenceState.phase === 'gameplay' && now >= endingSequenceState.camouflageStartAt) {
+    endingSequenceState.phase = 'camouflage-loading';
+    startEndingCamouflageSound(endingSequenceState.sequenceId);
+  }
+
+  if (
+    (
+      endingSequenceState.phase === 'camouflage-loading' ||
+      endingSequenceState.phase === 'camouflage' ||
+      endingSequenceState.phase === 'fade'
+    ) &&
+    endingSequenceState.endAt > 0
+  ) {
+    countdownTargetAt = endingSequenceState.endAt;
+    if (now >= endingSequenceState.fadeStartAt) {
+      const fadeProgress = (now - endingSequenceState.fadeStartAt) /
+        Math.max(1, endingSequenceState.endAt - endingSequenceState.fadeStartAt);
+      setEndingFadeOpacity(smoothUnit(fadeProgress));
+    } else {
+      setEndingFadeOpacity(0);
+    }
+    if (now >= endingSequenceState.endAt) {
+      completeEndingSequence(now);
+      return;
+    }
+  }
+
+  setEndingCountdownVisible(true);
+  syncEndingCountdownText(formatEndingCountdown(countdownTargetAt - now));
 }
 
 function updateOatMarkerOcclusionOpacity(marker, target, now) {
@@ -8327,6 +8640,22 @@ function syncStoryBoxesEnabled() {
   for (const oat of oats) hideOatObservation(oat.observation);
 }
 
+function setStoryBoxesEnabled(enabled) {
+  const nextEnabled = Boolean(enabled);
+  if (params.storyBoxesEnabled !== nextEnabled) {
+    params.storyBoxesEnabled = nextEnabled;
+    setActiveRenderDisplayPreset('custom');
+  }
+  const syncControl = boundParamControls.get('storyBoxesEnabled');
+  if (syncControl) syncControl();
+  else syncStoryBoxesEnabled();
+  return params.storyBoxesEnabled;
+}
+
+function toggleStoryBoxesEnabled() {
+  return setStoryBoxesEnabled(!isStoryBoxesEnabled());
+}
+
 function getOatAnnotationAnchorPos(oat, observation, target = oatAnnotationAnchorScratch) {
   if (oat?.sphere?.position) return target.copy(oat.sphere.position);
   return target.copy(observation.surfacePos).addScaledVector(observation.surfaceNormal, oatGlowLift);
@@ -8624,6 +8953,7 @@ const introSequenceState = {
 };
 const startScreenUiState = {
   readyAt: 0,
+  clickedAt: 0,
   beginFadeOutAt: 0,
   hoverStartedAt: 0,
   hoverFrom: 0,
@@ -8641,6 +8971,19 @@ const initialAgentSeedState = {
   diagnostics: null,
   visibleCount: 0,
   revealSlotCount: 0,
+};
+const endingSequenceState = {
+  active: false,
+  phase: 'idle',
+  sequenceId: 0,
+  armedAt: 0,
+  camouflageStartAt: 0,
+  camouflageStartedAt: 0,
+  camouflageDurationMs: 0,
+  fadeStartAt: 0,
+  endAt: 0,
+  targetReturnAt: 0,
+  lastCountdownText: '',
 };
 let lastTransitionCandidatePackingDiagnostics = {
   rawCandidateClaims: 0,
@@ -8880,6 +9223,14 @@ function handleIntroSkipKeydown(event) {
   if (!startScreenReady || introSequenceState.completed) return;
   event.preventDefault();
   skipIntroSequence();
+}
+
+function handleStoryBoxesKeydown(event) {
+  if (event.key?.toLowerCase() !== 'm' || event.altKey || event.ctrlKey || event.metaKey) return;
+  if (event.repeat) return;
+  if (isPanelShortcutEditableTarget(event.target)) return;
+  event.preventDefault();
+  toggleStoryBoxesEnabled();
 }
 
 function handleVisualLayerKeydown(event) {
@@ -10201,6 +10552,7 @@ function runReadbackDiagnostic(
 function setStartScreenLoadingProgress(percent = null, label = 'loading') {
   if (!startScreenStatus || startScreenReady) return;
   startScreenUiState.readyAt = 0;
+  startScreenUiState.clickedAt = 0;
   startScreenUiState.beginFadeOutAt = 0;
   setStartButtonHoverTarget(0, performance.now(), true);
   startScreenStatus.hidden = false;
@@ -10216,6 +10568,7 @@ function setStartScreenLoadingProgress(percent = null, label = 'loading') {
 function showStartScreenError(message) {
   startScreenReady = false;
   startScreenUiState.readyAt = 0;
+  startScreenUiState.clickedAt = 0;
   startScreenUiState.beginFadeOutAt = 0;
   setStartButtonHoverTarget(0, performance.now(), true);
   if (startScreen) {
@@ -10237,6 +10590,7 @@ function showStartScreenError(message) {
 function showStartButton() {
   startScreenReady = true;
   startScreenUiState.readyAt = performance.now();
+  startScreenUiState.clickedAt = 0;
   startScreenUiState.beginFadeOutAt = 0;
   setStartButtonHoverTarget(0, startScreenUiState.readyAt, true);
   if (startScreenStatus) {
@@ -15650,7 +16004,10 @@ async function onLoad(gltf) {
       requested: introSequenceState.requested,
       active: introSequenceState.active,
       completed: introSequenceState.completed,
+      clickAt: startScreenUiState.clickedAt,
+      fadeOutAt: startScreenUiState.beginFadeOutAt,
       requestedAt: introSequenceState.requestedAt,
+      startClickPeakDelayMs: INTRO_START_CLICK_SOUND_PEAK_MS,
       contentStartAt: getIntroContentStartAt(),
       startedAt: introSequenceState.startedAt,
       topEdgeLeadMs: introSequenceState.topEdgeLeadMs,
@@ -15675,6 +16032,20 @@ async function onLoad(gltf) {
       pendingMs: initialAgentSeedState.pending
         ? initialAgentSeedState.pendingStartAt - performance.now()
         : 0,
+    }),
+    getEndingSequenceState: () => ({
+      active: endingSequenceState.active,
+      phase: endingSequenceState.phase,
+      armedAt: endingSequenceState.armedAt,
+      camouflageStartAt: endingSequenceState.camouflageStartAt,
+      camouflageStartedAt: endingSequenceState.camouflageStartedAt,
+      camouflageDurationMs: endingSequenceState.camouflageDurationMs,
+      fadeStartAt: endingSequenceState.fadeStartAt,
+      endAt: endingSequenceState.endAt,
+      targetReturnAt: endingSequenceState.targetReturnAt,
+      countdownText: endingSequenceState.lastCountdownText,
+      fadeOpacity: Number.parseFloat(endingFadeOverlay?.style.opacity || '0') || 0,
+      now: performance.now(),
     }),
     mesh,
     lakeMirror,
@@ -17013,6 +17384,7 @@ function createAgentInitialData() {
 }
 
 function initAgents() {
+  cancelEndingSequence({ stopSound: true });
   cancelInitialAgentSeeding();
   const { data, diagnostics } = createAgentInitialData();
   uploadAgentDataToRT(data, agentRT.read);
@@ -17115,6 +17487,7 @@ function updateInitialAgentSeeding(now) {
     lastAgentCreationDiagnostics = state.diagnostics;
     resetAgentHistory(visibleAgents);
     cancelInitialAgentSeeding();
+    armEndingSequence(now);
   }
   return wasActive;
 }
@@ -17129,6 +17502,7 @@ function replayInitialAgentSeed({
   playSound = true,
   seedDelayMs = 0,
 } = {}) {
+  cancelEndingSequence({ stopSound: true });
   cancelInitialAgentSeeding();
   const delayMs = Math.max(0, Number(seedDelayMs) || 0);
   if (playSound) {
@@ -17154,6 +17528,7 @@ function replayInitialAgentSeed({
 }
 
 function resetSimulation({ resetOats = false, spawnAgents = true } = {}) {
+  cancelEndingSequence({ stopSound: true });
   cancelInitialAgentSeeding();
   statsReadbackCooldownUntil = performance.now() + STATS_READBACK_RESET_COOLDOWN_MS;
   if (resetOats) {
@@ -17966,6 +18341,7 @@ function initControls() {
   setUiPanelsVisible(uiPanelsVisible);
   window.addEventListener('keydown', handlePanelVisibilityKeydown);
   window.addEventListener('keydown', handleIntroSkipKeydown);
+  window.addEventListener('keydown', handleStoryBoxesKeydown);
   window.addEventListener('keydown', handleVisualLayerKeydown);
   window.addEventListener('resize', drawAgentCharts);
 
@@ -18047,6 +18423,7 @@ function frame(now) {
       renderDensity();
     }
     updateInitialAgentSeeding(now);
+    updateEndingSequence(now);
 	    if (params.showAgentDots) renderAgentDensityOverlay();
     smoothRenderField();
     if (isGoldWaferBodyHistoryActive() && (!paused || goldWaferBodyMaxFoodNeedsUpdate)) {

@@ -1,0 +1,2232 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>GPU Slime Mold Food Model</title>
+    <style>
+:root {
+  color-scheme: dark;
+  --bg: #07090a;
+  --panel: rgba(17, 21, 23, 0.82);
+  --panel-strong: rgba(30, 36, 39, 0.9);
+  --line: rgba(223, 234, 232, 0.16);
+  --text: #eef5f2;
+  --muted: #a8b6b1;
+  --green: #6ddf81;
+  --gold: #ffcd58;
+  --cyan: #8ce8ff;
+  --red: #ff6f6f;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+#app {
+  position: fixed;
+  inset: 0;
+  min-width: 320px;
+  background: #07090a;
+}
+
+#sim {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+  cursor: grab;
+  touch-action: none;
+}
+
+#sim:active {
+  cursor: grabbing;
+}
+
+.panel {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  width: min(400px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(16px);
+}
+
+.panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.panel-tools {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.panel.is-collapsed {
+  overflow: hidden;
+}
+
+.panel.is-collapsed .panel-body {
+  display: none;
+}
+
+h1 {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.15;
+  letter-spacing: 0;
+}
+
+p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+
+.icon-button,
+button {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel-strong);
+  color: var(--text);
+  cursor: pointer;
+}
+
+button:hover {
+  border-color: rgba(140, 232, 255, 0.45);
+  background: rgba(44, 55, 58, 0.92);
+}
+
+button:active {
+  transform: translateY(1px);
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 14px 0;
+}
+
+.stats > div {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: rgba(8, 11, 12, 0.54);
+}
+
+.stats strong,
+.stats span {
+  display: block;
+  white-space: nowrap;
+}
+
+.stats strong {
+  overflow: hidden;
+  color: var(--cyan);
+  font-size: clamp(0.9rem, 7vw, 1.22rem);
+  line-height: 1.05;
+  text-overflow: ellipsis;
+}
+
+.stats span {
+  margin-top: 3px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.68rem;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+}
+
+.controls {
+  display: grid;
+  gap: 12px;
+}
+
+.control-group {
+  display: grid;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.control-group:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.control-group h2 {
+  margin: 0 0 2px;
+  color: var(--text);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.control-row {
+  display: grid;
+  grid-template-columns: 88px minmax(96px, 1fr) 48px;
+  align-items: center;
+  gap: 10px;
+  min-height: 30px;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.control-copy {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 6px;
+}
+
+.control-copy strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.help-tip {
+  position: relative;
+  display: inline-grid;
+  flex: 0 0 auto;
+  width: 17px;
+  height: 17px;
+  place-items: center;
+  border: 1px solid rgba(255, 205, 88, 0.55);
+  border-radius: 50%;
+  color: var(--gold);
+  cursor: help;
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.help-tip > span {
+  position: absolute;
+  top: 50%;
+  left: calc(100% + 8px);
+  z-index: 10;
+  width: max-content;
+  max-width: 220px;
+  padding: 7px 8px;
+  border: 1px solid rgba(255, 205, 88, 0.28);
+  border-radius: 6px;
+  background: rgba(8, 10, 9, 0.96);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.42);
+  color: var(--text);
+  font-size: 0.68rem;
+  font-weight: 500;
+  line-height: 1.25;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%);
+  transition: opacity 120ms ease;
+  visibility: hidden;
+  white-space: normal;
+}
+
+.help-tip:hover > span,
+.help-tip:focus > span,
+.help-tip:focus-visible > span {
+  opacity: 1;
+  visibility: visible;
+}
+
+.help-tip:focus-visible {
+  outline: 2px solid rgba(255, 205, 88, 0.5);
+  outline-offset: 2px;
+}
+
+output {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+input[type="range"] {
+  width: 100%;
+  min-width: 0;
+  accent-color: var(--gold);
+}
+
+.display-options {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.toggle-control {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 30px;
+}
+
+.toggle-control input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--gold);
+}
+
+.actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.actions button {
+  min-width: 0;
+  padding: 0 8px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.error {
+  color: var(--red);
+}
+
+@media (max-width: 560px) {
+  .panel {
+    top: 10px;
+    left: 10px;
+    width: calc(100vw - 20px);
+    padding: 12px;
+  }
+
+  .control-row {
+    grid-template-columns: 82px minmax(72px, 1fr) 42px;
+    gap: 8px;
+  }
+
+  .help-tip > span {
+    max-width: 170px;
+  }
+}
+    </style>
+  </head>
+  <body>
+    <main id="app">
+      <canvas id="sim" aria-label="GPU slime mold simulation"></canvas>
+
+      <section class="panel is-collapsed" aria-label="Simulation controls" aria-hidden="true" hidden>
+        <div class="panel-head">
+          <div>
+            <h1>Slime Mold</h1>
+            <p id="gpuStatus">starting gpu...</p>
+          </div>
+          <div class="panel-tools">
+            <button id="collapsePanel" class="icon-button" type="button" aria-expanded="false" title="Show parameters">Show parameters</button>
+            <button id="pause" type="button">Pause</button>
+          </div>
+        </div>
+
+        <div id="panelBody" class="panel-body" aria-hidden="true">
+          <div class="stats" aria-label="Simulation statistics">
+            <div>
+              <strong id="agentCount">0</strong>
+              <span>agents</span>
+            </div>
+            <div>
+              <strong id="oatCount">1</strong>
+              <span>oats</span>
+            </div>
+            <div>
+              <strong id="fps">0</strong>
+              <span>fps</span>
+            </div>
+          </div>
+
+          <div class="controls">
+            <section class="control-group" aria-labelledby="agentControls">
+              <h2 id="agentControls">Agents</h2>
+
+              <label class="control-row">
+                <span class="control-copy">
+                  <strong>Uptake</strong>
+                  <span class="help-tip" tabindex="0" aria-label="Food taken from the local field.">?<span role="tooltip">Food taken from the local field.</span></span>
+                </span>
+                <input id="uptake" type="range" min="0.005" max="0.09" step="0.001" value="0.035" data-scale="100" data-suffix="%" data-digits="1">
+                <output for="uptake"></output>
+              </label>
+              <label class="control-row">
+                <span class="control-copy">
+                  <strong>Drop</strong>
+                  <span class="help-tip" tabindex="0" aria-label="Chemoattractant deposited each step.">?<span role="tooltip">Chemoattractant deposited each step.</span></span>
+                </span>
+                <input id="deposit" type="range" min="0.001" max="0.05" step="0.001" value="0.005" data-scale="100" data-digits="1">
+                <output for="deposit"></output>
+              </label>
+              <label class="control-row">
+                <span class="control-copy">
+                  <strong>Burn</strong>
+                  <span class="help-tip" tabindex="0" aria-label="Reserve cost paid to stay alive.">?<span role="tooltip">Reserve cost paid to stay alive.</span></span>
+                </span>
+                <input id="burn" type="range" min="0.001" max="0.045" step="0.001" value="0.005" data-scale="100" data-digits="1">
+                <output for="burn"></output>
+              </label>
+              <label class="control-row">
+                <span class="control-copy">
+                  <strong>Birth</strong>
+                  <span class="help-tip" tabindex="0" aria-label="Reserve needed to split into children.">?<span role="tooltip">Reserve needed to split into children.</span></span>
+                </span>
+                <input id="repro" type="range" min="0.2" max="4.5" step="0.05" value="3.0">
+                <output for="repro"></output>
+              </label>
+            </section>
+
+            <section class="control-group" aria-labelledby="steeringControls">
+              <h2 id="steeringControls">Steering</h2>
+
+              <label class="control-row">
+                <span class="control-copy">
+                  <strong>Food pull</strong>
+                  <span class="help-tip" tabindex="0" aria-label="Strength of attraction toward food.">?<span role="tooltip">Strength of attraction toward food.</span></span>
+                </span>
+                <input id="attract" type="range" min="0.2" max="3.5" step="0.05" value="1.5">
+                <output for="attract"></output>
+              </label>
+              <label class="control-row">
+                <span class="control-copy">
+                  <strong>Crowding</strong>
+                  <span class="help-tip" tabindex="0" aria-label="Penalty for cells above ideal density.">?<span role="tooltip">Penalty for cells above ideal density.</span></span>
+                </span>
+                <input id="avoid" type="range" min="0" max="3.5" step="0.05" value="1.0">
+                <output for="avoid"></output>
+              </label>
+              <label class="control-row">
+                <span class="control-copy">
+                  <strong>Crowd blur</strong>
+                  <span class="help-tip" tabindex="0" aria-label="Neighborhood radius for sensing agents.">?<span role="tooltip">Neighborhood radius for sensing agents.</span></span>
+                </span>
+                <input id="blur" type="range" min="1" max="64" step="0.5" value="18">
+                <output for="blur"></output>
+              </label>
+              <label class="control-row">
+                <span class="control-copy">
+                  <strong>Ideal dens</strong>
+                  <span class="help-tip" tabindex="0" aria-label="Preferred occupied-but-not-crowded level.">?<span role="tooltip">Preferred occupied-but-not-crowded level.</span></span>
+                </span>
+                <input id="ideal" type="range" min="0.02" max="0.7" step="0.01" value="0.02">
+                <output for="ideal"></output>
+              </label>
+              <label class="control-row">
+                <span class="control-copy">
+                  <strong>Min speed</strong>
+                  <span class="help-tip" tabindex="0" aria-label="Minimum fraction of a step taken by living agents.">?<span role="tooltip">Minimum fraction of a step taken by living agents.</span></span>
+                </span>
+                <input id="minSpeed" type="range" min="0" max="0.6" step="0.01" value="0.18" data-scale="100" data-suffix="%" data-digits="0">
+                <output for="minSpeed"></output>
+              </label>
+            </section>
+
+            <section class="control-group" aria-labelledby="fieldControls">
+              <h2 id="fieldControls">Field</h2>
+
+              <label class="control-row">
+                <span class="control-copy">
+                  <strong>Decay</strong>
+                  <span class="help-tip" tabindex="0" aria-label="Fraction retained after diffusion.">?<span role="tooltip">Fraction retained after diffusion.</span></span>
+                </span>
+                <input id="decay" type="range" min="0.94" max="1" step="0.001" value="0.991" data-scale="100" data-suffix="%" data-digits="1">
+                <output for="decay"></output>
+              </label>
+              <label class="control-row">
+                <span class="control-copy">
+                  <strong>Steps</strong>
+                  <span class="help-tip" tabindex="0" aria-label="Simulation updates per rendered frame.">?<span role="tooltip">Simulation updates per rendered frame.</span></span>
+                </span>
+                <input id="steps" type="range" min="1" max="8" step="1" value="1" data-digits="0">
+                <output for="steps"></output>
+              </label>
+            </section>
+
+            <section class="control-group" aria-labelledby="renderControls">
+              <h2 id="renderControls">Render</h2>
+
+              <label class="control-row">
+                <span class="control-copy">
+                  <strong>Spatial</strong>
+                  <span class="help-tip" tabindex="0" aria-label="Blur radius for the bump map.">?<span role="tooltip">Blur radius for the bump map.</span></span>
+                </span>
+                <input id="spatialSmooth" type="range" min="0" max="10" step="0.25" value="6.5">
+                <output for="spatialSmooth"></output>
+              </label>
+              <label class="control-row">
+                <span class="control-copy">
+                  <strong>Temporal</strong>
+                  <span class="help-tip" tabindex="0" aria-label="Blend with prior rendered field.">?<span role="tooltip">Blend with prior rendered field.</span></span>
+                </span>
+                <input id="temporalSmooth" type="range" min="0" max="0.95" step="0.01" value="0.8" data-scale="100" data-suffix="%" data-digits="0">
+                <output for="temporalSmooth"></output>
+              </label>
+            </section>
+          </div>
+
+          <div class="display-options" aria-label="Display options">
+            <label class="toggle-control">
+              <span>Oat glow</span>
+              <input id="showOats" type="checkbox" checked>
+            </label>
+            <label class="toggle-control">
+              <span>Agent dots</span>
+              <input id="showAgents" type="checkbox">
+            </label>
+          </div>
+
+          <div class="actions">
+            <button id="reset" type="button" data-testid="reset-button">Reset</button>
+            <button id="seed" type="button" data-testid="seed-button">Seed</button>
+            <button id="clearOats" type="button" data-testid="clear-oats-button">Center oat</button>
+          </div>
+        </div>
+      </section>
+    </main>
+    <script>
+const canvas = document.getElementById("sim");
+const statusEl = document.getElementById("gpuStatus");
+const agentCountEl = document.getElementById("agentCount");
+const oatCountEl = document.getElementById("oatCount");
+const fpsEl = document.getElementById("fps");
+
+const FIELD_SIZE = 1024;
+const AGENT_SIDE = 512;
+const AGENT_CAPACITY = AGENT_SIDE * AGENT_SIDE;
+const INITIAL_AGENTS = 900;
+const MAX_OATS = 64;
+const WORLD_LINEAR_SCALE = 4.0;
+const SURFACE_RESOLUTION = 512;
+const SURFACE_WORLD_SIZE = 2.4 * WORLD_LINEAR_SCALE;
+const SURFACE_FOV = Math.PI / 4.2;
+const SURFACE_GEOMETRY_RELIEF = 0.84;
+const DEFAULT_OAT_RADIUS = 0.08 / WORLD_LINEAR_SCALE;
+const DEFAULT_OAT_POWER = 1.55;
+const OVERFLOW_REPLACEMENT_RATE = 0.006;
+
+const params = {
+  uptakeRate: 0.035,
+  depositRate: 0.005,
+  burnRate: 0.005,
+  reproThreshold: 3.0,
+  foodWeight: 1.5,
+  crowdWeight: 1.0,
+  densityBlur: 18.0,
+  densityTarget: 0.02,
+  showAgentDots: false,
+  showOats: true,
+  simulationSteps: 1,
+  minMoveScale: 0.18,
+  stepSize: 0.0026 / WORLD_LINEAR_SCALE,
+  sensorDistance: 0.032 / WORLD_LINEAR_SCALE,
+  sensorAngle: 0.72,
+  turnAngle: 0.34,
+  wander: 0.092,
+  reproAngle: 0.7,
+  childStep: 0.0022 / WORLD_LINEAR_SCALE,
+  maxReserve: 7.0,
+  fieldDiffusion: 0.13,
+  fieldDecay: 0.991,
+  deltaScale: 1.35,
+  foodClamp: 0.45,
+  surfaceHeight: 0.34,
+  surfaceBump: 5.8,
+  spatialSmoothing: 6.5,
+  temporalSmoothing: 0.8,
+};
+
+let gl = canvas.getContext("webgl2", {
+  alpha: false,
+  antialias: false,
+  depth: true,
+  preserveDrawingBuffer: true,
+  stencil: false,
+});
+
+if (!gl) {
+  fail("WebGL2 is required.");
+  throw new Error("WebGL2 is required.");
+}
+
+const colorFloat = gl.getExtension("EXT_color_buffer_float");
+const floatBlend = gl.getExtension("EXT_float_blend");
+const linearFloat = gl.getExtension("OES_texture_float_linear");
+
+if (!colorFloat || !floatBlend) {
+  fail("WebGL2 float render targets and float blending are required.");
+  throw new Error("Required WebGL2 float extensions are unavailable.");
+}
+
+const debugInfo = gl.getExtension("WEBGL_debug_renderer_info");
+const rendererName = debugInfo ? gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) : "WebGL2";
+const baseStatus = `${rendererName} | ${AGENT_CAPACITY.toLocaleString()} slots`;
+statusEl.textContent = baseStatus;
+
+const fullScreenVertex = `#version 300 es
+layout(location = 0) in vec2 a_position;
+out vec2 v_uv;
+
+void main() {
+  v_uv = a_position * 0.5 + 0.5;
+  gl_Position = vec4(a_position, 0.0, 1.0);
+}
+`;
+
+const oatFragment = `#version 300 es
+precision highp float;
+
+#define MAX_OATS 64
+
+in vec2 v_uv;
+out vec4 outColor;
+
+uniform int u_oatCount;
+uniform vec2 u_oats[MAX_OATS];
+uniform float u_oatRadius[MAX_OATS];
+uniform float u_oatPower[MAX_OATS];
+
+void main() {
+  float food = 0.0;
+
+  for (int i = 0; i < MAX_OATS; i++) {
+    if (i >= u_oatCount) {
+      break;
+    }
+
+    vec2 d = abs(v_uv - u_oats[i]);
+    d = min(d, 1.0 - d);
+    float radius = max(u_oatRadius[i], 0.001);
+    food += u_oatPower[i] * exp(-dot(d, d) / (2.0 * radius * radius));
+  }
+
+  outColor = vec4(food, 0.0, 0.0, 1.0);
+}
+`;
+
+const diffuseFragment = `#version 300 es
+precision highp float;
+
+in vec2 v_uv;
+out vec4 outColor;
+
+uniform sampler2D u_food;
+uniform vec2 u_texel;
+uniform float u_diffusion;
+uniform float u_decay;
+uniform float u_foodClamp;
+
+float readFood(vec2 uv) {
+  return texture(u_food, fract(uv)).r;
+}
+
+void main() {
+  float c = readFood(v_uv);
+  float n = 0.0;
+
+  n += readFood(v_uv + vec2(-u_texel.x, -u_texel.y));
+  n += readFood(v_uv + vec2(0.0, -u_texel.y));
+  n += readFood(v_uv + vec2(u_texel.x, -u_texel.y));
+  n += readFood(v_uv + vec2(-u_texel.x, 0.0));
+  n += readFood(v_uv + vec2(u_texel.x, 0.0));
+  n += readFood(v_uv + vec2(-u_texel.x, u_texel.y));
+  n += readFood(v_uv + vec2(0.0, u_texel.y));
+  n += readFood(v_uv + vec2(u_texel.x, u_texel.y));
+
+  float blurred = n * 0.125;
+  float food = clamp(mix(c, blurred, u_diffusion) * u_decay, 0.0, u_foodClamp);
+  outColor = vec4(food, 0.0, 0.0, 1.0);
+}
+`;
+
+const clampFragment = `#version 300 es
+precision highp float;
+
+in vec2 v_uv;
+out vec4 outColor;
+
+uniform sampler2D u_food;
+uniform float u_foodClamp;
+
+void main() {
+  float food = clamp(texture(u_food, v_uv).r, 0.0, u_foodClamp);
+  outColor = vec4(food, 0.0, 0.0, 1.0);
+}
+`;
+
+const smoothFragment = `#version 300 es
+precision highp float;
+
+in vec2 v_uv;
+out vec4 outColor;
+
+uniform sampler2D u_currentFood;
+uniform sampler2D u_previousFood;
+uniform vec2 u_texel;
+uniform vec2 u_direction;
+uniform float u_spatialRadius;
+uniform float u_temporalWeight;
+uniform float u_foodClamp;
+uniform int u_applyTemporal;
+
+float readFood(vec2 offset) {
+  return max(texture(u_currentFood, fract(v_uv + offset)).r, 0.0);
+}
+
+void main() {
+  float radius = max(u_spatialRadius, 0.0);
+  float center = readFood(vec2(0.0));
+  float blurred = center;
+  float weightTotal = 1.0;
+  float sigma = max(radius * 0.42, 0.35);
+
+  for (int i = 1; i <= 14; i++) {
+    float offset = float(i) * radius / 14.0;
+    float weight = exp(-0.5 * (offset * offset) / (sigma * sigma));
+    vec2 sampleOffset = u_direction * u_texel * offset;
+    blurred += (readFood(sampleOffset) + readFood(-sampleOffset)) * weight;
+    weightTotal += weight * 2.0;
+  }
+
+  blurred /= max(weightTotal, 0.0001);
+  float spatialMix = smoothstep(0.0, 0.25, radius);
+  float spatialFood = mix(center, blurred, spatialMix);
+  float food = spatialFood;
+
+  if (u_applyTemporal == 1) {
+    float previousFood = max(texture(u_previousFood, v_uv).r, 0.0);
+    food = mix(spatialFood, previousFood, clamp(u_temporalWeight, 0.0, 0.98));
+  }
+
+  outColor = vec4(clamp(food, 0.0, u_foodClamp), 0.0, 0.0, 1.0);
+}
+`;
+
+const agentUpdateFragment = `#version 300 es
+precision highp float;
+precision highp sampler2D;
+
+in vec2 v_uv;
+out vec4 outColor;
+
+uniform sampler2D u_agents;
+uniform sampler2D u_food;
+uniform sampler2D u_oat;
+uniform sampler2D u_density;
+uniform int u_agentSide;
+uniform float u_time;
+uniform float u_dt;
+uniform float u_stepSize;
+uniform float u_minMoveScale;
+uniform float u_sensorDistance;
+uniform float u_sensorAngle;
+uniform float u_turnAngle;
+uniform float u_wander;
+uniform float u_uptakeRate;
+uniform float u_depositRate;
+uniform float u_burnRate;
+uniform float u_reproThreshold;
+uniform float u_reproAngle;
+uniform float u_childStep;
+uniform float u_foodWeight;
+uniform float u_crowdWeight;
+uniform float u_densityTarget;
+uniform float u_maxReserve;
+uniform float u_overflowReplacementRate;
+
+float hash(float n) {
+  return fract(sin(n * 127.1 + u_time * 41.7) * 43758.5453123);
+}
+
+vec4 fetchAgent(int index) {
+  ivec2 pixel = ivec2(index % u_agentSide, index / u_agentSide);
+  return texelFetch(u_agents, pixel, 0);
+}
+
+float scoreAt(vec2 uv, float reserve) {
+  uv = fract(uv);
+  float food = max(texture(u_food, uv).r + texture(u_oat, uv).r, 0.0);
+  float foodSignal = 1.0 - exp(-food * 1.2);
+  float crowd = texture(u_density, uv).r;
+  float appetite = 1.0 - smoothstep(u_reproThreshold * 0.55, u_reproThreshold * 1.05, reserve);
+  float target = max(u_densityTarget, 0.001);
+  float occupiedEnough = smoothstep(0.0, target, crowd);
+  float tooCrowded = smoothstep(target, min(target * 3.0, 1.0), crowd);
+  float crowdPreference = occupiedEnough - tooCrowded * 2.0;
+  return u_foodWeight * foodSignal * appetite + u_crowdWeight * crowdPreference;
+}
+
+vec4 advanceAgent(vec4 agent, float seed) {
+  if (agent.w <= 0.0) {
+    return vec4(fract(agent.xy), agent.z, 0.0);
+  }
+
+  vec2 pos = fract(agent.xy);
+  float angle = agent.z;
+
+  vec2 frontDir = vec2(cos(angle), sin(angle));
+  vec2 leftDir = vec2(cos(angle + u_sensorAngle), sin(angle + u_sensorAngle));
+  vec2 rightDir = vec2(cos(angle - u_sensorAngle), sin(angle - u_sensorAngle));
+
+  float front = scoreAt(pos + frontDir * u_sensorDistance, agent.w);
+  float left = scoreAt(pos + leftDir * u_sensorDistance, agent.w);
+  float right = scoreAt(pos + rightDir * u_sensorDistance, agent.w);
+  float stay = scoreAt(pos, agent.w);
+  float moveScore = front;
+  float angleDelta = (hash(seed + 11.0) - 0.5) * u_wander;
+
+  if (left > front && left > right) {
+    moveScore = left;
+    angleDelta = u_turnAngle;
+  } else if (right > front && right > left) {
+    moveScore = right;
+    angleDelta = -u_turnAngle;
+  }
+
+  float preference = moveScore - stay;
+  float moveScale = max(u_minMoveScale, smoothstep(0.0, 0.08, preference));
+
+  angle += angleDelta;
+  angle += (hash(seed + 23.0) - 0.5) * u_wander * 0.5 * moveScale;
+
+  vec2 dir = vec2(cos(angle), sin(angle));
+  pos = fract(pos + dir * u_stepSize * u_dt * moveScale);
+
+  float dynamicFood = max(texture(u_food, pos).r, 0.0);
+  float oatFood = max(texture(u_oat, pos).r, 0.0);
+  float effectiveFood = dynamicFood + oatFood;
+  float reserve = agent.w + (u_uptakeRate * effectiveFood - u_depositRate - u_burnRate) * u_dt;
+
+  if (reserve <= 0.0) {
+    return vec4(pos, angle, 0.0);
+  }
+
+  return vec4(pos, angle, min(reserve, u_maxReserve));
+}
+
+vec4 makeChild(vec4 parentNext, int side, float seed) {
+  float sideSign = side == 0 ? 1.0 : -1.0;
+  parentNext.z += sideSign * u_reproAngle + (hash(seed + 37.0) - 0.5) * 0.18;
+  parentNext.xy = fract(parentNext.xy + vec2(cos(parentNext.z), sin(parentNext.z)) * u_childStep);
+  parentNext.w *= 0.25;
+  return parentNext;
+}
+
+int overflowBirthSerialForSlot(int index) {
+  uint mask = uint(u_agentSide * u_agentSide - 1);
+  uint salt = uint(floor(u_time * 60.0)) * 747796405u;
+  uint serial = ((uint(index) - salt) * 22725u) & mask;
+  return int(serial);
+}
+
+void main() {
+  int index = int(gl_FragCoord.y) * u_agentSide + int(gl_FragCoord.x);
+  int capacity = u_agentSide * u_agentSide;
+  vec4 selfNext = advanceAgent(fetchAgent(index), float(index));
+
+  if (selfNext.w > u_reproThreshold) {
+    selfNext.w *= 0.5;
+  }
+
+  vec4 result = selfNext;
+
+  if (index > 0) {
+    int parentIndex = (index - 1) / 2;
+    int side = index - 1 - parentIndex * 2;
+    vec4 parentNext = advanceAgent(fetchAgent(parentIndex), float(parentIndex));
+
+    if (parentNext.w > u_reproThreshold) {
+      result = makeChild(parentNext, side, float(index));
+    }
+  }
+
+  float replacementChance = clamp(u_overflowReplacementRate * u_dt, 0.0, 0.02);
+
+  if (replacementChance > 0.0) {
+    int overflowSerial = overflowBirthSerialForSlot(index);
+    int overflowParent = capacity / 2 - 1;
+    int overflowSide = 1;
+    float overflowSeed = float(capacity);
+
+    if (overflowSerial > 0) {
+      int k = overflowSerial - 1;
+      overflowParent = capacity / 2 + k / 2;
+      overflowSide = k - (k / 2) * 2;
+      overflowSeed = float(capacity + overflowSerial);
+    }
+
+    vec4 overflowParentNext = advanceAgent(fetchAgent(overflowParent), float(overflowParent));
+    if (
+      overflowParentNext.w > u_reproThreshold &&
+      hash(float(index) + u_time * 19.0) < replacementChance
+    ) {
+      result = makeChild(overflowParentNext, overflowSide, overflowSeed);
+    }
+
+    if (overflowSerial == 0) {
+      int lastParent = capacity - 1;
+      vec4 lastParentNext = advanceAgent(fetchAgent(lastParent), float(lastParent));
+
+      if (
+        lastParentNext.w > u_reproThreshold &&
+        hash(u_time + 911.0) < replacementChance
+      ) {
+        result = makeChild(lastParentNext, 1, float(capacity * 2));
+      }
+    }
+  }
+
+  outColor = result;
+}
+`;
+
+const particleVertex = `#version 300 es
+precision highp float;
+precision highp sampler2D;
+
+layout(location = 0) in float a_index;
+out float v_alive;
+out float v_reserve;
+
+uniform sampler2D u_agents;
+uniform int u_agentSide;
+uniform float u_pointSize;
+
+vec4 fetchAgent(float index) {
+  int i = int(index);
+  ivec2 pixel = ivec2(i % u_agentSide, i / u_agentSide);
+  return texelFetch(u_agents, pixel, 0);
+}
+
+void main() {
+  vec4 agent = fetchAgent(a_index);
+  v_alive = agent.w > 0.0 ? 1.0 : 0.0;
+  v_reserve = agent.w;
+
+  if (v_alive < 0.5) {
+    gl_Position = vec4(-2.0, -2.0, 0.0, 1.0);
+    gl_PointSize = 0.0;
+  } else {
+    gl_Position = vec4(agent.xy * 2.0 - 1.0, 0.0, 1.0);
+    gl_PointSize = u_pointSize;
+  }
+}
+`;
+
+const densityFragment = `#version 300 es
+precision highp float;
+
+in float v_alive;
+in float v_reserve;
+out vec4 outColor;
+
+void main() {
+  vec2 p = gl_PointCoord * 2.0 - 1.0;
+  float kernel = smoothstep(1.0, 0.0, dot(p, p));
+  float reserveMass = clamp(v_reserve, 0.0, 64.0);
+  outColor = vec4(kernel * v_alive * reserveMass * 0.032, 0.0, 0.0, 1.0);
+}
+`;
+
+const agentDisplayFragment = `#version 300 es
+precision highp float;
+
+in float v_alive;
+in float v_reserve;
+out vec4 outColor;
+
+void main() {
+  vec2 p = gl_PointCoord - 0.5;
+  float d = length(p);
+  float alpha = smoothstep(0.5, 0.13, d) * v_alive;
+  float energy = clamp(v_reserve / 2.8, 0.0, 1.0);
+  vec3 color = mix(vec3(0.95, 0.70, 0.0), vec3(1.0, 0.8667, 0.0), energy);
+  outColor = vec4(color, alpha * 0.58);
+}
+`;
+
+const agentSurfaceVertex = `#version 300 es
+precision highp float;
+precision highp sampler2D;
+
+layout(location = 0) in float a_index;
+out float v_alive;
+out float v_reserve;
+
+uniform sampler2D u_agents;
+uniform sampler2D u_food;
+uniform int u_agentSide;
+uniform mat4 u_viewProjection;
+uniform float u_worldSize;
+uniform float u_heightScale;
+uniform float u_pointSize;
+
+vec4 fetchAgent(float index) {
+  int i = int(index);
+  ivec2 pixel = ivec2(i % u_agentSide, i / u_agentSide);
+  return texelFetch(u_agents, pixel, 0);
+}
+
+float heightFromFood(float food) {
+  return (1.0 - exp(-max(food, 0.0) * 4.0)) * u_heightScale;
+}
+
+void main() {
+  vec4 agent = fetchAgent(a_index);
+  v_alive = agent.w > 0.0 ? 1.0 : 0.0;
+  v_reserve = agent.w;
+
+  if (v_alive < 0.5) {
+    gl_Position = vec4(-2.0, -2.0, 0.0, 1.0);
+    gl_PointSize = 0.0;
+  } else {
+    vec2 uv = fract(agent.xy);
+    float food = texture(u_food, uv).r;
+    float height = heightFromFood(food) + 0.026;
+    vec3 world = vec3((uv.x - 0.5) * u_worldSize, height, (uv.y - 0.5) * u_worldSize);
+
+    gl_Position = u_viewProjection * vec4(world, 1.0);
+    gl_PointSize = u_pointSize;
+  }
+}
+`;
+
+const deltaFragment = `#version 300 es
+precision highp float;
+
+in vec2 v_uv;
+out vec4 outColor;
+
+uniform sampler2D u_food;
+uniform sampler2D u_depositDensity;
+uniform float u_uptakeRate;
+uniform float u_depositRate;
+uniform float u_deltaScale;
+uniform float u_dt;
+uniform float u_foodClamp;
+
+void main() {
+  float food = max(texture(u_food, v_uv).r, 0.0);
+  float density = max(texture(u_depositDensity, v_uv).r, 0.0);
+  float agentLoad = min(density / 0.032, 64.0);
+  float exposure = agentLoad * u_deltaScale * u_dt;
+  float deposited = u_depositRate * exposure;
+  float uptake = food * (1.0 - exp(-u_uptakeRate * exposure));
+  float nextFood = clamp(food + deposited - uptake, 0.0, u_foodClamp);
+  outColor = vec4(nextFood, 0.0, 0.0, 1.0);
+}
+`;
+
+const surfaceVertex = `#version 300 es
+precision highp float;
+precision highp sampler2D;
+
+layout(location = 0) in vec2 a_uv;
+
+out vec2 v_uv;
+out vec3 v_world;
+out float v_food;
+
+uniform sampler2D u_food;
+uniform mat4 u_viewProjection;
+uniform float u_worldSize;
+uniform float u_heightScale;
+
+float heightFromFood(float food) {
+  return (1.0 - exp(-max(food, 0.0) * 4.0)) * u_heightScale;
+}
+
+void main() {
+  vec2 uv = a_uv;
+  float food = texture(u_food, uv).r;
+  float height = heightFromFood(food) * ${SURFACE_GEOMETRY_RELIEF.toFixed(2)};
+  vec3 world = vec3((uv.x - 0.5) * u_worldSize, height, (uv.y - 0.5) * u_worldSize);
+
+  v_uv = uv;
+  v_world = world;
+  v_food = food;
+  gl_Position = u_viewProjection * vec4(world, 1.0);
+}
+`;
+
+const surfaceFragment = `#version 300 es
+precision highp float;
+precision highp sampler2D;
+
+in vec2 v_uv;
+in vec3 v_world;
+in float v_food;
+out vec4 outColor;
+
+uniform sampler2D u_food;
+uniform vec2 u_texel;
+uniform vec3 u_cameraPosition;
+uniform float u_heightScale;
+uniform float u_bumpStrength;
+uniform float u_normalSampleRadius;
+
+float heightFromFood(float food) {
+  return (1.0 - exp(-max(food, 0.0) * 4.0)) * u_heightScale;
+}
+
+void main() {
+  float food = max(texture(u_food, v_uv).r, 0.0);
+  float normalRadius = max(u_normalSampleRadius, 1.0);
+  vec2 normalTexel = u_texel * normalRadius;
+  float normalScale = u_bumpStrength / normalRadius;
+  float normalLift = mix(0.035, 0.06, smoothstep(1.0, 7.0, normalRadius));
+  float hL = heightFromFood(texture(u_food, fract(v_uv - vec2(normalTexel.x, 0.0))).r);
+  float hR = heightFromFood(texture(u_food, fract(v_uv + vec2(normalTexel.x, 0.0))).r);
+  float hD = heightFromFood(texture(u_food, fract(v_uv - vec2(0.0, normalTexel.y))).r);
+  float hU = heightFromFood(texture(u_food, fract(v_uv + vec2(0.0, normalTexel.y))).r);
+  float hUL = heightFromFood(texture(u_food, fract(v_uv + vec2(-normalTexel.x, normalTexel.y))).r);
+  float hUR = heightFromFood(texture(u_food, fract(v_uv + normalTexel)).r);
+  float hDL = heightFromFood(texture(u_food, fract(v_uv - normalTexel)).r);
+  float hDR = heightFromFood(texture(u_food, fract(v_uv + vec2(normalTexel.x, -normalTexel.y))).r);
+  float gradX = (hR - hL) * 0.5 + (hUR + hDR - hUL - hDL) * 0.25;
+  float gradY = (hU - hD) * 0.5 + (hUL + hUR - hDL - hDR) * 0.25;
+  vec3 normal = normalize(vec3(-gradX * normalScale, normalLift, -gradY * normalScale));
+
+  vec3 lightDir = normalize(vec3(-0.42, 0.78, 0.48));
+  vec3 viewDir = normalize(u_cameraPosition - v_world);
+  vec3 halfDir = normalize(lightDir + viewDir);
+
+  float foodViz = 1.0 - exp(-food * 2.4);
+  float trail = pow(foodViz, 0.68);
+  float trailCore = foodViz * foodViz * 0.55;
+  float diffuse = max(dot(normal, lightDir), 0.0);
+  float halfDot = max(dot(normal, halfDir), 0.0);
+  float viewDot = max(dot(normal, viewDir), 0.0);
+  float glossMask = smoothstep(0.02, 0.26, food);
+  float wetSheen = pow(halfDot, 22.0) * foodViz * 0.92;
+  float clearcoat = pow(halfDot, 92.0) * (0.50 + foodViz * 4.5);
+  float rim = pow(1.0 - viewDot, 2.0) * (0.10 + foodViz * 0.72);
+
+  vec3 slimeYellow = vec3(1.0, 0.8667, 0.0);
+  vec3 base = vec3(0.022, 0.018, 0.0);
+  base += trail * slimeYellow * 0.96;
+  base += trailCore * vec3(1.0, 0.76, 0.0) * 0.48;
+  vec3 color = base * (0.18 + diffuse * 1.05);
+  color += wetSheen * vec3(1.0, 0.86, 0.04) * (0.30 + glossMask * 1.05);
+  color += clearcoat * vec3(1.0, 0.98, 0.70) * (0.58 + glossMask * 1.12);
+  color += rim * vec3(1.0, 0.60, 0.02);
+  color += smoothstep(0.015, 0.20, food) * vec3(1.0, 0.72, 0.0) * (0.06 + rim * 0.18);
+
+  outColor = vec4(pow(color, vec3(0.78)), 1.0);
+}
+`;
+
+const oatMarkerVertex = `#version 300 es
+precision highp float;
+
+layout(location = 0) in vec4 a_oat;
+
+out float v_power;
+
+uniform mat4 u_viewProjection;
+uniform float u_worldSize;
+uniform float u_heightScale;
+uniform float u_pointScale;
+
+void main() {
+  vec2 uv = a_oat.xy;
+  float height = (1.0 - exp(-max(a_oat.w, 0.0) * 1.5)) * u_heightScale + 0.025;
+  vec3 world = vec3((uv.x - 0.5) * u_worldSize, height, (uv.y - 0.5) * u_worldSize);
+
+  v_power = a_oat.w;
+  gl_Position = u_viewProjection * vec4(world, 1.0);
+  gl_PointSize = clamp(a_oat.z * u_pointScale, 18.0, 86.0);
+}
+`;
+
+const oatMarkerFragment = `#version 300 es
+precision highp float;
+
+in float v_power;
+out vec4 outColor;
+
+void main() {
+  vec2 p = gl_PointCoord * 2.0 - 1.0;
+  float d = length(p);
+  float halo = smoothstep(1.0, 0.0, d);
+  float core = smoothstep(0.24, 0.0, d);
+  float ring = smoothstep(0.72, 0.36, d) * smoothstep(0.16, 0.36, d);
+  float strength = 0.7 + clamp(v_power, 0.0, 2.0) * 0.25;
+  vec3 color = vec3(1.0, 0.86, 0.02) * (0.34 * halo + 0.55 * ring) + vec3(1.0, 0.96, 0.46) * core * 1.8;
+  float alpha = (halo * 0.36 + ring * 0.30 + core * 0.95) * strength;
+
+  outColor = vec4(color * strength, alpha);
+}
+`;
+
+const programs = {
+  oat: createProgram(fullScreenVertex, oatFragment),
+  diffuse: createProgram(fullScreenVertex, diffuseFragment),
+  clamp: createProgram(fullScreenVertex, clampFragment),
+  smooth: createProgram(fullScreenVertex, smoothFragment),
+  updateAgents: createProgram(fullScreenVertex, agentUpdateFragment),
+  density: createProgram(particleVertex, densityFragment),
+  depositDensity: createProgram(particleVertex, densityFragment),
+  displayAgents: createProgram(agentSurfaceVertex, agentDisplayFragment),
+  delta: createProgram(fullScreenVertex, deltaFragment),
+  surface: createProgram(surfaceVertex, surfaceFragment),
+  oatMarker: createProgram(oatMarkerVertex, oatMarkerFragment),
+};
+
+const quadVao = createQuadVao();
+const particleVao = createParticleVao();
+const surfaceMesh = createSurfaceMesh();
+const oatMarkerMesh = createOatMarkerVao();
+
+const fieldFilter = linearFloat ? gl.LINEAR : gl.NEAREST;
+const agentTextures = [
+  createTexture(AGENT_SIDE, AGENT_SIDE, gl.RGBA32F, gl.RGBA, gl.FLOAT, gl.NEAREST, gl.CLAMP_TO_EDGE),
+  createTexture(AGENT_SIDE, AGENT_SIDE, gl.RGBA32F, gl.RGBA, gl.FLOAT, gl.NEAREST, gl.CLAMP_TO_EDGE),
+];
+const fieldTextures = [
+  createTexture(FIELD_SIZE, FIELD_SIZE, gl.RGBA32F, gl.RGBA, gl.FLOAT, fieldFilter, gl.REPEAT),
+  createTexture(FIELD_SIZE, FIELD_SIZE, gl.RGBA32F, gl.RGBA, gl.FLOAT, fieldFilter, gl.REPEAT),
+];
+const renderTextures = [
+  createTexture(FIELD_SIZE, FIELD_SIZE, gl.RGBA32F, gl.RGBA, gl.FLOAT, fieldFilter, gl.REPEAT),
+  createTexture(FIELD_SIZE, FIELD_SIZE, gl.RGBA32F, gl.RGBA, gl.FLOAT, fieldFilter, gl.REPEAT),
+];
+const renderScratchTexture = createTexture(FIELD_SIZE, FIELD_SIZE, gl.RGBA32F, gl.RGBA, gl.FLOAT, fieldFilter, gl.REPEAT);
+const oatTexture = createTexture(FIELD_SIZE, FIELD_SIZE, gl.RGBA32F, gl.RGBA, gl.FLOAT, fieldFilter, gl.REPEAT);
+const densityTexture = createTexture(FIELD_SIZE, FIELD_SIZE, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, gl.LINEAR, gl.REPEAT);
+const depositDensityTexture = createTexture(FIELD_SIZE, FIELD_SIZE, gl.RGBA32F, gl.RGBA, gl.FLOAT, fieldFilter, gl.REPEAT);
+
+const agentFbos = agentTextures.map(createFramebuffer);
+const fieldFbos = fieldTextures.map(createFramebuffer);
+const renderFbos = renderTextures.map(createFramebuffer);
+const renderScratchFbo = createFramebuffer(renderScratchTexture);
+const oatFbo = createFramebuffer(oatTexture);
+const densityFbo = createFramebuffer(densityTexture);
+const depositDensityFbo = createFramebuffer(depositDensityTexture);
+
+let agentRead = 0;
+let agentWrite = 1;
+let fieldRead = 0;
+let fieldWrite = 1;
+let renderRead = 0;
+let renderWrite = 1;
+let paused = false;
+let oatDirty = true;
+let smoothInitialized = false;
+let lastFrame = performance.now();
+let fpsSmoothed = 60;
+let lastStatsRead = 0;
+let overflowReplacementRate = 0;
+let visibleAgents = 0;
+let pointerAction = null;
+
+const surfaceView = {
+  yaw: -0.62,
+  pitch: 0.82,
+  distance: 2.95 * WORLD_LINEAR_SCALE,
+};
+
+const oats = [];
+const readback = new Float32Array(AGENT_CAPACITY * 4);
+
+initControls();
+resetSimulation({ resetOats: true });
+requestAnimationFrame(frame);
+
+window.__slime = {
+  addOat,
+  reset: resetSimulation,
+  params,
+  getStats: () => ({
+    agents: visibleAgents,
+    oats: oats.length,
+    capacity: AGENT_CAPACITY,
+    paused,
+  }),
+};
+
+function fail(message) {
+  statusEl.textContent = message;
+  statusEl.classList.add("error");
+}
+
+function createShader(type, source) {
+  const shader = gl.createShader(type);
+  gl.shaderSource(shader, source);
+  gl.compileShader(shader);
+
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+    const log = gl.getShaderInfoLog(shader);
+    gl.deleteShader(shader);
+    throw new Error(log || "Shader compilation failed.");
+  }
+
+  return shader;
+}
+
+function createProgram(vertexSource, fragmentSource) {
+  const program = gl.createProgram();
+  const vertex = createShader(gl.VERTEX_SHADER, vertexSource);
+  const fragment = createShader(gl.FRAGMENT_SHADER, fragmentSource);
+
+  gl.attachShader(program, vertex);
+  gl.attachShader(program, fragment);
+  gl.linkProgram(program);
+
+  gl.deleteShader(vertex);
+  gl.deleteShader(fragment);
+
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    const log = gl.getProgramInfoLog(program);
+    gl.deleteProgram(program);
+    throw new Error(log || "Program link failed.");
+  }
+
+  return program;
+}
+
+function createQuadVao() {
+  const vao = gl.createVertexArray();
+  const buffer = gl.createBuffer();
+
+  gl.bindVertexArray(vao);
+  gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+    -1, -1,
+    1, -1,
+    -1, 1,
+    1, 1,
+  ]), gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+  gl.bindVertexArray(null);
+
+  return vao;
+}
+
+function createParticleVao() {
+  const vao = gl.createVertexArray();
+  const buffer = gl.createBuffer();
+  const indices = new Float32Array(AGENT_CAPACITY);
+
+  for (let i = 0; i < indices.length; i++) {
+    indices[i] = i;
+  }
+
+  gl.bindVertexArray(vao);
+  gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+  gl.bufferData(gl.ARRAY_BUFFER, indices, gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 1, gl.FLOAT, false, 0, 0);
+  gl.bindVertexArray(null);
+
+  return vao;
+}
+
+function createSurfaceMesh() {
+  const side = SURFACE_RESOLUTION + 1;
+  const vertices = new Float32Array(side * side * 2);
+  const indices = new Uint32Array(SURFACE_RESOLUTION * SURFACE_RESOLUTION * 6);
+  let vertexOffset = 0;
+  let indexOffset = 0;
+
+  for (let y = 0; y < side; y++) {
+    for (let x = 0; x < side; x++) {
+      vertices[vertexOffset++] = x / SURFACE_RESOLUTION;
+      vertices[vertexOffset++] = y / SURFACE_RESOLUTION;
+    }
+  }
+
+  for (let y = 0; y < SURFACE_RESOLUTION; y++) {
+    for (let x = 0; x < SURFACE_RESOLUTION; x++) {
+      const a = y * side + x;
+      const b = a + 1;
+      const c = a + side;
+      const d = c + 1;
+
+      indices[indexOffset++] = a;
+      indices[indexOffset++] = c;
+      indices[indexOffset++] = b;
+      indices[indexOffset++] = b;
+      indices[indexOffset++] = c;
+      indices[indexOffset++] = d;
+    }
+  }
+
+  const vao = gl.createVertexArray();
+  const vertexBuffer = gl.createBuffer();
+  const indexBuffer = gl.createBuffer();
+
+  gl.bindVertexArray(vao);
+  gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+  gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
+  gl.bindVertexArray(null);
+
+  return { vao, indexCount: indices.length };
+}
+
+function createOatMarkerVao() {
+  const vao = gl.createVertexArray();
+  const buffer = gl.createBuffer();
+  const data = new Float32Array(MAX_OATS * 4);
+
+  gl.bindVertexArray(vao);
+  gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+  gl.bufferData(gl.ARRAY_BUFFER, data.byteLength, gl.DYNAMIC_DRAW);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 4, gl.FLOAT, false, 0, 0);
+  gl.bindVertexArray(null);
+
+  return { vao, buffer, data };
+}
+
+function createTexture(width, height, internalFormat, format, type, filter, wrap, data = null) {
+  const texture = gl.createTexture();
+
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, wrap);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, wrap);
+  gl.texImage2D(gl.TEXTURE_2D, 0, internalFormat, width, height, 0, format, type, data);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+
+  return texture;
+}
+
+function createFramebuffer(texture) {
+  const framebuffer = gl.createFramebuffer();
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+
+  const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+  if (status !== gl.FRAMEBUFFER_COMPLETE) {
+    throw new Error(`Framebuffer incomplete: ${status}`);
+  }
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  return framebuffer;
+}
+
+function bindTexture(unit, texture) {
+  gl.activeTexture(gl.TEXTURE0 + unit);
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+}
+
+function uniform(program, name) {
+  return gl.getUniformLocation(program, name);
+}
+
+function drawQuad() {
+  gl.bindVertexArray(quadVao);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  gl.bindVertexArray(null);
+}
+
+function drawParticles() {
+  gl.bindVertexArray(particleVao);
+  gl.drawArrays(gl.POINTS, 0, AGENT_CAPACITY);
+  gl.bindVertexArray(null);
+}
+
+function drawSurface() {
+  gl.bindVertexArray(surfaceMesh.vao);
+  gl.drawElements(gl.TRIANGLES, surfaceMesh.indexCount, gl.UNSIGNED_INT, 0);
+  gl.bindVertexArray(null);
+}
+
+function drawOatMarkers() {
+  for (let i = 0; i < oats.length; i++) {
+    const offset = i * 4;
+    oatMarkerMesh.data[offset] = oats[i].x;
+    oatMarkerMesh.data[offset + 1] = oats[i].y;
+    oatMarkerMesh.data[offset + 2] = oats[i].radius;
+    oatMarkerMesh.data[offset + 3] = oats[i].power;
+  }
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, oatMarkerMesh.buffer);
+  gl.bufferSubData(gl.ARRAY_BUFFER, 0, oatMarkerMesh.data.subarray(0, oats.length * 4));
+  gl.bindVertexArray(oatMarkerMesh.vao);
+  gl.drawArrays(gl.POINTS, 0, oats.length);
+  gl.bindVertexArray(null);
+}
+
+function clearFramebuffer(framebuffer, width, height) {
+  gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+  gl.viewport(0, 0, width, height);
+  gl.disable(gl.BLEND);
+  gl.clearColor(0, 0, 0, 1);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+}
+
+function resetSimulation({ resetOats = false } = {}) {
+  if (resetOats) {
+    oats.length = 0;
+    addOat(0.5, 0.5);
+  }
+
+  uploadAgents(makeAgentData());
+
+  clearFramebuffer(fieldFbos[0], FIELD_SIZE, FIELD_SIZE);
+  clearFramebuffer(fieldFbos[1], FIELD_SIZE, FIELD_SIZE);
+  clearFramebuffer(renderFbos[0], FIELD_SIZE, FIELD_SIZE);
+  clearFramebuffer(renderFbos[1], FIELD_SIZE, FIELD_SIZE);
+  clearFramebuffer(renderScratchFbo, FIELD_SIZE, FIELD_SIZE);
+  clearFramebuffer(densityFbo, FIELD_SIZE, FIELD_SIZE);
+  clearFramebuffer(depositDensityFbo, FIELD_SIZE, FIELD_SIZE);
+
+  agentRead = 0;
+  agentWrite = 1;
+  fieldRead = 0;
+  fieldWrite = 1;
+  renderRead = 0;
+  renderWrite = 1;
+  overflowReplacementRate = 0;
+  oatDirty = true;
+  smoothInitialized = false;
+}
+
+function makeAgentData() {
+  const data = new Float32Array(AGENT_CAPACITY * 4);
+  const random = mulberry32(0xdecafbad + oats.length * 97);
+
+  for (let i = 0; i < INITIAL_AGENTS; i++) {
+    const anchor = oats[Math.floor(random() * Math.max(oats.length, 1))] || { x: 0.5, y: 0.5 };
+    const radius = (0.035 + Math.pow(random(), 0.8) * 0.07) / WORLD_LINEAR_SCALE;
+    const bearing = random() * Math.PI * 2;
+    const index = i * 4;
+
+    data[index] = wrap01(anchor.x + Math.cos(bearing) * radius);
+    data[index + 1] = wrap01(anchor.y + Math.sin(bearing) * radius);
+    data[index + 2] = bearing + (random() - 0.5) * 0.85;
+    data[index + 3] = 1.0 + random() * 0.45;
+  }
+
+  return data;
+}
+
+function uploadAgents(data) {
+  for (const texture of agentTextures) {
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, AGENT_SIDE, AGENT_SIDE, gl.RGBA, gl.FLOAT, data);
+  }
+  gl.bindTexture(gl.TEXTURE_2D, null);
+}
+
+function mulberry32(seed) {
+  return function random() {
+    let t = seed += 0x6d2b79f5;
+    t = Math.imul(t ^ t >>> 15, t | 1);
+    t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+function wrap01(value) {
+  return value - Math.floor(value);
+}
+
+function addOat(x, y, radius = DEFAULT_OAT_RADIUS, power = DEFAULT_OAT_POWER) {
+  if (oats.length >= MAX_OATS) {
+    oats.splice(1, 1);
+  }
+
+  oats.push({ x: wrap01(x), y: wrap01(y), radius, power });
+  oatDirty = true;
+  oatCountEl.textContent = String(oats.length);
+}
+
+function renderOats() {
+  if (!oatDirty) {
+    return;
+  }
+
+  const oatPositions = new Float32Array(MAX_OATS * 2);
+  const oatRadius = new Float32Array(MAX_OATS);
+  const oatPower = new Float32Array(MAX_OATS);
+
+  for (let i = 0; i < oats.length; i++) {
+    oatPositions[i * 2] = oats[i].x;
+    oatPositions[i * 2 + 1] = oats[i].y;
+    oatRadius[i] = oats[i].radius;
+    oatPower[i] = oats[i].power;
+  }
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, oatFbo);
+  gl.viewport(0, 0, FIELD_SIZE, FIELD_SIZE);
+  gl.disable(gl.BLEND);
+  gl.useProgram(programs.oat);
+  gl.uniform1i(uniform(programs.oat, "u_oatCount"), oats.length);
+  gl.uniform2fv(uniform(programs.oat, "u_oats"), oatPositions);
+  gl.uniform1fv(uniform(programs.oat, "u_oatRadius"), oatRadius);
+  gl.uniform1fv(uniform(programs.oat, "u_oatPower"), oatPower);
+  drawQuad();
+  oatDirty = false;
+}
+
+function renderDensity() {
+  gl.bindFramebuffer(gl.FRAMEBUFFER, densityFbo);
+  gl.viewport(0, 0, FIELD_SIZE, FIELD_SIZE);
+  gl.disable(gl.BLEND);
+  gl.clearColor(0, 0, 0, 1);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+
+  gl.enable(gl.BLEND);
+  gl.blendEquation(gl.FUNC_ADD);
+  gl.blendFunc(gl.ONE, gl.ONE);
+  gl.useProgram(programs.density);
+  bindTexture(0, agentTextures[agentRead]);
+  gl.uniform1i(uniform(programs.density, "u_agents"), 0);
+  gl.uniform1i(uniform(programs.density, "u_agentSide"), AGENT_SIDE);
+  gl.uniform1f(uniform(programs.density, "u_pointSize"), Math.max(1.0, params.densityBlur / WORLD_LINEAR_SCALE));
+  drawParticles();
+  gl.disable(gl.BLEND);
+}
+
+function renderDepositDensity() {
+  gl.bindFramebuffer(gl.FRAMEBUFFER, depositDensityFbo);
+  gl.viewport(0, 0, FIELD_SIZE, FIELD_SIZE);
+  gl.disable(gl.BLEND);
+  gl.clearColor(0, 0, 0, 1);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+
+  gl.enable(gl.BLEND);
+  gl.blendEquation(gl.FUNC_ADD);
+  gl.blendFunc(gl.ONE, gl.ONE);
+  gl.useProgram(programs.depositDensity);
+  bindTexture(0, agentTextures[agentRead]);
+  gl.uniform1i(uniform(programs.depositDensity, "u_agents"), 0);
+  gl.uniform1i(uniform(programs.depositDensity, "u_agentSide"), AGENT_SIDE);
+  gl.uniform1f(uniform(programs.depositDensity, "u_pointSize"), Math.max(1.0, 2.8 / WORLD_LINEAR_SCALE));
+  drawParticles();
+  gl.disable(gl.BLEND);
+}
+
+function updateAgents(now, dt) {
+  gl.bindFramebuffer(gl.FRAMEBUFFER, agentFbos[agentWrite]);
+  gl.viewport(0, 0, AGENT_SIDE, AGENT_SIDE);
+  gl.disable(gl.BLEND);
+  gl.useProgram(programs.updateAgents);
+
+  bindTexture(0, agentTextures[agentRead]);
+  bindTexture(1, fieldTextures[fieldRead]);
+  bindTexture(2, oatTexture);
+  bindTexture(3, densityTexture);
+
+  gl.uniform1i(uniform(programs.updateAgents, "u_agents"), 0);
+  gl.uniform1i(uniform(programs.updateAgents, "u_food"), 1);
+  gl.uniform1i(uniform(programs.updateAgents, "u_oat"), 2);
+  gl.uniform1i(uniform(programs.updateAgents, "u_density"), 3);
+  gl.uniform1i(uniform(programs.updateAgents, "u_agentSide"), AGENT_SIDE);
+  gl.uniform1f(uniform(programs.updateAgents, "u_time"), now * 0.001);
+  gl.uniform1f(uniform(programs.updateAgents, "u_dt"), dt);
+  gl.uniform1f(uniform(programs.updateAgents, "u_stepSize"), params.stepSize);
+  gl.uniform1f(uniform(programs.updateAgents, "u_minMoveScale"), params.minMoveScale);
+  gl.uniform1f(uniform(programs.updateAgents, "u_sensorDistance"), params.sensorDistance);
+  gl.uniform1f(uniform(programs.updateAgents, "u_sensorAngle"), params.sensorAngle);
+  gl.uniform1f(uniform(programs.updateAgents, "u_turnAngle"), params.turnAngle);
+  gl.uniform1f(uniform(programs.updateAgents, "u_wander"), params.wander);
+  gl.uniform1f(uniform(programs.updateAgents, "u_uptakeRate"), params.uptakeRate);
+  gl.uniform1f(uniform(programs.updateAgents, "u_depositRate"), params.depositRate);
+  gl.uniform1f(uniform(programs.updateAgents, "u_burnRate"), params.burnRate);
+  gl.uniform1f(uniform(programs.updateAgents, "u_reproThreshold"), params.reproThreshold);
+  gl.uniform1f(uniform(programs.updateAgents, "u_reproAngle"), params.reproAngle);
+  gl.uniform1f(uniform(programs.updateAgents, "u_childStep"), params.childStep);
+  gl.uniform1f(uniform(programs.updateAgents, "u_foodWeight"), params.foodWeight);
+  gl.uniform1f(uniform(programs.updateAgents, "u_crowdWeight"), params.crowdWeight);
+  gl.uniform1f(uniform(programs.updateAgents, "u_densityTarget"), params.densityTarget);
+  gl.uniform1f(uniform(programs.updateAgents, "u_maxReserve"), params.maxReserve);
+  gl.uniform1f(uniform(programs.updateAgents, "u_overflowReplacementRate"), overflowReplacementRate);
+  drawQuad();
+
+  [agentRead, agentWrite] = [agentWrite, agentRead];
+}
+
+function diffuseField() {
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fieldFbos[fieldWrite]);
+  gl.viewport(0, 0, FIELD_SIZE, FIELD_SIZE);
+  gl.disable(gl.BLEND);
+  gl.useProgram(programs.diffuse);
+  bindTexture(0, fieldTextures[fieldRead]);
+  gl.uniform1i(uniform(programs.diffuse, "u_food"), 0);
+  gl.uniform2f(uniform(programs.diffuse, "u_texel"), 1 / FIELD_SIZE, 1 / FIELD_SIZE);
+  gl.uniform1f(uniform(programs.diffuse, "u_diffusion"), params.fieldDiffusion);
+  gl.uniform1f(uniform(programs.diffuse, "u_decay"), params.fieldDecay);
+  gl.uniform1f(uniform(programs.diffuse, "u_foodClamp"), params.foodClamp);
+  drawQuad();
+
+  [fieldRead, fieldWrite] = [fieldWrite, fieldRead];
+}
+
+function applyAgentFoodDeltas(dt) {
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fieldFbos[fieldWrite]);
+  gl.viewport(0, 0, FIELD_SIZE, FIELD_SIZE);
+  gl.disable(gl.BLEND);
+  gl.useProgram(programs.delta);
+
+  bindTexture(0, fieldTextures[fieldRead]);
+  bindTexture(1, depositDensityTexture);
+
+  gl.uniform1i(uniform(programs.delta, "u_food"), 0);
+  gl.uniform1i(uniform(programs.delta, "u_depositDensity"), 1);
+  gl.uniform1f(uniform(programs.delta, "u_uptakeRate"), params.uptakeRate);
+  gl.uniform1f(uniform(programs.delta, "u_depositRate"), params.depositRate);
+  gl.uniform1f(uniform(programs.delta, "u_deltaScale"), params.deltaScale);
+  gl.uniform1f(uniform(programs.delta, "u_dt"), dt);
+  gl.uniform1f(uniform(programs.delta, "u_foodClamp"), params.foodClamp);
+  drawQuad();
+
+  [fieldRead, fieldWrite] = [fieldWrite, fieldRead];
+}
+
+function clampField() {
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fieldFbos[fieldWrite]);
+  gl.viewport(0, 0, FIELD_SIZE, FIELD_SIZE);
+  gl.disable(gl.BLEND);
+  gl.useProgram(programs.clamp);
+  bindTexture(0, fieldTextures[fieldRead]);
+  gl.uniform1i(uniform(programs.clamp, "u_food"), 0);
+  gl.uniform1f(uniform(programs.clamp, "u_foodClamp"), params.foodClamp);
+  drawQuad();
+
+  [fieldRead, fieldWrite] = [fieldWrite, fieldRead];
+}
+
+function smoothRenderField() {
+  gl.viewport(0, 0, FIELD_SIZE, FIELD_SIZE);
+  gl.disable(gl.BLEND);
+  gl.disable(gl.DEPTH_TEST);
+  gl.useProgram(programs.smooth);
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, renderScratchFbo);
+  bindTexture(0, fieldTextures[fieldRead]);
+  bindTexture(1, renderTextures[renderRead]);
+  gl.uniform1i(uniform(programs.smooth, "u_currentFood"), 0);
+  gl.uniform1i(uniform(programs.smooth, "u_previousFood"), 1);
+  gl.uniform2f(uniform(programs.smooth, "u_texel"), 1 / FIELD_SIZE, 1 / FIELD_SIZE);
+  gl.uniform2f(uniform(programs.smooth, "u_direction"), 1, 0);
+  gl.uniform1f(uniform(programs.smooth, "u_spatialRadius"), params.spatialSmoothing);
+  gl.uniform1f(uniform(programs.smooth, "u_temporalWeight"), 0);
+  gl.uniform1f(uniform(programs.smooth, "u_foodClamp"), params.foodClamp);
+  gl.uniform1i(uniform(programs.smooth, "u_applyTemporal"), 0);
+  drawQuad();
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, renderFbos[renderWrite]);
+  bindTexture(0, renderScratchTexture);
+  bindTexture(1, renderTextures[renderRead]);
+  gl.uniform1i(uniform(programs.smooth, "u_currentFood"), 0);
+  gl.uniform1i(uniform(programs.smooth, "u_previousFood"), 1);
+  gl.uniform2f(uniform(programs.smooth, "u_texel"), 1 / FIELD_SIZE, 1 / FIELD_SIZE);
+  gl.uniform2f(uniform(programs.smooth, "u_direction"), 0, 1);
+  gl.uniform1f(uniform(programs.smooth, "u_spatialRadius"), params.spatialSmoothing);
+  gl.uniform1f(uniform(programs.smooth, "u_temporalWeight"), smoothInitialized ? params.temporalSmoothing : 0);
+  gl.uniform1f(uniform(programs.smooth, "u_foodClamp"), params.foodClamp);
+  gl.uniform1i(uniform(programs.smooth, "u_applyTemporal"), 1);
+  drawQuad();
+
+  [renderRead, renderWrite] = [renderWrite, renderRead];
+  smoothInitialized = true;
+}
+
+function simulate(now, dt) {
+  renderOats();
+  renderDensity();
+  updateAgents(now, dt);
+  diffuseField();
+  renderDepositDensity();
+  applyAgentFoodDeltas(dt);
+}
+
+function renderDisplay() {
+  resizeCanvas();
+  smoothRenderField();
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.clearColor(0.004, 0.006, 0.005, 1);
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  gl.enable(gl.DEPTH_TEST);
+  gl.depthFunc(gl.LEQUAL);
+  gl.disable(gl.BLEND);
+  gl.useProgram(programs.surface);
+
+  bindTexture(0, renderTextures[renderRead]);
+  const camera = getSurfaceCamera();
+  const projection = mat4Perspective(SURFACE_FOV, canvas.width / Math.max(canvas.height, 1), 0.04, 12 * WORLD_LINEAR_SCALE);
+  const view = mat4LookAt(camera.eye, [0, 0, 0], [0, 1, 0]);
+  const viewProjection = mat4Multiply(projection, view);
+  gl.uniform1i(uniform(programs.surface, "u_food"), 0);
+  gl.uniformMatrix4fv(uniform(programs.surface, "u_viewProjection"), false, viewProjection);
+  gl.uniform1f(uniform(programs.surface, "u_worldSize"), SURFACE_WORLD_SIZE);
+  gl.uniform1f(uniform(programs.surface, "u_heightScale"), params.surfaceHeight);
+  gl.uniform1f(uniform(programs.surface, "u_bumpStrength"), params.surfaceBump);
+  gl.uniform1f(uniform(programs.surface, "u_normalSampleRadius"), 1 + Math.max(0, params.spatialSmoothing) * 0.65);
+  gl.uniform2f(uniform(programs.surface, "u_texel"), 1 / FIELD_SIZE, 1 / FIELD_SIZE);
+  gl.uniform3f(uniform(programs.surface, "u_cameraPosition"), camera.eye[0], camera.eye[1], camera.eye[2]);
+  drawSurface();
+
+  if (params.showOats && oats.length > 0) {
+    gl.enable(gl.BLEND);
+    gl.blendEquation(gl.FUNC_ADD);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+    gl.depthMask(false);
+    gl.useProgram(programs.oatMarker);
+    gl.uniformMatrix4fv(uniform(programs.oatMarker, "u_viewProjection"), false, viewProjection);
+    gl.uniform1f(uniform(programs.oatMarker, "u_worldSize"), SURFACE_WORLD_SIZE);
+    gl.uniform1f(uniform(programs.oatMarker, "u_heightScale"), params.surfaceHeight);
+    gl.uniform1f(uniform(programs.oatMarker, "u_pointScale"), Math.min(canvas.width, canvas.height) * 1.4);
+    drawOatMarkers();
+    gl.depthMask(true);
+    gl.disable(gl.BLEND);
+  }
+
+  if (params.showAgentDots) {
+    gl.enable(gl.BLEND);
+    gl.blendEquation(gl.FUNC_ADD);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+    gl.depthMask(false);
+    gl.useProgram(programs.displayAgents);
+    bindTexture(0, agentTextures[agentRead]);
+    bindTexture(1, renderTextures[renderRead]);
+    gl.uniform1i(uniform(programs.displayAgents, "u_agents"), 0);
+    gl.uniform1i(uniform(programs.displayAgents, "u_food"), 1);
+    gl.uniform1i(uniform(programs.displayAgents, "u_agentSide"), AGENT_SIDE);
+    gl.uniformMatrix4fv(uniform(programs.displayAgents, "u_viewProjection"), false, viewProjection);
+    gl.uniform1f(uniform(programs.displayAgents, "u_worldSize"), SURFACE_WORLD_SIZE);
+    gl.uniform1f(uniform(programs.displayAgents, "u_heightScale"), params.surfaceHeight);
+    gl.uniform1f(uniform(programs.displayAgents, "u_pointSize"), Math.max(1.8, Math.min(3.4, window.devicePixelRatio * 2.0)));
+    drawParticles();
+    gl.depthMask(true);
+    gl.disable(gl.BLEND);
+  }
+
+  gl.disable(gl.DEPTH_TEST);
+}
+
+function frame(now) {
+  const rawDt = Math.min((now - lastFrame) / 16.6667, 2.2);
+  lastFrame = now;
+
+  if (!paused) {
+    const steps = Math.max(1, Math.min(8, Math.round(params.simulationSteps)));
+    const stepDt = rawDt / steps;
+
+    for (let step = 0; step < steps; step++) {
+      simulate(now + step * stepDt * 16.6667, stepDt);
+    }
+  } else {
+    renderOats();
+    renderDensity();
+  }
+
+  renderDisplay();
+  updateStats(now, rawDt);
+  requestAnimationFrame(frame);
+}
+
+function updateStats(now, dt) {
+  const instantFps = 60 / Math.max(dt, 0.001);
+  fpsSmoothed = fpsSmoothed * 0.92 + instantFps * 0.08;
+  fpsEl.textContent = String(Math.round(fpsSmoothed));
+  oatCountEl.textContent = String(oats.length);
+
+  if (now - lastStatsRead < 650) {
+    return;
+  }
+
+  lastStatsRead = now;
+  gl.bindFramebuffer(gl.FRAMEBUFFER, agentFbos[agentRead]);
+  gl.readPixels(0, 0, AGENT_SIDE, AGENT_SIDE, gl.RGBA, gl.FLOAT, readback);
+
+  let alive = 0;
+  let distanceSum = 0;
+  let maxDistance = 0;
+  const anchor = oats[0] || { x: 0.5, y: 0.5 };
+
+  for (let i = 3; i < readback.length; i += 4) {
+    if (readback[i] > 0.0001) {
+      alive++;
+      let dx = Math.abs(readback[i - 3] - anchor.x);
+      let dy = Math.abs(readback[i - 2] - anchor.y);
+      dx = Math.min(dx, 1 - dx);
+      dy = Math.min(dy, 1 - dy);
+      const distance = Math.hypot(dx, dy);
+      distanceSum += distance;
+      maxDistance = Math.max(maxDistance, distance);
+    }
+  }
+
+  visibleAgents = alive;
+  agentCountEl.textContent = alive.toLocaleString();
+  const slotPressure = clamp((alive / AGENT_CAPACITY - 0.96) / 0.035, 0, 1);
+  overflowReplacementRate = slotPressure * OVERFLOW_REPLACEMENT_RATE;
+  const meanDistance = alive > 0 ? distanceSum / alive : 0;
+  statusEl.textContent = `${baseStatus} | spread ${meanDistance.toFixed(2)}/${maxDistance.toFixed(2)}`;
+}
+
+function resizeCanvas() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const width = Math.max(1, Math.floor(canvas.clientWidth * dpr));
+  const height = Math.max(1, Math.floor(canvas.clientHeight * dpr));
+
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+  }
+}
+
+function getSurfaceCamera() {
+  const pitch = clamp(surfaceView.pitch, 0.22, 1.36);
+  const target = [0, 0.04, 0];
+  const horizontal = Math.cos(pitch) * surfaceView.distance;
+  const eye = [
+    Math.sin(surfaceView.yaw) * horizontal,
+    target[1] + Math.sin(pitch) * surfaceView.distance,
+    Math.cos(surfaceView.yaw) * horizontal,
+  ];
+  const forward = normalize3(sub3(target, eye));
+  const right = normalize3(cross3(forward, [0, 1, 0]));
+  const up = cross3(right, forward);
+
+  return { eye, target, forward, right, up };
+}
+
+function screenToSurfaceUv(event) {
+  const rect = canvas.getBoundingClientRect();
+  const x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  const y = 1 - ((event.clientY - rect.top) / rect.height) * 2;
+  const aspect = canvas.width / Math.max(canvas.height, 1);
+  const tanFov = Math.tan(SURFACE_FOV * 0.5);
+  const camera = getSurfaceCamera();
+  const ray = normalize3(add3(
+    add3(scale3(camera.right, x * aspect * tanFov), scale3(camera.up, y * tanFov)),
+    camera.forward,
+  ));
+
+  if (Math.abs(ray[1]) < 0.0001) {
+    return null;
+  }
+
+  const t = -camera.eye[1] / ray[1];
+  if (t <= 0) {
+    return null;
+  }
+
+  const hit = add3(camera.eye, scale3(ray, t));
+  const uv = {
+    x: hit[0] / SURFACE_WORLD_SIZE + 0.5,
+    y: hit[2] / SURFACE_WORLD_SIZE + 0.5,
+  };
+
+  if (uv.x < -0.06 || uv.x > 1.06 || uv.y < -0.06 || uv.y > 1.06) {
+    return null;
+  }
+
+  return { x: wrap01(uv.x), y: wrap01(uv.y) };
+}
+
+function mat4Perspective(fovY, aspect, near, far) {
+  const f = 1 / Math.tan(fovY * 0.5);
+  const nf = 1 / (near - far);
+
+  return new Float32Array([
+    f / aspect, 0, 0, 0,
+    0, f, 0, 0,
+    0, 0, (far + near) * nf, -1,
+    0, 0, 2 * far * near * nf, 0,
+  ]);
+}
+
+function mat4LookAt(eye, center, up) {
+  const z = normalize3(sub3(eye, center));
+  const x = normalize3(cross3(up, z));
+  const y = cross3(z, x);
+
+  return new Float32Array([
+    x[0], y[0], z[0], 0,
+    x[1], y[1], z[1], 0,
+    x[2], y[2], z[2], 0,
+    -dot3(x, eye), -dot3(y, eye), -dot3(z, eye), 1,
+  ]);
+}
+
+function mat4Multiply(a, b) {
+  const out = new Float32Array(16);
+
+  for (let column = 0; column < 4; column++) {
+    for (let row = 0; row < 4; row++) {
+      out[column * 4 + row] =
+        a[0 * 4 + row] * b[column * 4 + 0] +
+        a[1 * 4 + row] * b[column * 4 + 1] +
+        a[2 * 4 + row] * b[column * 4 + 2] +
+        a[3 * 4 + row] * b[column * 4 + 3];
+    }
+  }
+
+  return out;
+}
+
+function add3(a, b) {
+  return [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+}
+
+function sub3(a, b) {
+  return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+}
+
+function scale3(v, scale) {
+  return [v[0] * scale, v[1] * scale, v[2] * scale];
+}
+
+function dot3(a, b) {
+  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+function cross3(a, b) {
+  return [
+    a[1] * b[2] - a[2] * b[1],
+    a[2] * b[0] - a[0] * b[2],
+    a[0] * b[1] - a[1] * b[0],
+  ];
+}
+
+function normalize3(v) {
+  const length = Math.hypot(v[0], v[1], v[2]) || 1;
+  return [v[0] / length, v[1] / length, v[2] / length];
+}
+
+function initControls() {
+  const bindings = {
+    uptake: "uptakeRate",
+    deposit: "depositRate",
+    burn: "burnRate",
+    repro: "reproThreshold",
+    attract: "foodWeight",
+    avoid: "crowdWeight",
+    blur: "densityBlur",
+    ideal: "densityTarget",
+    minSpeed: "minMoveScale",
+    decay: "fieldDecay",
+    steps: "simulationSteps",
+    spatialSmooth: "spatialSmoothing",
+    temporalSmooth: "temporalSmoothing",
+  };
+
+  for (const [id, key] of Object.entries(bindings)) {
+    const input = document.getElementById(id);
+    const output = input.parentElement.querySelector("output");
+
+    const sync = () => {
+      params[key] = Number(input.value);
+      const scale = Number(input.dataset.scale || 1);
+      const suffix = input.dataset.suffix || "";
+      const value = params[key] * scale;
+      const digits = input.dataset.digits === undefined
+        ? (scale === 100 ? 1 : 2)
+        : Number(input.dataset.digits);
+      output.value = `${value.toFixed(digits)}${suffix}`;
+    };
+
+    input.addEventListener("input", sync);
+    sync();
+  }
+
+  for (const tip of document.querySelectorAll(".help-tip")) {
+    tip.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+
+    tip.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      tip.focus();
+    });
+  }
+
+  const showAgentsInput = document.getElementById("showAgents");
+  showAgentsInput.addEventListener("change", () => {
+    params.showAgentDots = showAgentsInput.checked;
+  });
+  params.showAgentDots = showAgentsInput.checked;
+
+  const showOatsInput = document.getElementById("showOats");
+  showOatsInput.addEventListener("change", () => {
+    params.showOats = showOatsInput.checked;
+  });
+  params.showOats = showOatsInput.checked;
+
+  const panel = document.querySelector(".panel");
+  const panelBody = document.getElementById("panelBody");
+  const collapsePanelButton = document.getElementById("collapsePanel");
+
+  const setPanelVisible = (visible) => {
+    panel.hidden = !visible;
+    panel.setAttribute("aria-hidden", String(!visible));
+  };
+
+  document.addEventListener("keydown", (event) => {
+    const target = event.target;
+    const isEditable = target instanceof HTMLElement
+      && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
+
+    if (isEditable || event.metaKey || event.ctrlKey || event.altKey || event.key.toLowerCase() !== "p") {
+      return;
+    }
+
+    event.preventDefault();
+    setPanelVisible(panel.hidden);
+  });
+
+  collapsePanelButton.addEventListener("click", () => {
+    const collapsed = panel.classList.toggle("is-collapsed");
+    collapsePanelButton.textContent = collapsed ? "Show parameters" : "Hide parameters";
+    collapsePanelButton.setAttribute("aria-expanded", String(!collapsed));
+    collapsePanelButton.title = collapsed ? "Show parameters" : "Hide parameters";
+    panelBody.setAttribute("aria-hidden", String(collapsed));
+  });
+
+  document.getElementById("pause").addEventListener("click", () => {
+    paused = !paused;
+    document.getElementById("pause").textContent = paused ? "Run" : "Pause";
+  });
+
+  document.getElementById("reset").addEventListener("click", () => {
+    resetSimulation({ resetOats: true });
+  });
+
+  document.getElementById("seed").addEventListener("click", () => {
+    uploadAgents(makeAgentData());
+  });
+
+  document.getElementById("clearOats").addEventListener("click", () => {
+    oats.length = 0;
+    addOat(0.5, 0.5);
+  });
+
+  canvas.addEventListener("pointerdown", (event) => {
+    canvas.setPointerCapture(event.pointerId);
+    pointerAction = {
+      id: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      lastX: event.clientX,
+      lastY: event.clientY,
+      dragged: false,
+    };
+  });
+
+  canvas.addEventListener("pointermove", (event) => {
+    if (!pointerAction || pointerAction.id !== event.pointerId) {
+      return;
+    }
+
+    const dx = event.clientX - pointerAction.lastX;
+    const dy = event.clientY - pointerAction.lastY;
+    const totalDx = event.clientX - pointerAction.startX;
+    const totalDy = event.clientY - pointerAction.startY;
+
+    if (Math.hypot(totalDx, totalDy) > 4) {
+      pointerAction.dragged = true;
+    }
+
+    if (pointerAction.dragged) {
+      surfaceView.yaw -= dx * 0.008;
+      surfaceView.pitch = clamp(surfaceView.pitch + dy * 0.006, 0.22, 1.36);
+    }
+
+    pointerAction.lastX = event.clientX;
+    pointerAction.lastY = event.clientY;
+  });
+
+  canvas.addEventListener("pointerup", (event) => {
+    if (!pointerAction || pointerAction.id !== event.pointerId) {
+      pointerAction = null;
+      return;
+    }
+
+    if (!pointerAction.dragged) {
+      const uv = screenToSurfaceUv(event) || pointerUv(event);
+      addOat(uv.x, uv.y);
+    }
+
+    pointerAction = null;
+  });
+
+  canvas.addEventListener("pointercancel", () => {
+    pointerAction = null;
+  });
+
+  canvas.addEventListener("wheel", (event) => {
+    event.preventDefault();
+    surfaceView.distance = clamp(
+      surfaceView.distance * Math.exp(event.deltaY * 0.001),
+      1.55 * WORLD_LINEAR_SCALE,
+      5.6 * WORLD_LINEAR_SCALE,
+    );
+  }, { passive: false });
+
+  window.addEventListener("blur", () => {
+    pointerAction = null;
+  });
+}
+
+function pointerUv(event) {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: clamp((event.clientX - rect.left) / rect.width, 0, 1),
+    y: clamp(1 - (event.clientY - rect.top) / rect.height, 0, 1),
+  };
+}
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+    </script>
+  </body>
+</html>
