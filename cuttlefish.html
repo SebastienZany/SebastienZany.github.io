@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Slime Mold on Cuttlefish</title>
+    <title>A Bestiary of Vanishings</title>
     <link rel="icon" href="data:,">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -1085,7 +1085,7 @@ input[type="color"] {
       <section class="panel" aria-label="Simulation controls" aria-hidden="true">
         <div class="panel-head">
           <div>
-            <h1>Slime Mold on Cuttlefish</h1>
+            <h1>A Bestiary of Vanishings</h1>
             <p id="gpuStatus">loading cuttlefish...</p>
           </div>
           <div class="panel-tools">
@@ -1632,6 +1632,10 @@ input[type="color"] {
             <section class="control-group" aria-labelledby="visibilityControls">
               <h2 id="visibilityControls">Visibility</h2>
 
+              <label class="toggle-control">
+                <span>Time limit</span>
+                <input id="endingTimeLimitEnabled" type="checkbox">
+              </label>
               <label class="toggle-control">
                 <span>Oat glow</span>
                 <input id="showOats" type="checkbox" checked>
@@ -2195,6 +2199,7 @@ const params = {
   useIslandMasking: true,
   useHeadingRotation: true,
   useOpticalZoom: false,
+  endingTimeLimitEnabled: false,
   debugView: 'slime',
   performanceMode: 'quality',
 };
@@ -7323,8 +7328,9 @@ function setEndingFadeOpacity(opacity) {
 
 function setEndingCountdownVisible(visible) {
   if (!endingCountdownLayer) return;
-  endingCountdownLayer.style.opacity = visible ? '1' : '0';
-  endingCountdownLayer.setAttribute('aria-hidden', String(!visible));
+  const shouldShow = Boolean(visible && params.endingTimeLimitEnabled);
+  endingCountdownLayer.style.opacity = shouldShow ? '1' : '0';
+  endingCountdownLayer.setAttribute('aria-hidden', String(!shouldShow));
 }
 
 function formatEndingCountdown(ms) {
@@ -7376,9 +7382,9 @@ function resetIntroSequenceToStartScreen(now = performance.now()) {
   updateStartScreenUi(now);
 }
 
-function getEndingTargetReturnAt(now = performance.now()) {
+function getEndingTargetReturnAt(now = performance.now(), { fromNow = false } = {}) {
   const clickedAt = startScreenUiState.clickedAt;
-  if (Number.isFinite(clickedAt) && clickedAt > 0) {
+  if (!fromNow && Number.isFinite(clickedAt) && clickedAt > 0) {
     return clickedAt + ENDING_TOTAL_RUNTIME_MS;
   }
   return now + ENDING_TOTAL_RUNTIME_MS;
@@ -7799,13 +7805,17 @@ function cancelEndingSequence({ stopSound = false } = {}) {
   if (stopSound) stopSoundCheckOneShot('cuttlefish-camouflage');
 }
 
-function armEndingSequence(now = performance.now()) {
-  if (endingSequenceState.active) return;
+function armEndingSequence(now = performance.now(), { fromNow = false } = {}) {
+  if (!params.endingTimeLimitEnabled) {
+    setEndingCountdownVisible(false);
+    return false;
+  }
+  if (endingSequenceState.active) return true;
   endingSequenceState.active = true;
   endingSequenceState.phase = 'preparing';
   endingSequenceState.sequenceId++;
   endingSequenceState.armedAt = now;
-  endingSequenceState.targetReturnAt = getEndingTargetReturnAt(now);
+  endingSequenceState.targetReturnAt = getEndingTargetReturnAt(now, { fromNow });
   endingSequenceState.camouflageStartAt = 0;
   endingSequenceState.camouflageStartedAt = 0;
   endingSequenceState.camouflageDurationMs = 0;
@@ -7815,6 +7825,7 @@ function armEndingSequence(now = performance.now()) {
   setEndingFadeOpacity(0);
   setEndingCountdownVisible(true);
   prepareEndingCamouflageSchedule(endingSequenceState.sequenceId);
+  return true;
 }
 
 function useFallbackEndingFade(now = performance.now(), targetReturnAt = endingSequenceState.targetReturnAt) {
@@ -7898,6 +7909,14 @@ function completeEndingSequence(now = performance.now()) {
 }
 
 function updateEndingSequence(now = performance.now()) {
+  if (!params.endingTimeLimitEnabled) {
+    if (endingSequenceState.active) {
+      cancelEndingSequence({ stopSound: true });
+    } else {
+      setEndingCountdownVisible(false);
+    }
+    return;
+  }
   if (!endingSequenceState.active) return;
   let countdownTargetAt = endingSequenceState.camouflageStartAt || endingSequenceState.endAt;
   if (endingSequenceState.endAt > 0 && now >= endingSequenceState.endAt) {
@@ -16044,6 +16063,8 @@ async function onLoad(gltf) {
       endAt: endingSequenceState.endAt,
       targetReturnAt: endingSequenceState.targetReturnAt,
       countdownText: endingSequenceState.lastCountdownText,
+      countdownEnabled: params.endingTimeLimitEnabled,
+      timeLimitEnabled: params.endingTimeLimitEnabled,
       fadeOpacity: Number.parseFloat(endingFadeOverlay?.style.opacity || '0') || 0,
       now: performance.now(),
     }),
@@ -18255,6 +18276,24 @@ function initControls() {
   bindToggle('glassEnabled', 'glassEnabled', { onChange: syncGlassMaterialMode });
   bindToggle('showLakeMirror', 'showLakeMirror', { onChange: syncLakeMirrorVisibility });
   bindToggle('storyBoxesEnabled', 'storyBoxesEnabled', { onChange: syncStoryBoxesEnabled });
+  bindToggle('endingTimeLimitEnabled', 'endingTimeLimitEnabled', {
+    onChange: () => {
+      if (!params.endingTimeLimitEnabled) {
+        cancelEndingSequence({ stopSound: true });
+        return;
+      }
+      if (
+        started &&
+        introSequenceState.completed &&
+        !initialAgentSeedState.active &&
+        !initialAgentSeedState.pending
+      ) {
+        armEndingSequence(performance.now(), { fromNow: true });
+      } else {
+        setEndingCountdownVisible(endingSequenceState.active);
+      }
+    },
+  });
   bindToggle('useSeamStitching', 'useSeamStitching');
   bindToggle('useIslandMasking', 'useIslandMasking');
   bindToggle('useHeadingRotation', 'useHeadingRotation');
