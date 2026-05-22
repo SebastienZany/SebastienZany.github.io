@@ -1673,6 +1673,10 @@ input[type="color"] {
                 <span>Optical zoom</span>
                 <input id="useOpticalZoom" type="checkbox">
               </label>
+              <label class="toggle-control">
+                <span>Stats readback</span>
+                <input id="statsReadbackEnabled" type="checkbox">
+              </label>
               <label class="control-row">
                 <span class="control-copy">
                   <strong>Debug view</strong>
@@ -1808,6 +1812,7 @@ const AGENT_CANDIDATE_COUNT = AGENT_CAPACITY * AGENT_RECORD_STRIDE;
 const AGENT_SCAN_PASS_COUNT = Math.ceil(Math.log2(AGENT_CANDIDATE_COUNT));
 const INITIAL_AGENTS = 4096;
 const MAX_OATS = 64;
+const OBSERVATION_SLIME_TRIGGER_RADIUS_TEXELS = 3;
 const WORLD_LINEAR_SCALE = 4.0;
 const SURFACE_WORLD_SIZE = 2.4 * WORLD_LINEAR_SCALE;
 const SURFACE_FOV = Math.PI / 4.2;
@@ -2200,6 +2205,7 @@ const params = {
   useHeadingRotation: true,
   useOpticalZoom: false,
   endingTimeLimitEnabled: false,
+  statsReadbackEnabled: false,
   debugView: 'slime',
   performanceMode: 'quality',
 };
@@ -3039,10 +3045,11 @@ function updateCameraKeyboardOrbit(now = performance.now()) {
   }
 
   const dtSeconds = dtMs / 1000;
-  return applyCameraOrbitDelta(
+  const changed = applyCameraOrbitDelta(
     cameraKeyboardOrbitState.thetaVelocity * dtSeconds,
     cameraKeyboardOrbitState.phiVelocity * dtSeconds,
   );
+  return changed;
 }
 
 function getCameraPose() {
@@ -3413,6 +3420,32 @@ function makeSampleViewFieldRT() {
     stencilBuffer: false,
   });
 }
+function makeObservationTriggerScoreRT() {
+  return new THREE.WebGLRenderTarget(MAX_OATS, 1, {
+    type: THREE.FloatType,
+    format: THREE.RGBAFormat,
+    internalFormat: 'RGBA32F',
+    minFilter: THREE.NearestFilter,
+    magFilter: THREE.NearestFilter,
+    wrapS: THREE.ClampToEdgeWrapping,
+    wrapT: THREE.ClampToEdgeWrapping,
+    depthBuffer: false,
+    stencilBuffer: false,
+  });
+}
+function makeObservationTriggerQueryRT() {
+  return new THREE.WebGLRenderTarget(1, 1, {
+    type: THREE.UnsignedByteType,
+    format: THREE.RGBAFormat,
+    internalFormat: 'RGBA8',
+    minFilter: THREE.NearestFilter,
+    magFilter: THREE.NearestFilter,
+    wrapS: THREE.ClampToEdgeWrapping,
+    wrapT: THREE.ClampToEdgeWrapping,
+    depthBuffer: false,
+    stencilBuffer: false,
+  });
+}
 function makeMaskRT() {
   return new THREE.WebGLRenderTarget(FIELD_SIZE, FIELD_SIZE, {
     type: THREE.UnsignedByteType,
@@ -3526,6 +3559,8 @@ const fieldSampleViewRT = makeSampleViewFieldRT();
 const renderRT = new RTPair(makeCanonicalFieldRT);
 const renderSampleViewRT = new RTPair(makeSampleViewFieldRT);
 const renderScratchRT = makeSampleViewFieldRT();
+const observationTriggerScoreRT = makeObservationTriggerScoreRT();
+const observationTriggerQueryRT = makeObservationTriggerQueryRT();
 let goldWaferBodyMaxFoodRT = null;
 let goldWaferBodyMaxFoodInitialized = false;
 let goldWaferBodyMaxFoodNeedsUpdate = true;
@@ -4215,6 +4250,75 @@ void main() {
     return;
   }
   outColor = texture(u_source, v_uv);
+}
+`;
+
+const observationTriggerScoreFragment = `#version 300 es
+precision highp float;
+precision highp int;
+precision highp sampler2D;
+in vec2 v_uv;
+out vec4 outColor;
+uniform sampler2D u_food;
+uniform int u_oatCount;
+uniform vec2 u_oats[${MAX_OATS}];
+const int SAMPLE_RADIUS = ${OBSERVATION_SLIME_TRIGGER_RADIUS_TEXELS};
+void main() {
+  int index = int(gl_FragCoord.x);
+  if (index >= u_oatCount || index >= ${MAX_OATS}) {
+    outColor = vec4(0.0);
+    return;
+  }
+
+  ivec2 fieldSize = textureSize(u_food, 0);
+  vec2 centerUv = clamp(u_oats[index], vec2(0.0), vec2(1.0));
+  ivec2 centerPixel = clamp(
+    ivec2(floor(centerUv * vec2(fieldSize))),
+    ivec2(0),
+    fieldSize - ivec2(1)
+  );
+
+  float sumValue = 0.0;
+  float maxValue = 0.0;
+  int sampleCount = 0;
+  for (int dy = -SAMPLE_RADIUS; dy <= SAMPLE_RADIUS; dy++) {
+    int y = centerPixel.y + dy;
+    if (y < 0 || y >= fieldSize.y) continue;
+    for (int dx = -SAMPLE_RADIUS; dx <= SAMPLE_RADIUS; dx++) {
+      int x = centerPixel.x + dx;
+      if (x < 0 || x >= fieldSize.x) continue;
+      float value = max(texelFetch(u_food, ivec2(x, y), 0).r, 0.0);
+      sumValue += value;
+      maxValue = max(maxValue, value);
+      sampleCount++;
+    }
+  }
+
+  float meanValue = sampleCount > 0 ? sumValue / float(sampleCount) : 0.0;
+  outColor = vec4(maxValue, meanValue, float(sampleCount), 1.0);
+}
+`;
+
+const observationTriggerThresholdQueryFragment = `#version 300 es
+precision highp float;
+precision highp int;
+precision highp sampler2D;
+in vec2 v_uv;
+out vec4 outColor;
+uniform sampler2D u_scores;
+uniform int u_oatCount;
+uniform float u_threshold;
+uniform float u_pending[${MAX_OATS}];
+void main() {
+  bool found = false;
+  for (int i = 0; i < ${MAX_OATS}; i++) {
+    if (i >= u_oatCount) continue;
+    if (u_pending[i] < 0.5) continue;
+    float score = texelFetch(u_scores, ivec2(i, 0), 0).r;
+    if (score >= u_threshold) found = true;
+  }
+  if (!found) discard;
+  outColor = vec4(1.0);
 }
 `;
 
@@ -5992,6 +6096,19 @@ const sampleViewCopyMaterial = makeRawShaderMaterial(sampleViewCopyFragment, {
   u_chartUnsafe: { value: chartUnsafeRT.texture },
 });
 
+const observationTriggerScoreMaterial = makeRawShaderMaterial(observationTriggerScoreFragment, {
+  u_food: { value: null },
+  u_oatCount: { value: 0 },
+  u_oats: { value: new Array(MAX_OATS).fill(null).map(() => new THREE.Vector2()) },
+});
+
+const observationTriggerThresholdQueryMaterial = makeRawShaderMaterial(observationTriggerThresholdQueryFragment, {
+  u_scores: { value: observationTriggerScoreRT.texture },
+  u_oatCount: { value: 0 },
+  u_threshold: { value: 0 },
+  u_pending: { value: new Float32Array(MAX_OATS) },
+});
+
 const safeSeamPaddingMaterial = makeRawShaderMaterial(safeSeamPaddingFragment, {
   u_existingSampleView: { value: null },
   u_sourceCanonical: { value: null },
@@ -7127,8 +7244,6 @@ const OBSERVATION_LEADER_BORDER_OVERLAP_PX = 2;
 const OBSERVATION_Z_INDEX_RANGE = 100000;
 const OBSERVATION_OCCLUSION_MARGIN = 0.012 * WORLD_LINEAR_SCALE;
 const OBSERVATION_OCCLUSION_REFRESH_MS = 120;
-const OBSERVATION_SLIME_TRIGGER_RADIUS_TEXELS = 3;
-const OBSERVATION_SLIME_TRIGGER_SAMPLE_SIZE = OBSERVATION_SLIME_TRIGGER_RADIUS_TEXELS * 2 + 1;
 const OBSERVATION_SLIME_TRIGGER_INTERVAL_MS = 220;
 const OBSERVATION_SLIME_TRIGGER_READS_PER_FRAME = 4;
 const OBSERVATION_CHAR_STEP_MS = 190;
@@ -7802,7 +7917,18 @@ function cancelEndingSequence({ stopSound = false } = {}) {
   endingSequenceState.lastCountdownText = '';
   setEndingFadeOpacity(0);
   setEndingCountdownVisible(false);
-  if (stopSound) stopSoundCheckOneShot('cuttlefish-camouflage');
+  if (stopSound) stopEndingSequenceSounds();
+}
+
+function stopEndingSequenceSounds() {
+  stopSoundCheckOneShot('cuttlefish-camouflage');
+  stopSoundCheckOneShot('game-complete');
+}
+
+function isEndingSequenceSoundAllowed(sequenceId = endingSequenceState.sequenceId) {
+  return params.endingTimeLimitEnabled &&
+    endingSequenceState.active &&
+    endingSequenceState.sequenceId === sequenceId;
 }
 
 function armEndingSequence(now = performance.now(), { fromNow = false } = {}) {
@@ -7842,6 +7968,7 @@ function useFallbackEndingFade(now = performance.now(), targetReturnAt = endingS
 }
 
 async function prepareEndingCamouflageSchedule(sequenceId) {
+  if (!isEndingSequenceSoundAllowed(sequenceId)) return;
   const clip = getSoundClip('cuttlefish-camouflage');
   const targetReturnAt = endingSequenceState.targetReturnAt || getEndingTargetReturnAt();
   if (!clip) {
@@ -7850,7 +7977,7 @@ async function prepareEndingCamouflageSchedule(sequenceId) {
   }
   try {
     const buffer = await loadSoundCheckBuffer(clip.path);
-    if (!endingSequenceState.active || endingSequenceState.sequenceId !== sequenceId) return;
+    if (!isEndingSequenceSoundAllowed(sequenceId)) return;
     const now = performance.now();
     const durationMs = Math.max(1, (buffer.duration ?? 0) * 1000);
     const fadeDelayMs = Math.min(ENDING_CAMOUFLAGE_FADE_DELAY_MS, Math.max(0, durationMs - 1));
@@ -7874,6 +8001,7 @@ async function prepareEndingCamouflageSchedule(sequenceId) {
 }
 
 async function startEndingCamouflageSound(sequenceId) {
+  if (!isEndingSequenceSoundAllowed(sequenceId)) return;
   const clip = getSoundClip('cuttlefish-camouflage');
   if (!clip) {
     useFallbackEndingFade();
@@ -7885,7 +8013,10 @@ async function startEndingCamouflageSound(sequenceId) {
       allowOverlap: false,
       startAtPerformanceMs: endingSequenceState.camouflageStartAt,
     });
-    if (!endingSequenceState.active || endingSequenceState.sequenceId !== sequenceId) return;
+    if (!isEndingSequenceSoundAllowed(sequenceId)) {
+      stopOneShotSourceRecord(sourceRecord, 0);
+      return;
+    }
     if (!sourceRecord) {
       useFallbackEndingFade();
       return;
@@ -7901,11 +8032,16 @@ async function startEndingCamouflageSound(sequenceId) {
 }
 
 function completeEndingSequence(now = performance.now()) {
+  if (!params.endingTimeLimitEnabled) {
+    cancelEndingSequence({ stopSound: true });
+    return false;
+  }
   cancelEndingSequence({ stopSound: true });
   resetSimulation({ resetOats: true, spawnAgents: false });
   stopEnvAudio();
   stopSlimeTumbleLoop({ fadeOutSeconds: 1.2 });
   resetIntroSequenceToStartScreen(now);
+  return true;
 }
 
 function updateEndingSequence(now = performance.now()) {
@@ -8700,85 +8836,455 @@ function updateObservationOcclusionOpacity(observation, target, now) {
   return updateOcclusionOpacity(observation, target, now, 10);
 }
 
-function measureOatSlimeTriggerScore(oat) {
-  if (!oat?.uv) return null;
-  const cx = THREE.MathUtils.clamp(Math.floor(oat.uv.x * FIELD_SIZE), 0, FIELD_SIZE - 1);
-  const cy = THREE.MathUtils.clamp(Math.floor(oat.uv.y * FIELD_SIZE), 0, FIELD_SIZE - 1);
-  const radius = OBSERVATION_SLIME_TRIGGER_RADIUS_TEXELS;
-  const x0 = Math.max(0, cx - radius);
-  const y0 = Math.max(0, cy - radius);
-  const width = Math.min(FIELD_SIZE - x0, radius * 2 + 1, cx + radius + 1 - x0);
-  const height = Math.min(FIELD_SIZE - y0, radius * 2 + 1, cy + radius + 1 - y0);
-  if (width <= 0 || height <= 0) return null;
-
-  renderer.readRenderTargetPixels(renderSampleViewRT.read, x0, y0, width, height, observationTriggerReadback);
-  let sum = 0;
-  let maxValue = 0;
-  const count = width * height;
-  for (let i = 0; i < count; i++) {
-    const value = Math.max(0, observationTriggerReadback[i * 4]);
-    sum += value;
-    maxValue = Math.max(maxValue, value);
+function renderObservationTriggerScoreTexture() {
+  const uniforms = observationTriggerScoreMaterial.uniforms;
+  uniforms.u_food.value = renderSampleViewRT.read.texture;
+  uniforms.u_oatCount.value = Math.min(oats.length, MAX_OATS);
+  const oatUniforms = uniforms.u_oats.value;
+  for (let i = 0; i < MAX_OATS; i++) {
+    const uv = oats[i]?.uv;
+    oatUniforms[i].set(
+      Number.isFinite(uv?.x) ? uv.x : 0,
+      Number.isFinite(uv?.y) ? uv.y : 0,
+    );
   }
+  runFullscreenPass(observationTriggerScoreMaterial, observationTriggerScoreRT);
+}
+
+function beginObservationTriggerThresholdQuery(indices, threshold) {
+  const state = observationTriggerThresholdQueryState;
+  if (!state.supported || state.pending || !indices?.length) return false;
+
+  renderObservationTriggerScoreTexture();
+
+  const uniforms = observationTriggerThresholdQueryMaterial.uniforms;
+  uniforms.u_scores.value = observationTriggerScoreRT.texture;
+  uniforms.u_oatCount.value = Math.min(oats.length, MAX_OATS);
+  uniforms.u_threshold.value = threshold;
+  uniforms.u_pending.value.fill(0);
+  for (const index of indices) {
+    if (index >= 0 && index < MAX_OATS) uniforms.u_pending.value[index] = 1;
+  }
+
+  const gl = renderer.getContext();
+  let query = null;
+  let queryBegun = false;
+  try {
+    query = gl.createQuery();
+    if (!query) return false;
+    gl.beginQuery(gl.ANY_SAMPLES_PASSED, query);
+    queryBegun = true;
+    runFullscreenPass(observationTriggerThresholdQueryMaterial, observationTriggerQueryRT);
+    gl.endQuery(gl.ANY_SAMPLES_PASSED);
+    queryBegun = false;
+
+    const queryError = gl.getError();
+    if (queryError !== gl.NO_ERROR) {
+      state.supported = false;
+      state.lastError = queryError;
+      gl.deleteQuery(query);
+      return false;
+    }
+
+    state.query = query;
+    state.pending = true;
+    state.indices = indices.slice();
+    state.requestedSequence = ++state.sequence;
+    state.requestedOatListVersion = oatListVersion;
+    state.lastQueuedAt = performance.now();
+    return true;
+  } catch (err) {
+    state.supported = false;
+    state.lastError = err;
+    if (queryBegun) {
+      try {
+        gl.endQuery(gl.ANY_SAMPLES_PASSED);
+      } catch {
+        // Query support is disabled below; keep the fallback path available.
+      }
+    }
+    if (query) gl.deleteQuery(query);
+    return false;
+  }
+}
+
+function beginObservationTriggerScoreAsyncReadback() {
+  const state = observationTriggerScoreReadbackState;
+  if (!state.asyncSupported || state.pending) return false;
+  const gl = renderer.getContext();
+  const previousPackBuffer = gl.getParameter(gl.PIXEL_PACK_BUFFER_BINDING);
+  const previousRenderTarget = renderer.getRenderTarget();
+  let sync = null;
+  try {
+    if (!state.buffer) state.buffer = gl.createBuffer();
+    if (!state.buffer) return false;
+    renderer.setRenderTarget(observationTriggerScoreRT);
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, state.buffer);
+    gl.bufferData(gl.PIXEL_PACK_BUFFER, observationTriggerScoreReadbackByteLength, gl.STREAM_READ);
+    gl.readPixels(0, 0, MAX_OATS, 1, gl.RGBA, gl.FLOAT, 0);
+    const readError = gl.getError();
+    if (readError !== gl.NO_ERROR) {
+      state.asyncSupported = false;
+      state.lastError = readError;
+      return false;
+    }
+    sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+    if (!sync) return false;
+    gl.flush();
+    state.pending = true;
+    state.sync = sync;
+    state.requestedSequence = ++state.sequence;
+    state.requestedOatListVersion = oatListVersion;
+    state.lastQueuedAt = performance.now();
+    state.mode = 'async';
+    return true;
+  } catch (err) {
+    state.asyncSupported = false;
+    state.lastError = err;
+    if (sync) gl.deleteSync(sync);
+    return false;
+  } finally {
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, previousPackBuffer);
+    renderer.setRenderTarget(previousRenderTarget);
+  }
+}
+
+function completeObservationTriggerScoreReadback(sequence, oatVersion, mode) {
+  observationTriggerScoreReadbackState.completedSequence = sequence;
+  observationTriggerScoreReadbackState.completedOatListVersion = oatVersion;
+  observationTriggerScoreReadbackState.lastCompletedAt = performance.now();
+  observationTriggerScoreReadbackState.mode = mode;
+}
+
+function readObservationTriggerScoresSync() {
+  renderer.readRenderTargetPixels(
+    observationTriggerScoreRT,
+    0,
+    0,
+    MAX_OATS,
+    1,
+    observationTriggerScoreReadback,
+  );
+  const sequence = ++observationTriggerScoreReadbackState.sequence;
+  completeObservationTriggerScoreReadback(sequence, oatListVersion, 'sync');
+  return true;
+}
+
+function requestObservationTriggerScoreReadback({ renderScores = true, processIndices = null } = {}) {
+  const state = observationTriggerScoreReadbackState;
+  if (state.pending) return false;
+  state.processIndices = Array.isArray(processIndices) ? processIndices.slice() : null;
+  if (renderScores) renderObservationTriggerScoreTexture();
+  if (beginObservationTriggerScoreAsyncReadback()) return true;
+  const completed = readObservationTriggerScoresSync();
+  if (!completed) state.processIndices = null;
+  return completed;
+}
+
+function pollObservationTriggerScoreReadback() {
+  const state = observationTriggerScoreReadbackState;
+  if (!state.pending || !state.sync || !state.buffer) return false;
+  const gl = renderer.getContext();
+  const status = gl.clientWaitSync(state.sync, 0, 0);
+  if (status === gl.TIMEOUT_EXPIRED) return false;
+
+  const sync = state.sync;
+  const sequence = state.requestedSequence;
+  const oatVersion = state.requestedOatListVersion;
+  state.pending = false;
+  state.sync = null;
+  gl.deleteSync(sync);
+
+  if (status === gl.WAIT_FAILED) {
+    state.lastError = 'WAIT_FAILED';
+    return false;
+  }
+
+  const previousPackBuffer = gl.getParameter(gl.PIXEL_PACK_BUFFER_BINDING);
+  try {
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, state.buffer);
+    gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, observationTriggerScoreReadback);
+    const readError = gl.getError();
+    if (readError !== gl.NO_ERROR) {
+      state.asyncSupported = false;
+      state.lastError = readError;
+      return false;
+    }
+  } finally {
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, previousPackBuffer);
+  }
+
+  if (oatVersion !== oatListVersion) return false;
+  completeObservationTriggerScoreReadback(sequence, oatVersion, 'async');
+  return true;
+}
+
+function invalidateObservationTriggerThresholdQuery() {
+  const state = observationTriggerThresholdQueryState;
+  if (state.query) {
+    try {
+      renderer.getContext().deleteQuery(state.query);
+    } catch {
+      // The query is best-effort; a stale query should not block the fallback.
+    }
+  }
+  state.query = null;
+  state.pending = false;
+  state.indices = [];
+  state.requestedOatListVersion = -1;
+}
+
+function pollObservationTriggerThresholdQuery() {
+  const state = observationTriggerThresholdQueryState;
+  if (!state.pending || !state.query) {
+    return { completed: false, passed: false, checked: 0, readbackRequested: false };
+  }
+
+  const gl = renderer.getContext();
+  let available = false;
+  try {
+    available = Boolean(gl.getQueryParameter(state.query, gl.QUERY_RESULT_AVAILABLE));
+  } catch (err) {
+    state.supported = false;
+    state.lastError = err;
+    invalidateObservationTriggerThresholdQuery();
+    return { completed: false, passed: false, checked: 0, readbackRequested: false };
+  }
+  if (!available) return { completed: false, passed: false, checked: 0, readbackRequested: false };
+
+  const query = state.query;
+  const indices = state.indices.slice();
+  const oatVersion = state.requestedOatListVersion;
+  let passed = false;
+  try {
+    passed = Boolean(gl.getQueryParameter(query, gl.QUERY_RESULT));
+  } catch (err) {
+    state.supported = false;
+    state.lastError = err;
+  } finally {
+    gl.deleteQuery(query);
+    state.query = null;
+    state.pending = false;
+    state.indices = [];
+  }
+
+  state.lastCompletedAt = performance.now();
+  state.lastResult = passed;
+  if (oatVersion !== oatListVersion) {
+    return { completed: true, passed: false, checked: indices.length, readbackRequested: false, stale: true };
+  }
+
+  let readbackRequested = false;
+  if (passed && !observationTriggerScoreReadbackState.pending && !hasUnprocessedObservationTriggerScores()) {
+    readbackRequested = requestObservationTriggerScoreReadback({
+      renderScores: false,
+      processIndices: indices,
+    });
+  }
+
+  return { completed: true, passed, checked: indices.length, readbackRequested };
+}
+
+function hasUnprocessedObservationTriggerScores() {
+  const state = observationTriggerScoreReadbackState;
+  return state.completedSequence > state.processedSequence &&
+    state.completedOatListVersion === oatListVersion;
+}
+
+function markObservationTriggerScoresProcessed() {
+  observationTriggerScoreReadbackState.processedSequence =
+    observationTriggerScoreReadbackState.completedSequence;
+  observationTriggerScoreReadbackState.processIndices = null;
+}
+
+function invalidateObservationTriggerScores() {
+  const state = observationTriggerScoreReadbackState;
+  state.requestedOatListVersion = -1;
+  state.completedOatListVersion = -1;
+  state.completedSequence = 0;
+  state.processedSequence = 0;
+  state.processIndices = null;
+  invalidateObservationTriggerThresholdQuery();
+}
+
+function readOatSlimeTriggerScore(index) {
+  if (index < 0 || index >= Math.min(oats.length, MAX_OATS)) return null;
+  if (observationTriggerScoreReadbackState.completedOatListVersion !== oatListVersion) return null;
+  const offset = index * 4;
+  const maxValue = observationTriggerScoreReadback[offset];
+  const meanValue = observationTriggerScoreReadback[offset + 1];
+  const sampleCount = observationTriggerScoreReadback[offset + 2];
+  if (!Number.isFinite(maxValue) || !Number.isFinite(meanValue) || sampleCount <= 0) return null;
   return {
-    mean: sum / Math.max(1, count),
+    mean: meanValue,
     max: maxValue,
     score: maxValue,
   };
 }
 
+function collectObservationTriggerCheckIndices(maxReads) {
+  const indices = [];
+  const count = oats.length;
+  if (count <= 0) return { indices, cursor: observationTriggerCursor };
+  let cursor = observationTriggerCursor;
+  for (let attempts = 0; attempts < count && indices.length < maxReads; attempts++) {
+    const index = cursor % count;
+    cursor = (cursor + 1) % count;
+    const observation = oats[index]?.observation;
+    if (!observation || observation.triggered) continue;
+    indices.push(index);
+  }
+  return { indices, cursor };
+}
+
+function processObservationTriggerScoreIndex(index, threshold, now) {
+  const oat = oats[index];
+  const observation = oat?.observation;
+  if (!observation || observation.triggered) return { checked: false, triggered: false };
+
+  const sample = readOatSlimeTriggerScore(index);
+  if (!sample) return { checked: true, triggered: false };
+
+  observation.slimeTriggerMean = sample.mean;
+  observation.slimeTriggerMax = sample.max;
+  observation.slimeTriggerScore = sample.score;
+  if (sample.score < threshold) return { checked: true, triggered: false };
+
+  const triggeredObservation = triggerOatObservation(oat);
+  if (!triggeredObservation) return { checked: true, triggered: false };
+  playCuttlefishRevealSound(now);
+  return { checked: true, triggered: true };
+}
+
 function updateObservationSlimeTriggers(now = performance.now()) {
+  const threshold = Math.max(0, params.observationSlimeTriggerThreshold ?? 0);
   if (!isStoryBoxesEnabled()) {
     nextObservationTriggerCheckAt = now + OBSERVATION_SLIME_TRIGGER_INTERVAL_MS;
+    invalidateObservationTriggerScores();
     lastObservationTriggerDiagnostics = {
       checked: 0,
       triggered: 0,
       pending: 0,
-      threshold: Math.max(0, params.observationSlimeTriggerThreshold ?? 0),
+      threshold,
       lastCheckedAt: now,
       disabled: true,
     };
     return lastObservationTriggerDiagnostics;
   }
+
+  const completedScoreReadback = pollObservationTriggerScoreReadback();
+  const thresholdQueryResult = pollObservationTriggerThresholdQuery();
+  if ((completedScoreReadback || hasUnprocessedObservationTriggerScores()) && now < nextObservationTriggerCheckAt) {
+    nextObservationTriggerCheckAt = now;
+  }
+
   if (!oats.length || now < nextObservationTriggerCheckAt) return lastObservationTriggerDiagnostics;
   nextObservationTriggerCheckAt = now + OBSERVATION_SLIME_TRIGGER_INTERVAL_MS;
 
-  const threshold = Math.max(0, params.observationSlimeTriggerThreshold ?? 0);
+  let pendingBefore = 0;
+  for (const oat of oats) {
+    if (oat.observation && !oat.observation.triggered) pendingBefore++;
+  }
+  if (pendingBefore <= 0) {
+    lastObservationTriggerDiagnostics = {
+      checked: 0,
+      triggered: 0,
+      pending: 0,
+      threshold,
+      lastCheckedAt: now,
+      gpuScoreReadbacks: 0,
+      gpuScoreReadbackMode: observationTriggerScoreReadbackState.mode,
+      gpuScoreReadbackPending: observationTriggerScoreReadbackState.pending,
+      gpuThresholdQueries: 0,
+      gpuThresholdQueryPending: observationTriggerThresholdQueryState.pending,
+      gpuThresholdQuerySupported: observationTriggerThresholdQueryState.supported,
+    };
+    return lastObservationTriggerDiagnostics;
+  }
+
+  let scoreReadbackRequested = false;
+  let thresholdQueryRequested = false;
+  let thresholdQueryChecked = thresholdQueryResult.completed ? thresholdQueryResult.checked : 0;
+  const maxReads = Math.max(1, OBSERVATION_SLIME_TRIGGER_READS_PER_FRAME);
+
+  if (
+    !hasUnprocessedObservationTriggerScores() &&
+    !observationTriggerScoreReadbackState.pending &&
+    !observationTriggerThresholdQueryState.pending
+  ) {
+    if (observationTriggerThresholdQueryState.supported) {
+      const selection = collectObservationTriggerCheckIndices(maxReads);
+      if (selection.indices.length > 0) {
+        thresholdQueryRequested = beginObservationTriggerThresholdQuery(selection.indices, threshold);
+        if (thresholdQueryRequested) {
+          observationTriggerCursor = selection.cursor;
+          thresholdQueryChecked += selection.indices.length;
+        }
+      }
+    }
+    if (!thresholdQueryRequested) {
+      scoreReadbackRequested = requestObservationTriggerScoreReadback();
+    }
+  }
+
+  if (!hasUnprocessedObservationTriggerScores()) {
+    lastObservationTriggerDiagnostics = {
+      checked: 0,
+      triggered: 0,
+      pending: pendingBefore,
+      threshold,
+      lastCheckedAt: now,
+      gpuScoreReadbacks: scoreReadbackRequested ? 1 : 0,
+      gpuScoreReadbackMode: observationTriggerScoreReadbackState.mode,
+      gpuScoreReadbackPending: observationTriggerScoreReadbackState.pending,
+      gpuThresholdQueries: thresholdQueryRequested ? 1 : 0,
+      gpuThresholdQueryChecked: thresholdQueryChecked,
+      gpuThresholdQueryPassed: thresholdQueryResult.passed,
+      gpuThresholdQueryReadbackRequested: thresholdQueryResult.readbackRequested,
+      gpuThresholdQueryPending: observationTriggerThresholdQueryState.pending,
+      gpuThresholdQuerySupported: observationTriggerThresholdQueryState.supported,
+    };
+    return lastObservationTriggerDiagnostics;
+  }
+
   let checked = 0;
   let triggered = 0;
   let pending = 0;
-  const maxReads = Math.max(1, OBSERVATION_SLIME_TRIGGER_READS_PER_FRAME);
+  const processIndices = Array.isArray(observationTriggerScoreReadbackState.processIndices)
+    ? observationTriggerScoreReadbackState.processIndices
+    : null;
+  let scoreSelection = processIndices;
+  if (!scoreSelection) {
+    const selection = collectObservationTriggerCheckIndices(maxReads);
+    scoreSelection = selection.indices;
+    observationTriggerCursor = selection.cursor;
+  }
 
-  for (let attempts = 0; attempts < oats.length && checked < maxReads; attempts++) {
-    const index = observationTriggerCursor % oats.length;
-    observationTriggerCursor = (observationTriggerCursor + 1) % Math.max(1, oats.length);
-    const oat = oats[index];
-    const observation = oat?.observation;
-    if (!observation || observation.triggered) continue;
-    checked++;
-    const sample = measureOatSlimeTriggerScore(oat);
-    if (!sample) continue;
-    observation.slimeTriggerMean = sample.mean;
-    observation.slimeTriggerMax = sample.max;
-    observation.slimeTriggerScore = sample.score;
-    if (sample.score >= threshold) {
-      const triggeredObservation = triggerOatObservation(oat);
-      if (triggeredObservation) {
-        playCuttlefishRevealSound(now);
-        triggered++;
-      }
-    }
+  for (const index of scoreSelection) {
+    const result = processObservationTriggerScoreIndex(index, threshold, now);
+    if (result.checked) checked++;
+    if (result.triggered) triggered++;
   }
 
   for (const oat of oats) {
     if (oat.observation && !oat.observation.triggered) pending++;
   }
+  markObservationTriggerScoresProcessed();
   lastObservationTriggerDiagnostics = {
     checked,
     triggered,
     pending,
     threshold,
     lastCheckedAt: now,
+    gpuScoreReadbacks: scoreReadbackRequested ? 1 : 0,
+    gpuScoreReadbackMode: observationTriggerScoreReadbackState.mode,
+    gpuScoreReadbackPending: observationTriggerScoreReadbackState.pending,
+    gpuThresholdQueries: thresholdQueryRequested ? 1 : 0,
+    gpuThresholdQueryChecked: thresholdQueryChecked,
+    gpuThresholdQueryPassed: thresholdQueryResult.passed,
+    gpuThresholdQueryReadbackRequested: thresholdQueryResult.readbackRequested,
+    gpuThresholdQueryPending: observationTriggerThresholdQueryState.pending,
+    gpuThresholdQuerySupported: observationTriggerThresholdQueryState.supported,
   };
   return lastObservationTriggerDiagnostics;
 }
@@ -8871,9 +9377,53 @@ let agentPrefixCountValid = false;
 let slimeCoverageReadback = new Float32Array(FIELD_SIZE * FIELD_SIZE * 4);
 let coverageMaskReadback = new Uint8Array(FIELD_SIZE * FIELD_SIZE * 4);
 let legacyCoverageMaskReadback = new Uint8Array(FIELD_SIZE * FIELD_SIZE * 4);
-const observationTriggerReadback = new Float32Array(
-  OBSERVATION_SLIME_TRIGGER_SAMPLE_SIZE * OBSERVATION_SLIME_TRIGGER_SAMPLE_SIZE * 4,
-);
+const observationTriggerScoreReadback = new Float32Array(MAX_OATS * 4);
+const observationTriggerScoreReadbackByteLength =
+  observationTriggerScoreReadback.length * Float32Array.BYTES_PER_ELEMENT;
+const observationTriggerScoreReadbackState = {
+  asyncSupported: (() => {
+    const gl = renderer.getContext();
+    return typeof gl.fenceSync === 'function' &&
+      typeof gl.clientWaitSync === 'function' &&
+      typeof gl.getBufferSubData === 'function';
+  })(),
+  buffer: null,
+  sync: null,
+  pending: false,
+  sequence: 0,
+  requestedSequence: 0,
+  completedSequence: 0,
+  processedSequence: 0,
+  requestedOatListVersion: -1,
+  completedOatListVersion: -1,
+  lastQueuedAt: 0,
+  lastCompletedAt: 0,
+  mode: 'idle',
+  lastError: null,
+  processIndices: null,
+};
+const observationTriggerThresholdQueryState = {
+  supported: (() => {
+    const gl = renderer.getContext();
+    return typeof gl.createQuery === 'function' &&
+      typeof gl.beginQuery === 'function' &&
+      typeof gl.endQuery === 'function' &&
+      typeof gl.getQueryParameter === 'function' &&
+      typeof gl.deleteQuery === 'function' &&
+      gl.ANY_SAMPLES_PASSED !== undefined;
+  })(),
+  query: null,
+  pending: false,
+  indices: [],
+  sequence: 0,
+  requestedSequence: 0,
+  requestedOatListVersion: -1,
+  lastQueuedAt: 0,
+  lastCompletedAt: 0,
+  lastResult: false,
+  lastError: null,
+};
+let oatListVersion = 0;
 let nextObservationTriggerCheckAt = 0;
 let observationTriggerCursor = 0;
 let lastObservationTriggerDiagnostics = {
@@ -17224,6 +17774,8 @@ function addOat(x, y, opts = {}) {
   oat.observation = createOatObservation(oat);
   if (opts.observationCompleted) completeOatObservation(oat);
   oats.push(oat);
+  oatListVersion++;
+  invalidateObservationTriggerScores();
   oatDirty = true;
   oatCountEl.textContent = String(oats.length);
   return oat;
@@ -17257,6 +17809,8 @@ function clearAllOats() {
     disposeOatMarker(marker);
   }
   oats.length = 0;
+  oatListVersion++;
+  invalidateObservationTriggerScores();
   nextObservationId = 1;
   resetStoryLibraryCursor();
   oatDirty = true;
@@ -18298,6 +18852,7 @@ function initControls() {
   bindToggle('useIslandMasking', 'useIslandMasking');
   bindToggle('useHeadingRotation', 'useHeadingRotation');
   bindToggle('useOpticalZoom', 'useOpticalZoom', { onChange: syncCameraZoomMode });
+  bindToggle('statsReadbackEnabled', 'statsReadbackEnabled');
   bindToggle('useOatRationing', 'useOatRationing');
   bindToggle('usePopulationControl', 'usePopulationControl', {
     onChange: () => {
@@ -18463,7 +19018,7 @@ function frame(now) {
     }
     updateInitialAgentSeeding(now);
     updateEndingSequence(now);
-	    if (params.showAgentDots) renderAgentDensityOverlay();
+    if (params.showAgentDots) renderAgentDensityOverlay();
     smoothRenderField();
     if (isGoldWaferBodyHistoryActive() && (!paused || goldWaferBodyMaxFoodNeedsUpdate)) {
       updateGoldWaferBodyMaxFoodTexture({ force: goldWaferBodyMaxFoodNeedsUpdate });
@@ -18516,13 +19071,13 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 
-function renderSceneOnce(now = performance.now()) {
+function renderSceneOnce(now = performance.now(), { updateAnnotations = true } = {}) {
   controls.update();
   syncSlimeTumbleSpatialAudio();
   resizeIfNeeded();
   updateStormSkyTexture(now);
   updateCameraPoseReadout();
-  updateOatAnnotations();
+  if (updateAnnotations) updateOatAnnotations();
 
   renderer.setRenderTarget(null);
   renderer.setClearColor(0x000000, 1);
@@ -18847,6 +19402,10 @@ function updateStats(now, dt) {
   const statsDue = now - lastStatsRead >= STATS_UPDATE_INTERVAL_MS;
   if (!statsDue) return;
   lastStatsRead = now;
+  if (!params.statsReadbackEnabled) {
+    statusEl.textContent = baseStatus;
+    return;
+  }
   const populationFeedbackDue =
     params.usePopulationControl &&
     now - lastRuntimeAgentFeedbackRead >= getPopulationControlPeriodMs();
