@@ -1833,6 +1833,13 @@ const DEFAULT_OAT_RADIUS = 0.08 / WORLD_LINEAR_SCALE;
 const DEFAULT_OAT_POWER = 1.55;
 const OAT_EPSILON = 0.001;
 const OAT_SUPPORT_SIGMAS = Math.sqrt(-2 * Math.log(OAT_EPSILON));
+const OAT_FOOD_DECAY_TARGET_MULTIPLIER = 1 / 3;
+const OAT_FOOD_DECAY_DURATION_MS = 90000;
+const OAT_FOOD_DECAY_UPDATE_INTERVAL_MS = 250;
+const OAT_FOOD_DECAY_EPSILON = 0.0005;
+const MOUSE_REPEL_RADIUS_UV = 0.07 / 3;
+const MOUSE_REPEL_STRENGTH = 3.0;
+const MOUSE_REPEL_RAYCAST_INTERVAL_MS = 45;
 const INITIAL_AGENT_SPAWN_SIGMA = DEFAULT_OAT_RADIUS * 0.45;
 const GLB_PATH = 'luyvwj-fwgyww.glb';
 const GOLD_WAFER_LOOKUP_PATH = 'material%20data/thicker_au_rgb_thickness_angle_tensor.json';
@@ -1840,7 +1847,7 @@ const GOLD_WAFER_BODY_ENV_EQUIRECT_WIDTH = 512;
 const GOLD_WAFER_BODY_ENV_EQUIRECT_HEIGHT = 256;
 const GOLD_BODY_FAST_LOOKUP = true;
 const GOLD_BODY_FAST_LOOKUP_ANGLE_ROWS = 256;
-const INITIAL_OAT_POWER_MULTIPLIER = 4;
+const INITIAL_OAT_POWER_MULTIPLIER = 1;
 const ENV_AUDIO_PATH = 'shen-soundpack/wav/env.wav';
 const ENV_AUDIO_FALLBACK_PATH = 'shen-soundpack/wav/env-under-25mb.wav';
 const ENV_AUDIO_CROSSFADE_SECONDS = 2.5;
@@ -1972,10 +1979,13 @@ const PERFORMANCE_MODES = Object.freeze({
 });
 const PERFORMANCE_MODE_NAMES = Object.freeze(Object.keys(PERFORMANCE_MODES));
 
-// Fallback only; startup replaces this with the closest mesh point to the camera rotation center.
+// Fallback only; startup replaces this with the mesh hit under the viewport center.
 const FALLBACK_INITIAL_OAT_UV = { x: 0.65, y: 0.1 };
 let initialOatUv = { ...FALLBACK_INITIAL_OAT_UV };
 let initialOatSurfaceHit = null;
+const INITIAL_OAT_VIEWPORT_CENTER_NDC = new THREE.Vector2(0, 0);
+const initialOatViewportRaycaster = new THREE.Raycaster();
+const initialOatViewportHits = [];
 
 const BASE_SIMULATION_PARAMS = Object.freeze({
   uptakeRate: 0.035,
@@ -4559,6 +4569,11 @@ uniform float u_oatSupplyRate;
 uniform float u_densityMassScale;
 uniform int u_useOatRationing;
 uniform int u_useHeadingRotation;
+uniform int u_mouseRepelActive;
+uniform vec2 u_mouseRepelUv;
+uniform float u_mouseRepelChart;
+uniform float u_mouseRepelRadius;
+uniform float u_mouseRepelStrength;
 ${safeSamplingGlsl}
 float hash(float n) {
   return fract(sin(n * 127.1 + u_time * 41.7) * 43758.5453123);
@@ -4664,6 +4679,16 @@ float scoreAt(vec2 baseUv, vec2 sampleUv, float reserve) {
   float sampleValid = 0.0;
   float dynamicFood = readFoodSafe(baseUv, sampleUv, 0.0, sampleValid);
   if (sampleValid < 0.5) return -100000.0;
+  float mouseRepelPenalty = 0.0;
+  if (u_mouseRepelActive == 1 && u_mouseRepelRadius > 0.0 && u_mouseRepelStrength > 0.0) {
+    float sampleChart = chartIdAt(sampleUv);
+    if (sampleChart > 0.5 && abs(sampleChart - u_mouseRepelChart) < 0.5 && !isOwnershipUnsafe(sampleUv)) {
+      vec2 pointerDelta = sampleUv - u_mouseRepelUv;
+      float radiusSq = u_mouseRepelRadius * u_mouseRepelRadius;
+      float normalizedDistanceSq = dot(pointerDelta, pointerDelta) / max(radiusSq, 0.0000001);
+      mouseRepelPenalty = u_mouseRepelStrength * exp(-normalizedDistanceSq * 2.0);
+    }
+  }
   float crowd = readDensitySafe(baseUv, sampleUv, 1.0);
   float oatFood = rationedOatFood(readOatSafe(baseUv, sampleUv, 0.0), crowd);
   float food = dynamicFood + oatFood;
@@ -4677,7 +4702,7 @@ float scoreAt(vec2 baseUv, vec2 sampleUv, float reserve) {
   float crowdCurve = max(u_crowdExponent, 1.0);
   float superlinearPenalty = tooCrowded * pow(max(densityRatio, 1.0), crowdCurve - 1.0);
   float crowdPreference = occupiedEnough - superlinearPenalty * 2.0;
-  return u_foodWeight * foodSignal * appetite + u_crowdWeight * crowdPreference;
+  return u_foodWeight * foodSignal * appetite + u_crowdWeight * crowdPreference - mouseRepelPenalty;
 }
 vec4 advanceAgent(vec4 agent, float seed) {
   float angle = agent.z;
@@ -6186,6 +6211,11 @@ const agentParentUpdateMaterial = makeRawShaderMaterial(agentParentUpdateFragmen
   u_densityMassScale: { value: DENSITY_MASS_SCALE },
   u_useOatRationing: { value: params.useOatRationing ? 1 : 0 },
   u_useHeadingRotation: { value: 1 },
+  u_mouseRepelActive: { value: 0 },
+  u_mouseRepelUv: { value: new THREE.Vector2() },
+  u_mouseRepelChart: { value: 0 },
+  u_mouseRepelRadius: { value: MOUSE_REPEL_RADIUS_UV },
+  u_mouseRepelStrength: { value: MOUSE_REPEL_STRENGTH },
   ...sharedSafeSamplingUniforms(),
 });
 
@@ -6219,6 +6249,11 @@ const agentCandidateBuildMaterial = makeRawShaderMaterial(agentCandidateBuildFra
   u_densityMassScale: { value: DENSITY_MASS_SCALE },
   u_useOatRationing: { value: params.useOatRationing ? 1 : 0 },
   u_useHeadingRotation: { value: 1 },
+  u_mouseRepelActive: { value: 0 },
+  u_mouseRepelUv: { value: new THREE.Vector2() },
+  u_mouseRepelChart: { value: 0 },
+  u_mouseRepelRadius: { value: MOUSE_REPEL_RADIUS_UV },
+  u_mouseRepelStrength: { value: MOUSE_REPEL_STRENGTH },
   u_allocationOffset: { value: 0 },
   ...sharedSafeSamplingUniforms(),
 });
@@ -8186,6 +8221,12 @@ function updateOatGlowMarkers() {
       updateRejectedOatFizzleMarker(marker, now);
       continue;
     }
+    if (marker.userData.oat?.suppressObservation) {
+      marker.visible = false;
+      const glow = marker.children[0];
+      if (glow?.material) glow.material.opacity = 0;
+      continue;
+    }
     const toCamera = oatFacingToCamera.copy(camera.position).sub(marker.userData.surfacePos).normalize();
     const facing = marker.userData.surfaceNormal.dot(toCamera);
     const facingVisibility = THREE.MathUtils.smoothstep(facing, -0.18, 0.14);
@@ -8406,6 +8447,7 @@ function buildObservationTextAnimation(observation, text = OBSERVATION_PLACEHOLD
 }
 
 function maybeStartOatObservationText(oat, now = performance.now()) {
+  if (oat?.initial || oat?.suppressObservation) return null;
   const observation = oat?.observation;
   if (
     !observation?.triggered ||
@@ -8417,6 +8459,7 @@ function maybeStartOatObservationText(oat, now = performance.now()) {
   }
   const storyText = ensureOatStoryText(oat);
   buildObservationTextAnimation(observation, normalizeStoryTextValue(observation.text) || storyText);
+  startOatFoodDecay(oat, now);
   return observation.textTimeline;
 }
 
@@ -8611,6 +8654,7 @@ function playCuttlefishRevealSound(startAtPerformanceMs = performance.now()) {
 function triggerOatObservation(oatOrIndex, { force = false } = {}) {
   if (!isStoryBoxesEnabled() && !force) return null;
   const oat = typeof oatOrIndex === 'number' ? oats[oatOrIndex] : oatOrIndex;
+  if (oat?.initial || oat?.suppressObservation) return null;
   const observation = oat?.observation;
   if (!observation || (observation.triggered && !force)) return null;
   const now = performance.now();
@@ -9130,7 +9174,9 @@ function collectObservationTriggerCheckIndices(maxReads) {
   for (let attempts = 0; attempts < count && indices.length < maxReads; attempts++) {
     const index = cursor % count;
     cursor = (cursor + 1) % count;
-    const observation = oats[index]?.observation;
+    const oat = oats[index];
+    const observation = oat?.observation;
+    if (oat?.initial || oat?.suppressObservation) continue;
     if (!observation || observation.triggered) continue;
     indices.push(index);
   }
@@ -9140,6 +9186,7 @@ function collectObservationTriggerCheckIndices(maxReads) {
 function processObservationTriggerScoreIndex(index, threshold, now) {
   const oat = oats[index];
   const observation = oat?.observation;
+  if (oat?.initial || oat?.suppressObservation) return { checked: false, triggered: false };
   if (!observation || observation.triggered) return { checked: false, triggered: false };
 
   const sample = readOatSlimeTriggerScore(index);
@@ -9472,12 +9519,19 @@ let lastAgentAllocationOffset = 0;
 let smoothInitialized = false;
 let oatDirty = true;
 let lastOatRenderSeamStitching = null;
+let nextOatFoodDecayUpdateAt = 0;
 let paused = false;
 let started = false;
 let baseStatus = 'loading cuttlefish...';
 let seamPairs = [];
 let loggedClicks = [];
 let nextObservationId = 1;
+const mouseRepelState = {
+  active: false,
+  uv: new THREE.Vector2(),
+  chartId: 0,
+  lastRaycastAt: 0,
+};
 let debugMaterials = {};
 let debugBaseMaterial = null;
 let chartOwnership = null;
@@ -11290,12 +11344,58 @@ function updateInitialOatFromCameraRotationCenter(targetMesh = mesh) {
   return initialOatSurfaceHit;
 }
 
+function updateInitialOatFromViewportCenter(targetMesh = mesh) {
+  if (!targetMesh) {
+    initialOatUv = { ...FALLBACK_INITIAL_OAT_UV };
+    initialOatSurfaceHit = null;
+    return null;
+  }
+
+  targetMesh.updateMatrixWorld(true);
+  camera.updateMatrixWorld(true);
+  camera.updateProjectionMatrix();
+  initialOatViewportRaycaster.setFromCamera(INITIAL_OAT_VIEWPORT_CENTER_NDC, camera);
+  initialOatViewportHits.length = 0;
+  initialOatViewportRaycaster.intersectObject(targetMesh, false, initialOatViewportHits);
+  const hit = initialOatViewportHits[0];
+  initialOatViewportHits.length = 0;
+
+  if (!hit?.uv) {
+    console.warn('Viewport-center ray missed mesh for initial oat; using camera-target fallback.');
+    return updateInitialOatFromCameraRotationCenter(targetMesh);
+  }
+
+  const worldNormal = hit.face?.normal
+    ?.clone()
+    .transformDirection(targetMesh.matrixWorld) ?? new THREE.Vector3();
+  if (worldNormal.lengthSq() < 1e-8) {
+    const center = targetMesh.geometry?.boundingSphere?.center?.clone?.() ?? new THREE.Vector3();
+    targetMesh.localToWorld(center);
+    worldNormal.copy(hit.point).sub(center);
+  }
+  if (worldNormal.lengthSq() < 1e-8) {
+    worldNormal.copy(camera.position).sub(hit.point);
+  }
+  if (worldNormal.lengthSq() < 1e-8) worldNormal.set(0, 1, 0);
+
+  initialOatUv = { x: hit.uv.x, y: hit.uv.y };
+  initialOatSurfaceHit = {
+    uv: { ...initialOatUv },
+    worldPos: hit.point.clone(),
+    worldNormal: worldNormal.normalize(),
+    distanceToCamera: hit.distance,
+    distanceToRotationCenter: hit.point.distanceTo(controls?.target ?? new THREE.Vector3()),
+    source: 'viewport-center-raycast',
+  };
+  return initialOatSurfaceHit;
+}
+
 function addInitialOat(opts = {}) {
-  const hit = initialOatSurfaceHit ?? updateInitialOatFromCameraRotationCenter();
+  const hit = updateInitialOatFromViewportCenter() ?? initialOatSurfaceHit;
   const uv = hit?.uv ?? getInitialOatUv();
   return addOat(uv.x, uv.y, {
     initial: true,
-    observationCompleted: true,
+    suppressObservation: true,
     worldPos: hit?.worldPos,
     worldNormal: hit?.worldNormal,
     ...opts,
@@ -16372,7 +16472,7 @@ async function onLoad(gltf) {
   mesh.frustumCulled = false;
 
   scene.add(mesh);
-  updateInitialOatFromCameraRotationCenter(mesh);
+  updateInitialOatFromViewportCenter(mesh);
   setStartScreenLoadingProgress(80, 'mapping');
 
   // Build UV mask
@@ -16668,6 +16768,13 @@ async function onLoad(gltf) {
     setAllOatObservationText,
     observationPlaceholderText: OBSERVATION_PLACEHOLDER_TEXT,
     loggedClicks,
+    getMouseRepelState: () => ({
+      active: mouseRepelState.active,
+      uv: { x: mouseRepelState.uv.x, y: mouseRepelState.uv.y },
+      chartId: mouseRepelState.chartId,
+      radius: MOUSE_REPEL_RADIUS_UV,
+      strength: MOUSE_REPEL_STRENGTH,
+    }),
     addOat,
     resetSimulation,
     listSimulationPresets,
@@ -17760,10 +17867,34 @@ function addOat(x, y, opts = {}) {
   }
   const storyText = normalizeStoryTextValue(opts.storyText ?? opts.text);
   const storyAssigned = Boolean(storyText);
-  const oat = { uv, chartId, worldPos, worldNormal, radius, power, initial, sphere, storyText, storyAssigned, observation: null };
+  const suppressObservation = !!opts.suppressObservation;
+  const oat = {
+    uv,
+    chartId,
+    worldPos,
+    worldNormal,
+    radius,
+    power,
+    foodDecayStartedAt: null,
+    foodDecayMultiplier: 1,
+    initial,
+    suppressObservation,
+    sphere,
+    storyText,
+    storyAssigned,
+    observation: null,
+  };
   if (sphere) sphere.userData.oat = oat;
-  oat.observation = createOatObservation(oat);
-  if (opts.observationCompleted) completeOatObservation(oat);
+  if (suppressObservation) {
+    if (sphere) {
+      sphere.visible = false;
+      const glow = sphere.children?.[0];
+      if (glow?.material) glow.material.opacity = 0;
+    }
+  } else {
+    oat.observation = createOatObservation(oat);
+    if (opts.observationCompleted) completeOatObservation(oat);
+  }
   oats.push(oat);
   oatListVersion++;
   invalidateObservationTriggerScores();
@@ -17778,6 +17909,52 @@ function getDefaultOatPower() {
 
 function getInitialOatPower() {
   return getDefaultOatPower() * INITIAL_OAT_POWER_MULTIPLIER;
+}
+
+function getOatFoodDecayMultiplier(oat) {
+  const multiplier = Number(oat?.foodDecayMultiplier);
+  if (!Number.isFinite(multiplier)) return 1;
+  return THREE.MathUtils.clamp(multiplier, OAT_FOOD_DECAY_TARGET_MULTIPLIER, 1);
+}
+
+function startOatFoodDecay(oat, now = performance.now()) {
+  if (!oat || Number.isFinite(oat.foodDecayStartedAt)) return false;
+  oat.foodDecayStartedAt = now;
+  oat.foodDecayMultiplier = 1;
+  nextOatFoodDecayUpdateAt = 0;
+  oatDirty = true;
+  return true;
+}
+
+function updateOatFoodDecay(now = performance.now(), { force = false } = {}) {
+  if (!force && now < nextOatFoodDecayUpdateAt) return false;
+
+  let hasActiveDecay = false;
+  let changed = false;
+  for (const oat of oats) {
+    if (!Number.isFinite(oat.foodDecayStartedAt)) continue;
+
+    const elapsed = Math.max(0, now - oat.foodDecayStartedAt);
+    const progress = THREE.MathUtils.clamp(elapsed / OAT_FOOD_DECAY_DURATION_MS, 0, 1);
+    const eased = smoothUnit(progress);
+    const nextMultiplier = progress >= 1
+      ? OAT_FOOD_DECAY_TARGET_MULTIPLIER
+      : THREE.MathUtils.lerp(1, OAT_FOOD_DECAY_TARGET_MULTIPLIER, eased);
+    const previousMultiplier = getOatFoodDecayMultiplier(oat);
+    if (Math.abs(nextMultiplier - previousMultiplier) >= OAT_FOOD_DECAY_EPSILON) {
+      oat.foodDecayMultiplier = nextMultiplier;
+      changed = true;
+    }
+    if (progress < 1) hasActiveDecay = true;
+  }
+
+  if (changed) oatDirty = true;
+  nextOatFoodDecayUpdateAt = hasActiveDecay ? now + OAT_FOOD_DECAY_UPDATE_INTERVAL_MS : Infinity;
+  return changed;
+}
+
+function getEffectiveOatPower(oat) {
+  return Math.max(0, Number(oat?.power) || 0) * getOatFoodDecayMultiplier(oat);
 }
 
 function syncOatPowersFromParams() {
@@ -18169,7 +18346,7 @@ function uploadOatUniforms(material) {
   for (let i = 0; i < oats.length; i++) {
     u.u_oats.value[i].set(oats[i].uv.x, oats[i].uv.y);
     u.u_oatRadius.value[i] = oats[i].radius;
-    u.u_oatPower.value[i] = oats[i].power;
+    u.u_oatPower.value[i] = getEffectiveOatPower(oats[i]);
     u.u_oatChart.value[i] = oats[i].chartId;
   }
 }
@@ -18267,6 +18444,11 @@ function setAgentUpdateUniforms(material, now, dt) {
   u.u_useSeamStitching.value = params.useSeamStitching ? 1 : 0;
   u.u_useZeroGutterTransitions.value = params.useSeamStitching ? 1 : 0;
   u.u_useHeadingRotation.value = params.useHeadingRotation ? 1 : 0;
+  u.u_mouseRepelActive.value = mouseRepelState.active ? 1 : 0;
+  u.u_mouseRepelUv.value.copy(mouseRepelState.uv);
+  u.u_mouseRepelChart.value = mouseRepelState.chartId;
+  u.u_mouseRepelRadius.value = MOUSE_REPEL_RADIUS_UV;
+  u.u_mouseRepelStrength.value = MOUSE_REPEL_STRENGTH;
 }
 
 function updateAgents(now, dt) {
@@ -18496,15 +18678,74 @@ function simulate(now, dt) {
 // === click handling ===
 const raycaster = new THREE.Raycaster();
 const ndc = new THREE.Vector2();
+const pointerRepelHits = [];
 let pointerStart = null;
+
+function setPointerNdcFromEvent(event, target = ndc) {
+  const rect = canvas.getBoundingClientRect();
+  target.set(
+    ((event.clientX - rect.left) / rect.width) * 2 - 1,
+    -(((event.clientY - rect.top) / rect.height) * 2 - 1),
+  );
+  return target;
+}
+
+function clearMouseRepel() {
+  mouseRepelState.active = false;
+  mouseRepelState.chartId = 0;
+}
+
+function updateMouseRepelFromEvent(event, { force = false } = {}) {
+  if (!mesh) {
+    clearMouseRepel();
+    return false;
+  }
+
+  const now = performance.now();
+  if (!force && now - mouseRepelState.lastRaycastAt < MOUSE_REPEL_RAYCAST_INTERVAL_MS) {
+    return mouseRepelState.active;
+  }
+  mouseRepelState.lastRaycastAt = now;
+
+  setPointerNdcFromEvent(event);
+  raycaster.setFromCamera(ndc, camera);
+  pointerRepelHits.length = 0;
+  raycaster.intersectObject(mesh, false, pointerRepelHits);
+  const hit = pointerRepelHits[0];
+  pointerRepelHits.length = 0;
+  if (!hit?.uv) {
+    clearMouseRepel();
+    return false;
+  }
+
+  const uv = { x: hit.uv.x, y: hit.uv.y };
+  const chartId = chartIdAt(uv);
+  if (chartId <= 0 || isOwnershipUnsafe(uv)) {
+    clearMouseRepel();
+    return false;
+  }
+
+  mouseRepelState.active = true;
+  mouseRepelState.uv.set(uv.x, uv.y);
+  mouseRepelState.chartId = chartId;
+  return true;
+}
 
 canvas.addEventListener('pointerdown', (event) => {
   pointerStart = { x: event.clientX, y: event.clientY, id: event.pointerId };
+  updateMouseRepelFromEvent(event, { force: true });
 });
 
-canvas.addEventListener('pointermove', () => {});
+canvas.addEventListener('pointermove', (event) => {
+  updateMouseRepelFromEvent(event);
+});
+
+canvas.addEventListener('pointerleave', () => {
+  clearMouseRepel();
+});
 
 canvas.addEventListener('pointerup', (event) => {
+  updateMouseRepelFromEvent(event, { force: true });
   if (!pointerStart || pointerStart.id !== event.pointerId) {
     pointerStart = null;
     return;
@@ -18515,11 +18756,7 @@ canvas.addEventListener('pointerup', (event) => {
   pointerStart = null;
   if (moved >= 4) return;
   if (!mesh) return;
-  const rect = canvas.getBoundingClientRect();
-  ndc.set(
-    ((event.clientX - rect.left) / rect.width) * 2 - 1,
-    -(((event.clientY - rect.top) / rect.height) * 2 - 1),
-  );
+  setPointerNdcFromEvent(event);
   raycaster.setFromCamera(ndc, camera);
   const hits = raycaster.intersectObject(mesh, false);
   if (hits.length === 0) return;
@@ -18536,6 +18773,7 @@ canvas.addEventListener('pointerup', (event) => {
 
 canvas.addEventListener('pointercancel', () => {
   pointerStart = null;
+  clearMouseRepel();
 });
 
 // === UI controls ===
@@ -19006,6 +19244,7 @@ function frame(now) {
   updateCameraKeyboardOrbit(now);
 
   if (started) {
+    updateOatFoodDecay(now);
     if (!paused) {
       const steps = Math.max(0, Math.min(MAX_SIMULATION_STEPS, Math.round(params.simulationSteps)));
       if (steps > 0) {
