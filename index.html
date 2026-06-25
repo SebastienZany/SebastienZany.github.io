@@ -1834,7 +1834,7 @@ const DEFAULT_OAT_POWER = 1.55;
 const OAT_EPSILON = 0.001;
 const OAT_SUPPORT_SIGMAS = Math.sqrt(-2 * Math.log(OAT_EPSILON));
 const INITIAL_AGENT_SPAWN_SIGMA = DEFAULT_OAT_RADIUS * 0.45;
-const GLB_PATH = 'vceyxz-xxfsxx.glb';
+const GLB_PATH = 'luyvwj-fwgyww.glb';
 const GOLD_WAFER_LOOKUP_PATH = 'material%20data/thicker_au_rgb_thickness_angle_tensor.json';
 const GOLD_WAFER_BODY_ENV_EQUIRECT_WIDTH = 512;
 const GOLD_WAFER_BODY_ENV_EQUIRECT_HEIGHT = 256;
@@ -15204,7 +15204,6 @@ function computeChartClearance(topo) {
   const maxThresholdTexels = Math.max(...thresholds);
   const cellSize = maxThresholdTexels / FIELD_SIZE;
   const grid = new Map();
-  const seenSegmentPairs = new Set();
   let minimum = Infinity;
 
   function cellKey(x, y) {
@@ -15221,6 +15220,7 @@ function computeChartClearance(topo) {
     const cMaxX = Math.floor(maxX / cellSize) + 1;
     const cMinY = Math.floor(minY / cellSize) - 1;
     const cMaxY = Math.floor(maxY / cellSize) + 1;
+    const seenOtherSegmentIndices = new Set();
 
     for (let cy = cMinY; cy <= cMaxY; cy++) {
       for (let cx = cMinX; cx <= cMaxX; cx++) {
@@ -15229,9 +15229,8 @@ function computeChartClearance(topo) {
         for (const otherIndex of bucket) {
           const other = segments[otherIndex];
           if (other.chartId === seg.chartId) continue;
-          const pairKey = otherIndex < i ? `${otherIndex}|${i}` : `${i}|${otherIndex}`;
-          if (seenSegmentPairs.has(pairKey)) continue;
-          seenSegmentPairs.add(pairKey);
+          if (seenOtherSegmentIndices.has(otherIndex)) continue;
+          seenOtherSegmentIndices.add(otherIndex);
           const distanceTexels = segmentDistance(seg, other) * FIELD_SIZE;
           if (distanceTexels < minimum) {
             minimum = distanceTexels;
@@ -16497,14 +16496,6 @@ async function onLoad(gltf) {
       u_seamTransitionClaim: { value: seamTransitionClaimRT.texture },
     },
   });
-
-  // Wireframe overlay (off by default)
-  wireframeOverlay = new THREE.LineSegments(
-    new THREE.WireframeGeometry(geom),
-    new THREE.LineBasicMaterial({ color: 0x88aabb, transparent: true, opacity: 0.18, depthTest: true }),
-  );
-  wireframeOverlay.visible = false;
-  scene.add(wireframeOverlay);
 
   createLakeMirror(geom.boundingBox);
   setStartScreenLoadingProgress(98, 'starting');
@@ -18993,6 +18984,17 @@ function initControls() {
 }
 initControls();
 
+function ensureWireframeOverlay() {
+  if (wireframeOverlay || !mesh?.geometry) return wireframeOverlay;
+  wireframeOverlay = new THREE.LineSegments(
+    new THREE.WireframeGeometry(mesh.geometry),
+    new THREE.LineBasicMaterial({ color: 0x88aabb, transparent: true, opacity: 0.18, depthTest: true }),
+  );
+  wireframeOverlay.visible = false;
+  scene.add(wireframeOverlay);
+  return wireframeOverlay;
+}
+
 // === frame loop ===
 function frame(now) {
   const rawDt = Math.min((now - lastFrameTime) / 16.6667, FRAME_DT_CLAMP);
@@ -19059,7 +19061,8 @@ function frame(now) {
     if (mesh.material !== mat) mesh.material = mat;
 
     if (mesh.visible !== slimeVisualVisible) mesh.visible = slimeVisualVisible;
-    if (wireframeOverlay) wireframeOverlay.visible = !!params.showWireframe;
+    const activeWireframeOverlay = params.showWireframe ? ensureWireframeOverlay() : wireframeOverlay;
+    if (activeWireframeOverlay) activeWireframeOverlay.visible = !!params.showWireframe;
     syncLakeMirrorVisibility();
     oatGroup.visible = !!params.showOats;
     if (oatGroup.visible) updateOatGlowMarkers();
