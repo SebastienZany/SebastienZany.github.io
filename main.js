@@ -72,15 +72,12 @@ const IS_MOBILE_DEVICE =
   Math.min(window.screen?.width ?? Infinity, window.screen?.height ?? Infinity) <= 820;
 const MAX_PIXEL_RATIO = IS_MOBILE_DEVICE ? 1.5 : 2;
 
-// Desktop runs the high-resolution simulation; phones keep the smaller field
-// and agent pool (2048² field alone costs ~2.4GB of GPU memory). The ?field=
-// override exists so the seam bake for the phone size can be generated from a
-// desktop browser (see exportSeamBake).
+// Same simulation resolution on desktop and mobile. The ?field= override
+// exists for generating seam bakes at other sizes from a desktop browser
+// (see exportSeamBake).
 const FIELD_SIZE_OVERRIDE = Number(new URLSearchParams(window.location.search).get('field'));
-const FIELD_SIZE = [1024, 2048].includes(FIELD_SIZE_OVERRIDE)
-  ? FIELD_SIZE_OVERRIDE
-  : (IS_MOBILE_DEVICE ? 1024 : 2048);
-const AGENT_SIDE = IS_MOBILE_DEVICE ? 512 : 1024;
+const FIELD_SIZE = FIELD_SIZE_OVERRIDE > 0 ? FIELD_SIZE_OVERRIDE : 1536;
+const AGENT_SIDE = 768;
 const SEAM_BAKE_EXPORT_MODE = new URLSearchParams(window.location.search).has('bakeExport');
 const AGENT_CAPACITY = AGENT_SIDE * AGENT_SIDE;
 const AGENT_RECORD_STRIDE = 3; // updated parent plus two child proposal slots
