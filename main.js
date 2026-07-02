@@ -445,8 +445,8 @@ const RENDER_DISPLAY_PRESETS = Object.freeze([
     'Screenshot render look: softer spatial blur, stronger temporal smoothing, white body, thinner film band.',
     {
       spatialSmoothing: 1,
-      temporalSmoothing: 1,
-      surfaceHeight: 1,
+      temporalSmoothing: 0.93,
+      surfaceHeight: 1.4,
       surfaceBump: 5,
       iridescenceStrength: 0.8,
       slimeBaseColor: '#ffffff',
