@@ -16050,6 +16050,11 @@ function addOat(x, y, opts = {}) {
     oat.observation = createOatObservation(oat);
     if (opts.observationCompleted) completeOatObservation(oat);
   }
+  // Other oats start their food-power decay when their story text reveals
+  // (see maybeStartOatObservationText), which the initial oat never gets
+  // since it has no observation. It's already surrounded by slime from the
+  // first frame, so start its decay clock immediately instead.
+  if (initial) startOatFoodDecay(oat, performance.now());
   oats.push(oat);
   oatListVersion++;
   invalidateObservationTriggerScores();
