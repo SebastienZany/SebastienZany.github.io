@@ -72,8 +72,16 @@ const IS_MOBILE_DEVICE =
   Math.min(window.screen?.width ?? Infinity, window.screen?.height ?? Infinity) <= 820;
 const MAX_PIXEL_RATIO = IS_MOBILE_DEVICE ? 1.5 : 2;
 
-const FIELD_SIZE = 1024;
-const AGENT_SIDE = 512;
+// Desktop runs the high-resolution simulation; phones keep the smaller field
+// and agent pool (2048² field alone costs ~2.4GB of GPU memory). The ?field=
+// override exists so the seam bake for the phone size can be generated from a
+// desktop browser (see exportSeamBake).
+const FIELD_SIZE_OVERRIDE = Number(new URLSearchParams(window.location.search).get('field'));
+const FIELD_SIZE = [1024, 2048].includes(FIELD_SIZE_OVERRIDE)
+  ? FIELD_SIZE_OVERRIDE
+  : (IS_MOBILE_DEVICE ? 1024 : 2048);
+const AGENT_SIDE = IS_MOBILE_DEVICE ? 512 : 1024;
+const SEAM_BAKE_EXPORT_MODE = new URLSearchParams(window.location.search).has('bakeExport');
 const AGENT_CAPACITY = AGENT_SIDE * AGENT_SIDE;
 const AGENT_RECORD_STRIDE = 3; // updated parent plus two child proposal slots
 const AGENT_CANDIDATE_HEIGHT = AGENT_SIDE * AGENT_RECORD_STRIDE;
@@ -1909,7 +1917,8 @@ void trySeamKernelCandidate(
   vec4 transitionDirection,
   vec4 transitionBasis,
   inout vec2 winnerUv,
-  inout float winnerCount
+  inout float winnerCount,
+  inout float winnerDistance
 ) {
   if (transitionUv.z < 0.5) return;
   float transitionSourceChart = floor(transitionMeta.r + 0.5);
@@ -1924,10 +1933,14 @@ void trySeamKernelCandidate(
       dot(transitionBasis.zw, transitionBasis.zw) < 0.25) {
     return;
   }
+  // Nearest seam wins: the kernel continues across the closest boundary.
+  float seamDistance = max(0.0, transitionUv.w);
+  if (winnerCount > 0.5 && seamDistance >= winnerDistance) return;
   vec2 destinationIn = normalize(transitionDirection.zw);
-  float receiverDepthUv = max(0.0, transitionUv.w) / float(${FIELD_SIZE});
+  float receiverDepthUv = seamDistance / float(${FIELD_SIZE});
   winnerUv = transitionUv.xy - destinationIn * receiverDepthUv;
-  winnerCount += 1.0;
+  winnerDistance = seamDistance;
+  winnerCount = 1.0;
 }
 vec2 mapSeamReceiverToSourceVirtualUv(
   vec2 receiverUv,
@@ -1936,14 +1949,17 @@ vec2 mapSeamReceiverToSourceVirtualUv(
   out float valid
 ) {
   valid = 0.0;
+  // Overflow texels (more candidates generated at build time than atlas slots)
+  // still store their nearest candidates; try them rather than treating the
+  // texel as a wall. The single-winner check below keeps ambiguity conservative.
   if (u_useSeamStitching == 0 ||
       receiverChart < 0.5 ||
-      sourceChart < 0.5 ||
-      hasSeamKernelTransitionCandidateOverflow(receiverUv)) {
+      sourceChart < 0.5) {
     return receiverUv;
   }
   vec2 winnerUv = receiverUv;
   float winnerCount = 0.0;
+  float winnerDistance = 1e9;
   for (int slot = 0; slot < ${SEAM_TRANSITION_CANDIDATE_COUNT}; slot++) {
     vec2 candidateUv = seamTransitionCandidateAtlasUv(receiverUv, slot);
     trySeamKernelCandidate(receiverUv, receiverChart, sourceChart,
@@ -1952,9 +1968,10 @@ vec2 mapSeamReceiverToSourceVirtualUv(
       texture(u_seamTransitionDirectionAtlas, candidateUv),
       texture(u_seamTransitionBasisAtlas, candidateUv),
       winnerUv,
-      winnerCount);
+      winnerCount,
+      winnerDistance);
   }
-  if (abs(winnerCount - 1.0) > 0.1) return receiverUv;
+  if (winnerCount < 0.5) return receiverUv;
   valid = 1.0;
   return winnerUv;
 }
@@ -2083,7 +2100,8 @@ void tryZeroGutterTransitionCandidate(
   vec4 transitionBasis,
   inout vec2 winnerUv,
   inout vec2 winnerRotation,
-  inout float winnerCount
+  inout float winnerCount,
+  inout float winnerDistance
 ) {
   if (transitionUv.z < 0.5 || isOutsideAtlas(transitionUv.xy)) return;
   float sourceChart = floor(transitionMeta.r + 0.5);
@@ -2121,20 +2139,25 @@ void tryZeroGutterTransitionCandidate(
     return;
   }
 
+  // Nearest seam wins: the offset crosses the closest boundary first.
+  if (winnerCount > 0.5 && seamDistanceTexels >= winnerDistance) return;
   winnerUv = destUv;
   winnerRotation = transitionMeta.zw;
-  winnerCount += 1.0;
+  winnerDistance = seamDistanceTexels;
+  winnerCount = 1.0;
 }
 vec2 resolveZeroGutterTransitionUv(vec2 baseUv, vec2 sampleUv, float baseChart, out float transitionValid, out vec2 transitionRotation) {
   transitionValid = 0.0;
   transitionRotation = vec2(0.0, 1.0);
   if (u_useZeroGutterTransitions == 0 || u_useSeamStitching == 0) return baseUv;
-  if (hasTransitionCandidateOverflow(baseUv)) return baseUv;
+  // Overflow texels still store their nearest candidates; try them instead of
+  // treating the texel as a wall. The single-winner check below stays.
 
   vec2 sampleOffset = sampleUv - baseUv;
   vec2 winnerUv = baseUv;
   vec2 winnerRotation = vec2(0.0, 1.0);
   float winnerCount = 0.0;
+  float winnerDistance = 1e9;
   for (int slot = 0; slot < ${SEAM_TRANSITION_CANDIDATE_COUNT}; slot++) {
     vec2 candidateUv = seamTransitionCandidateAtlasUv(baseUv, slot);
     tryZeroGutterTransitionCandidate(baseUv, sampleOffset, baseChart,
@@ -2144,9 +2167,10 @@ vec2 resolveZeroGutterTransitionUv(vec2 baseUv, vec2 sampleUv, float baseChart, 
       texture(u_seamTransitionBasisAtlas, candidateUv),
       winnerUv,
       winnerRotation,
-      winnerCount);
+      winnerCount,
+      winnerDistance);
   }
-  if (abs(winnerCount - 1.0) > 0.1) return baseUv;
+  if (winnerCount < 0.5) return baseUv;
   transitionRotation = winnerRotation;
   transitionValid = 1.0;
   return winnerUv;
@@ -3044,7 +3068,8 @@ void trySplatTransitionCandidate(
   vec4 transitionDirection,
   inout vec2 winnerUv,
   inout float winnerChart,
-  inout float winnerCount
+  inout float winnerCount,
+  inout float winnerDistance
 ) {
   float sourceChart = floor(transitionMeta.r + 0.5);
   float destinationChart = floor(transitionMeta.g + 0.5);
@@ -3054,11 +3079,15 @@ void trySplatTransitionCandidate(
       dot(transitionDirection.zw, transitionDirection.zw) < 0.25) {
     return;
   }
+  // Nearest seam wins: the kernel continues across the closest boundary.
+  float seamDistance = max(0.0, transitionUv.w);
+  if (winnerCount > 0.5 && seamDistance >= winnerDistance) return;
   vec2 destinationIn = normalize(transitionDirection.zw);
-  float sourceDepthUv = max(0.0, transitionUv.w) / u_fieldSize;
+  float sourceDepthUv = seamDistance / u_fieldSize;
   winnerUv = transitionUv.xy - destinationIn * sourceDepthUv;
   winnerChart = destinationChart;
-  winnerCount += 1.0;
+  winnerDistance = seamDistance;
+  winnerCount = 1.0;
 }
 void main() {
   vec4 agent = fetchAgent(a_index);
@@ -3075,7 +3104,7 @@ void main() {
     gl_PointSize = 0.0;
   } else {
     if (u_splatMode == 1) {
-      if (u_useSeamStitching == 0 || hasSeamKernelTransitionCandidateOverflow(agent.xy)) {
+      if (u_useSeamStitching == 0) {
         gl_Position = vec4(-2.0, -2.0, 0.0, 1.0);
         gl_PointSize = 0.0;
         return;
@@ -3083,6 +3112,7 @@ void main() {
       vec2 winnerUv = agent.xy;
       float winnerChart = 0.0;
       float winnerCount = 0.0;
+      float winnerDistance = 1e9;
       for (int slot = 0; slot < ${SEAM_TRANSITION_CANDIDATE_COUNT}; slot++) {
         vec2 candidateUv = seamTransitionCandidateAtlasUv(agent.xy, slot);
         trySplatTransitionCandidate(agent.xy, v_agentChart,
@@ -3091,9 +3121,10 @@ void main() {
           texture(u_seamTransitionDirectionAtlas, candidateUv),
           winnerUv,
           winnerChart,
-          winnerCount);
+          winnerCount,
+          winnerDistance);
       }
-      if (abs(winnerCount - 1.0) > 0.1) {
+      if (winnerCount < 0.5) {
         gl_Position = vec4(-2.0, -2.0, 0.0, 1.0);
         gl_PointSize = 0.0;
         return;
@@ -9124,6 +9155,7 @@ function showStartScreenError(message) {
 }
 
 function showStartButton() {
+  console.info(`[load] start button ready at ${Math.round(performance.now())}ms`);
   startScreenReady = true;
   startScreenUiState.readyAt = performance.now();
   startScreenUiState.clickedAt = 0;
@@ -9505,15 +9537,10 @@ function createUvDiagnostics(targetMesh, initialTopology = null, initialOwnershi
   function resolveTransitionCandidate(maps, state, baseIndex, baseChart, offsetUvX, offsetUvY) {
     const p = baseIndex * 4;
     const claimCount = Math.round(maps.transitionClaim[p]);
+    // Mirrors the GLSL: overflow texels still resolve through their stored
+    // nearest candidates; overflow is only reported as the cause when
+    // resolution fails (the evicted candidate may have been the right one).
     const hasOverflow = maps.transitionClaim[p + 1] >= 0.5;
-    if (hasOverflow) {
-      return {
-        accepted: false,
-        cause: 'transitionCandidateOverflow',
-        metadataPair: 'overflow',
-        candidateCount: claimCount,
-      };
-    }
     if (claimCount <= 0) {
       return { accepted: false, cause: 'transitionMetadataMissing', metadataPair: 'none' };
     }
@@ -9632,17 +9659,31 @@ function createUvDiagnostics(targetMesh, initialTopology = null, initialOwnershi
         accepted: true,
         ...uniqueAccepted[0],
         candidateCount: claimCount,
-        hadCandidateOverflow: false,
+        hadCandidateOverflow: hasOverflow,
         duplicateWinnersMerged: accepted.length - uniqueAccepted.length,
       };
     }
     if (uniqueAccepted.length > 1) {
+      // Mirrors the GLSL nearest-seam-wins rule: the offset crosses the
+      // closest boundary first.
+      const nearest = uniqueAccepted.reduce((best, entry) =>
+        entry.seamDistanceTexels < best.seamDistanceTexels ? entry : best);
+      return {
+        accepted: true,
+        ...nearest,
+        candidateCount: claimCount,
+        hadCandidateOverflow: hasOverflow,
+        resolvedFromAmbiguousCandidates: uniqueAccepted.length,
+        duplicateWinnersMerged: accepted.length - uniqueAccepted.length,
+      };
+    }
+
+    if (hasOverflow) {
       return {
         accepted: false,
-        cause: 'transitionCandidateAmbiguous',
-        metadataPair: uniqueAccepted.map((entry) => entry.metadataPair).join(','),
+        cause: 'transitionCandidateOverflow',
+        metadataPair: 'overflow',
         candidateCount: claimCount,
-        duplicateWinnersMerged: accepted.length - uniqueAccepted.length,
       };
     }
 
@@ -9663,10 +9704,8 @@ function createUvDiagnostics(targetMesh, initialTopology = null, initialOwnershi
 
   function mapReceiverTexelToSourceVirtualUv(texel, receiverChart, sourceChart, maps, counts = null) {
     const p = texel * 4;
-    if (maps.transitionClaim[p + 1] >= 0.5) {
-      if (counts) counts.skippedTransitionCollisionContributions++;
-      return null;
-    }
+    // Mirrors the GLSL: overflow texels resolve through their stored nearest
+    // candidates instead of being skipped outright.
     let winner = null;
     let winnerCount = 0;
     for (const candidate of maps.transitionCandidates ?? []) {
@@ -9688,20 +9727,20 @@ function createUvDiagnostics(targetMesh, initialTopology = null, initialOwnershi
       if (destinationInLen < 0.5 || sourceEdgeLen < 0.5 || destinationEdgeLen < 0.5) {
         continue;
       }
-      const receiverDepthUv = Math.max(0, candidate.transitionUv[p + 3]) / FIELD_SIZE;
+      // Mirrors the GLSL nearest-seam-wins rule.
+      const seamDistance = Math.max(0, candidate.transitionUv[p + 3]);
+      if (winner && seamDistance >= winner.transitionDistanceTexels) continue;
+      const receiverDepthUv = seamDistance / FIELD_SIZE;
       winner = {
         u: candidate.transitionUv[p] - (destinationInX / destinationInLen) * receiverDepthUv,
         v: candidate.transitionUv[p + 1] - (destinationInY / destinationInLen) * receiverDepthUv,
         pair: `${sourceChart}->${receiverChart}`,
-        transitionDistanceTexels: candidate.transitionUv[p + 3],
+        transitionDistanceTexels: seamDistance,
       };
       winnerCount++;
     }
-    if (winnerCount === 1) return winner;
-    if (counts) {
-      if (winnerCount > 1) counts.skippedTransitionCollisionContributions++;
-      else counts.skippedWrongDirectionNotCrossingContributions++;
-    }
+    if (winner) return winner;
+    if (counts) counts.skippedWrongDirectionNotCrossingContributions++;
     return null;
   }
 
@@ -10678,13 +10717,10 @@ function createUvDiagnostics(targetMesh, initialTopology = null, initialOwnershi
           }
         }
 
+        // Mirrors the GLSL splat-vertex rule: overflow texels still resolve
+        // through stored candidates, and the nearest seam wins.
         const centerP = centerIndex * 4;
-        if (maps.transitionClaim[centerP + 1] >= 0.5) {
-          counts.skippedTransitionCollisionContributions++;
-          continue;
-        }
         let centerWinner = null;
-        let centerWinnerCount = 0;
         for (const candidate of maps.transitionCandidates ?? []) {
           if (candidate.transitionUv[centerP + 2] < 0.5) continue;
           const transitionSourceChart = Math.round(candidate.transitionMeta[centerP]);
@@ -10693,18 +10729,15 @@ function createUvDiagnostics(targetMesh, initialTopology = null, initialOwnershi
           const destinationInY = candidate.transitionDirection[centerP + 3];
           const destinationInLen = Math.hypot(destinationInX, destinationInY);
           if (transitionSourceChart !== agentChart || destinationChart <= 0 || destinationInLen < 0.5) continue;
-          const sourceDepthUv = Math.max(0, candidate.transitionUv[centerP + 3]) / FIELD_SIZE;
+          const seamDistance = Math.max(0, candidate.transitionUv[centerP + 3]);
+          if (centerWinner && seamDistance >= centerWinner.transitionDistanceTexels) continue;
+          const sourceDepthUv = seamDistance / FIELD_SIZE;
           centerWinner = {
             destinationChart,
             virtualCx: (candidate.transitionUv[centerP] - (destinationInX / destinationInLen) * sourceDepthUv) * FIELD_SIZE,
             virtualCy: (candidate.transitionUv[centerP + 1] - (destinationInY / destinationInLen) * sourceDepthUv) * FIELD_SIZE,
-            transitionDistanceTexels: candidate.transitionUv[centerP + 3],
+            transitionDistanceTexels: seamDistance,
           };
-          centerWinnerCount++;
-        }
-        if (centerWinnerCount > 1) {
-          counts.skippedTransitionCollisionContributions++;
-          continue;
         }
         if (!centerWinner) {
           counts.skippedWrongDirectionNotCrossingContributions++;
@@ -14314,6 +14347,110 @@ function createPerfHelpers() {
 }
 
 // === GLB load ===
+// === seam transition bake ===
+// The CPU-side candidate packing dominates load time (tens of seconds at
+// 2048). The bake stores its per-slot decisions; values are recomputed from
+// the mesh at load. Generated via ?bakeExport=1 + __cuttle.exportSeamBake().
+const SEAM_BAKE_MAGIC = 0x53424b31; // 'SBK1'
+const SEAM_BAKE_VERSION = 1;
+let seamBakeData = null;
+let seamBakeExportState = null;
+
+function parseSeamBake(bytes) {
+  if (bytes.byteLength < 28) return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (view.getUint32(0, true) !== SEAM_BAKE_MAGIC) return null;
+  if (view.getUint32(4, true) !== SEAM_BAKE_VERSION) return null;
+  const fieldSize = view.getUint32(8, true);
+  const slots = view.getUint32(12, true);
+  const seamEdgeCount = view.getUint32(16, true);
+  const recordCount = view.getUint32(20, true);
+  const diagnosticsLength = view.getUint32(24, true);
+  if (28 + diagnosticsLength > bytes.byteLength) return null;
+  let diagnostics = {};
+  try {
+    diagnostics = JSON.parse(new TextDecoder().decode(bytes.subarray(28, 28 + diagnosticsLength)));
+  } catch {
+    return null;
+  }
+  return {
+    fieldSize,
+    slots,
+    seamEdgeCount,
+    recordCount,
+    diagnostics,
+    view,
+    recordsOffset: 28 + diagnosticsLength,
+  };
+}
+
+const seamBakeFetchPromise = (async () => {
+  if (SEAM_BAKE_EXPORT_MODE) return null;
+  if (typeof DecompressionStream !== 'function') return null;
+  try {
+    const response = await fetch(`seam-bake-${FIELD_SIZE}.bin`);
+    if (!response.ok) return null;
+    const stream = response.body.pipeThrough(new DecompressionStream('gzip'));
+    const bytes = new Uint8Array(await new Response(stream).arrayBuffer());
+    return parseSeamBake(bytes);
+  } catch (error) {
+    console.warn('Seam bake unavailable; seam transitions will build live.', error);
+    return null;
+  }
+})();
+
+async function exportSeamBake() {
+  const state = seamBakeExportState;
+  if (!state?.slotSeamIds) {
+    throw new Error('Load the page with ?bakeExport=1 first, then call exportSeamBake().');
+  }
+  const diagnosticsBytes = new TextEncoder().encode(JSON.stringify(state.diagnostics));
+  const texelCount = state.fieldSize * state.fieldSize;
+  let recordCount = 0;
+  let recordBytes = 0;
+  for (let texel = 0; texel < texelCount; texel++) {
+    const count = Math.min(state.candidateCounts[texel], state.slots);
+    if (count === 0 && state.candidateOverflow[texel] === 0) continue;
+    recordCount++;
+    recordBytes += 5 + count * 4;
+  }
+  const bytes = new Uint8Array(28 + diagnosticsBytes.length + recordBytes);
+  const view = new DataView(bytes.buffer);
+  view.setUint32(0, SEAM_BAKE_MAGIC, true);
+  view.setUint32(4, SEAM_BAKE_VERSION, true);
+  view.setUint32(8, state.fieldSize, true);
+  view.setUint32(12, state.slots, true);
+  view.setUint32(16, state.seamEdgeCount, true);
+  view.setUint32(20, recordCount, true);
+  view.setUint32(24, diagnosticsBytes.length, true);
+  bytes.set(diagnosticsBytes, 28);
+  let offset = 28 + diagnosticsBytes.length;
+  for (let texel = 0; texel < texelCount; texel++) {
+    const count = Math.min(state.candidateCounts[texel], state.slots);
+    if (count === 0 && state.candidateOverflow[texel] === 0) continue;
+    view.setUint32(offset, texel, true);
+    view.setUint8(offset + 4, count | (state.candidateOverflow[texel] ? 0x80 : 0));
+    offset += 5;
+    for (let slot = 0; slot < count; slot++) {
+      view.setUint32(offset, state.slotSeamIds[texel * state.slots + slot], true);
+      offset += 4;
+    }
+  }
+  const gzipped = new Uint8Array(await new Response(
+    new Blob([bytes]).stream().pipeThrough(new CompressionStream('gzip')),
+  ).arrayBuffer());
+  const blob = new Blob([gzipped], { type: 'application/octet-stream' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = `seam-bake-${state.fieldSize}.bin`;
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 10000);
+  return { rawBytes: bytes.length, gzippedBytes: gzipped.length, recordCount };
+}
+
 new GLTFLoader().load(
   GLB_PATH,
   (gltf) => {
@@ -14393,14 +14530,28 @@ async function onLoad(gltf) {
   updateInitialOatFromViewportCenter(mesh);
   setStartScreenLoadingProgress(80, 'mapping');
 
+  const loadPhaseStart = performance.now();
+  console.info(`[load] mapping phase begins at ${Math.round(loadPhaseStart)}ms`);
+  let loadPhaseLast = loadPhaseStart;
+  const loadPhase = (label) => {
+    const now = performance.now();
+    console.info(`[load] ${label}: ${Math.round(now - loadPhaseLast)}ms`);
+    loadPhaseLast = now;
+  };
   // Build UV mask
   buildUvMask(mesh);
   cacheCoverageMask();
+  loadPhase('uvMask+coverage');
   const uvTopology = buildUvChartTopology(mesh);
+  loadPhase('chartTopology');
   chartOwnership = buildChartOwnershipTextures(uvTopology);
+  loadPhase('chartOwnership');
   setStartScreenLoadingProgress(88, 'mapping');
   // Build seam data
+  seamBakeData = await seamBakeFetchPromise;
+  loadPhase('bakeFetch');
   seamPairs = buildSeamData(mesh, uvTopology);
+  loadPhase('seamData');
   uvDiagnostics = createUvDiagnostics(mesh, uvTopology, chartOwnership);
   setStartScreenLoadingProgress(92, 'shading');
 
@@ -14511,10 +14662,26 @@ async function onLoad(gltf) {
   baseStatus = `${info} | ${AGENT_CAPACITY.toLocaleString()} slots`;
   statusEl.textContent = baseStatus;
 
+  loadPhase('materials+wiring');
+
+  // First use of each program triggers driver compilation, which can block the
+  // main thread for tens of seconds. Run one throwaway frame while the loading
+  // screen is still up so the stall lands here instead of freezing the first
+  // visible frame; resetSimulation() below clears any state it touched.
+  setStartScreenLoadingProgress(99, 'compiling');
+  await new Promise((resolve) => requestAnimationFrame(resolve));
+  simulate(performance.now(), 0.001);
+  markRenderFieldChanged();
+  smoothRenderField();
+  renderSceneOnce(performance.now(), { updateAnnotations: false });
+  loadPhase('shaderPrewarm');
+
   // Reset & start frame loop
   await loadStories();
+  loadPhase('stories');
   resetSimulation({ resetOats: true, spawnAgents: false });
   started = true;
+  loadPhase('resetSimulation');
   lastFrameTime = performance.now();
   requestAnimationFrame(frame);
 
@@ -14651,6 +14818,7 @@ async function onLoad(gltf) {
     seamPairs,
     chartOwnership,
     uvDiagnostics,
+    exportSeamBake,
     debugMaterials,
     perf: createPerfHelpers(),
     oats,
@@ -15433,6 +15601,10 @@ function buildSeamData(targetMesh, uvTopology = null) {
     const duplicateMergeCounts = new Uint16Array(texelCount);
     const trueOverflowCounts = new Uint16Array(texelCount);
     const claimPixels = new Float32Array(texelCount * 4);
+    // Only tracked in bake-export mode: which edge-side won each slot.
+    const slotSeamIds = SEAM_BAKE_EXPORT_MODE
+      ? new Uint32Array(texelCount * SEAM_TRANSITION_CANDIDATE_COUNT)
+      : null;
     const packingStats = {
       rawCandidateClaims: 0,
       rawCandidateTexels: 0,
@@ -15454,9 +15626,22 @@ function buildSeamData(targetMesh, uvTopology = null) {
     };
     let seamId = 1;
 
-    for (const seam of seamEdges) {
-      pushTransitionCandidate(seam.A, seam.B, seamId++);
-      pushTransitionCandidate(seam.B, seam.A, seamId++);
+    const bake = seamBakeData &&
+      seamBakeData.fieldSize === FIELD_SIZE &&
+      seamBakeData.slots === SEAM_TRANSITION_CANDIDATE_COUNT &&
+      seamBakeData.seamEdgeCount === seamEdges.length
+      ? seamBakeData
+      : null;
+    if (bake) {
+      applyBakedCandidates(bake);
+    } else {
+      if (seamBakeData) {
+        console.warn('Seam bake does not match this mesh/config; building seam transitions live.');
+      }
+      for (const seam of seamEdges) {
+        pushTransitionCandidate(seam.A, seam.B, seamId++);
+        pushTransitionCandidate(seam.B, seam.A, seamId++);
+      }
     }
 
     for (let texel = 0; texel < texelCount; texel++) {
@@ -15464,6 +15649,7 @@ function buildSeamData(targetMesh, uvTopology = null) {
       claimPixels[p] = candidateCounts[texel];
       claimPixels[p + 1] = candidateOverflow[texel];
       claimPixels[p + 3] = 1;
+      if (bake) continue; // packing stats come from the bake below
       if (rawCandidateCounts[texel] > 0) packingStats.rawCandidateTexels++;
       if (sourceMismatchCounts[texel] > 0) packingStats.discardedSourceChartMismatchTexels++;
       if (nonAuthoritativeCounts[texel] > 0) packingStats.discardedNonAuthoritativeTexels++;
@@ -15477,16 +15663,29 @@ function buildSeamData(targetMesh, uvTopology = null) {
         }
       }
     }
-    lastTransitionCandidatePackingDiagnostics = {
-      ...packingStats,
-      filteredCandidateClaims:
-        packingStats.remainingCandidatesAfterFilteringDeduplication +
-        packingStats.trueOverflowAfterFilteringDeduplicationCandidates,
-      discardedCandidateClaims:
-        packingStats.discardedSourceChartMismatchCandidates +
-        packingStats.discardedNonAuthoritativeCandidates,
-      note: 'Transition candidate packing is filtered by authoritative source ownership before slot allocation, then equivalent same-seam candidates are deduplicated. Overflow now means true post-filter/post-dedup ambiguity and is treated as conservative no-flux by runtime samplers.',
-    };
+    lastTransitionCandidatePackingDiagnostics = bake
+      ? { ...bake.diagnostics, prebaked: true }
+      : {
+        ...packingStats,
+        filteredCandidateClaims:
+          packingStats.remainingCandidatesAfterFilteringDeduplication +
+          packingStats.trueOverflowAfterFilteringDeduplicationCandidates,
+        discardedCandidateClaims:
+          packingStats.discardedSourceChartMismatchCandidates +
+          packingStats.discardedNonAuthoritativeCandidates,
+        note: 'Transition candidate packing is filtered by authoritative source ownership before slot allocation, then equivalent same-seam candidates are deduplicated. Overflow now means true post-filter/post-dedup ambiguity and is treated as conservative no-flux by runtime samplers.',
+      };
+    if (SEAM_BAKE_EXPORT_MODE) {
+      seamBakeExportState = {
+        fieldSize: FIELD_SIZE,
+        slots: SEAM_TRANSITION_CANDIDATE_COUNT,
+        seamEdgeCount: seamEdges.length,
+        candidateCounts,
+        candidateOverflow,
+        slotSeamIds,
+        diagnostics: lastTransitionCandidatePackingDiagnostics,
+      };
+    }
 
     const uvTexture = makeDataTexture2D(uvAtlas, candidateAtlasWidth, FIELD_SIZE, THREE.FloatType);
     const metaTexture = makeDataTexture2D(metaAtlas, candidateAtlasWidth, FIELD_SIZE, THREE.FloatType);
@@ -15504,6 +15703,41 @@ function buildSeamData(targetMesh, uvTopology = null) {
     const claimTexture = makeDataTexture(claimPixels, THREE.FloatType);
     uploadDataTextureToRT(claimTexture, seamTransitionClaimRT);
     claimTexture.dispose();
+
+    function applyBakedCandidates(bakeData) {
+      // The bake stores only the packing decisions (which edge-side won each
+      // slot); the candidate values are recomputed here with the same math the
+      // live rasterizer uses, so both paths produce identical atlases.
+      const frames = new Array(seamEdges.length * 2 + 1);
+      const view = bakeData.view;
+      let offset = bakeData.recordsOffset;
+      for (let record = 0; record < bakeData.recordCount; record++) {
+        const texel = view.getUint32(offset, true);
+        const flags = view.getUint8(offset + 4);
+        offset += 5;
+        const count = flags & 0x0f;
+        candidateCounts[texel] = count;
+        candidateOverflow[texel] = flags & 0x80 ? 1 : 0;
+        const x = texel % FIELD_SIZE;
+        const y = (texel - x) / FIELD_SIZE;
+        for (let slot = 0; slot < count; slot++) {
+          const candidateSeamId = view.getUint32(offset, true);
+          offset += 4;
+          let frame = frames[candidateSeamId];
+          if (frame === undefined) {
+            const seam = seamEdges[(candidateSeamId - 1) >> 1];
+            frame = seam
+              ? ((candidateSeamId - 1) % 2 === 0
+                ? makeTransitionCandidateFrame(seam.A, seam.B, candidateSeamId)
+                : makeTransitionCandidateFrame(seam.B, seam.A, candidateSeamId))
+              : null;
+            frames[candidateSeamId] = frame;
+          }
+          if (!frame) continue;
+          writeCandidateToSlot(slot, texel, candidateAtTexel(frame, x, y));
+        }
+      }
+    }
 
     function candidateAtlasOffset(slot, texel) {
       const x = texel % FIELD_SIZE;
@@ -15544,6 +15778,7 @@ function buildSeamData(targetMesh, uvTopology = null) {
     }
 
     function writeCandidateToSlot(slot, texel, candidate) {
+      if (slotSeamIds) slotSeamIds[texel * SEAM_TRANSITION_CANDIDATE_COUNT + slot] = candidate.seamId;
       const p = candidateAtlasOffset(slot, texel);
       uvAtlas[p] = candidate.destinationU;
       uvAtlas[p + 1] = candidate.destinationV;
@@ -15625,7 +15860,9 @@ function buildSeamData(targetMesh, uvTopology = null) {
       writeCandidateToSlot(slot, texel, candidate);
     }
 
-    function pushTransitionCandidate(srcSide, dstSide, candidateSeamId) {
+    // Per-edge-side frame: everything a texel candidate derives from. Shared by
+    // the live rasterizer and the bake decoder so both produce identical values.
+    function makeTransitionCandidateFrame(srcSide, dstSide, candidateSeamId) {
       const uvA = [uvAttr[srcSide.vA * 2], uvAttr[srcSide.vA * 2 + 1]];
       const uvB = [uvAttr[srcSide.vB * 2], uvAttr[srcSide.vB * 2 + 1]];
       const uvC = [uvAttr[srcSide.vC * 2], uvAttr[srcSide.vC * 2 + 1]];
@@ -15635,7 +15872,7 @@ function buildSeamData(targetMesh, uvTopology = null) {
 
       const ex = uvB[0] - uvA[0], ey = uvB[1] - uvA[1];
       const elen = Math.hypot(ex, ey);
-      if (elen < 1e-12) return;
+      if (elen < 1e-12) return null;
       const edgeX = ex / elen, edgeY = ey / elen;
       const px = -edgeY, py = edgeX;
       const toC = [uvC[0] - uvA[0], uvC[1] - uvA[1]];
@@ -15645,7 +15882,7 @@ function buildSeamData(targetMesh, uvTopology = null) {
 
       const dEx = dstB[0] - dstA[0], dEy = dstB[1] - dstA[1];
       const dElen = Math.hypot(dEx, dEy);
-      if (dElen < 1e-12) return;
+      if (dElen < 1e-12) return null;
       const dstEdgeX = dEx / dElen, dstEdgeY = dEy / dElen;
       const dPx = -dstEdgeY, dPy = dstEdgeX;
       const dToC = [dstC[0] - dstA[0], dstC[1] - dstA[1]];
@@ -15659,6 +15896,47 @@ function buildSeamData(targetMesh, uvTopology = null) {
       const sinT = TA[0] * BB[0] + TA[1] * BB[1] + TA[2] * BB[2];
       const sourceChart = uvTopology?.faceChartIds?.[srcSide.face] ?? 0;
       const destinationChart = uvTopology?.faceChartIds?.[dstSide.face] ?? 0;
+
+      return {
+        seamId: candidateSeamId,
+        uvA, uvB, dstA, dstB,
+        elen, edgeX, edgeY,
+        inX_src, inY_src, outX_src, outY_src,
+        inX_dst, inY_dst, dstEdgeX, dstEdgeY,
+        sinT, cosT, sourceChart, destinationChart,
+      };
+    }
+
+    function candidateAtTexel(frame, x, y) {
+      const centerU = (x + 0.5) / FIELD_SIZE;
+      const centerV = (y + 0.5) / FIELD_SIZE;
+      const alongUv = (centerU - frame.uvA[0]) * frame.edgeX + (centerV - frame.uvA[1]) * frame.edgeY;
+      const t = clampNumber(frame.elen > 0 ? alongUv / frame.elen : 0, 0, 1);
+      const depthUv = Math.max(0, (centerU - frame.uvA[0]) * frame.inX_src + (centerV - frame.uvA[1]) * frame.inY_src);
+      return {
+        seamId: frame.seamId,
+        sourceChart: frame.sourceChart,
+        destinationChart: frame.destinationChart,
+        sinT: frame.sinT,
+        cosT: frame.cosT,
+        destinationU: frame.dstA[0] + (frame.dstB[0] - frame.dstA[0]) * t,
+        destinationV: frame.dstA[1] + (frame.dstB[1] - frame.dstA[1]) * t,
+        distanceTexels: Math.min(SEAM_CROSSING_TRANSITION_BAND_TEXELS, depthUv * FIELD_SIZE),
+        outX: frame.outX_src,
+        outY: frame.outY_src,
+        destInX: frame.inX_dst,
+        destInY: frame.inY_dst,
+        edgeX: frame.edgeX,
+        edgeY: frame.edgeY,
+        dstEdgeX: frame.dstEdgeX,
+        dstEdgeY: frame.dstEdgeY,
+      };
+    }
+
+    function pushTransitionCandidate(srcSide, dstSide, candidateSeamId) {
+      const frame = makeTransitionCandidateFrame(srcSide, dstSide, candidateSeamId);
+      if (!frame) return;
+      const { uvA, uvB, inX_src, inY_src } = frame;
 
       const outPad = SEAM_WELD_OUT_PAD_TEXELS / FIELD_SIZE;
       const inDepth = SEAM_CROSSING_TRANSITION_BAND_TEXELS / FIELD_SIZE;
@@ -15679,29 +15957,7 @@ function buildSeamData(targetMesh, uvTopology = null) {
             triangleTouchesTexel(qA[0], qA[1], qB[0], qB[1], qBi[0], qBi[1], areaA, x, y) ||
             triangleTouchesTexel(qA[0], qA[1], qBi[0], qBi[1], qAi[0], qAi[1], areaB, x, y);
           if (!touches) continue;
-          const centerU = (x + 0.5) / FIELD_SIZE;
-          const centerV = (y + 0.5) / FIELD_SIZE;
-          const alongUv = (centerU - uvA[0]) * edgeX + (centerV - uvA[1]) * edgeY;
-          const t = clampNumber(elen > 0 ? alongUv / elen : 0, 0, 1);
-          const depthUv = Math.max(0, (centerU - uvA[0]) * inX_src + (centerV - uvA[1]) * inY_src);
-          appendCandidate(y * FIELD_SIZE + x, {
-            seamId: candidateSeamId,
-            sourceChart,
-            destinationChart,
-            sinT,
-            cosT,
-            destinationU: dstA[0] + (dstB[0] - dstA[0]) * t,
-            destinationV: dstA[1] + (dstB[1] - dstA[1]) * t,
-            distanceTexels: Math.min(SEAM_CROSSING_TRANSITION_BAND_TEXELS, depthUv * FIELD_SIZE),
-            outX: outX_src,
-            outY: outY_src,
-            destInX: inX_dst,
-            destInY: inY_dst,
-            edgeX,
-            edgeY,
-            dstEdgeX,
-            dstEdgeY,
-          });
+          appendCandidate(y * FIELD_SIZE + x, candidateAtTexel(frame, x, y));
         }
       }
     }
