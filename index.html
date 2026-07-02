@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>A Bestiary of Vanishings</title>
     <link rel="icon" href="data:,">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -426,92 +426,6 @@
               <label class="toggle-control">
                 <span>Extra lights</span>
                 <input id="useIcosaFaceLights" type="checkbox">
-              </label>
-            </section>
-
-            <section class="control-group" aria-labelledby="environmentControls">
-              <h2 id="environmentControls">Environment</h2>
-
-              <label class="toggle-control">
-                <span>Environment</span>
-                <input id="environmentEnabled" type="checkbox">
-              </label>
-              <label class="control-row">
-                <span class="control-copy">
-                  <strong>Sky drift</strong>
-                  <span class="help-tip" tabindex="0" aria-label="Animation speed for the procedural storm sky.">?<span role="tooltip">Animation speed for the procedural storm sky.</span></span>
-                </span>
-                <input id="backdropAnimationSpeed" type="range" min="0" max="1" step="0.01" value="0.12" data-scale="100" data-suffix="%" data-digits="0">
-                <output for="backdropAnimationSpeed"></output>
-              </label>
-              <label class="control-row">
-                <span class="control-copy">
-                  <strong>Mirror tint</strong>
-                  <span class="help-tip" tabindex="0" aria-label="Color blended into the Reflector lake tint.">?<span role="tooltip">Color blended into the Reflector lake tint.</span></span>
-                </span>
-                <input id="mirrorTint" type="color" value="#7f7f7f">
-                <output for="mirrorTint"></output>
-              </label>
-              <label class="control-row">
-                <span class="control-copy">
-                  <strong>Tint strength</strong>
-                  <span class="help-tip" tabindex="0" aria-label="Blend amount from neutral mirror response to the selected lake tint.">?<span role="tooltip">Blend amount from neutral mirror response to the selected lake tint.</span></span>
-                </span>
-                <input id="mirrorTintStrength" type="range" min="0" max="1" step="0.01" value="0" data-scale="100" data-suffix="%" data-digits="0">
-                <output for="mirrorTintStrength"></output>
-              </label>
-              <label class="toggle-control">
-                <span>Mirror lake</span>
-                <input id="showLakeMirror" type="checkbox" checked>
-              </label>
-            </section>
-
-            <section class="control-group" aria-labelledby="glassControls">
-              <h2 id="glassControls">Glass</h2>
-
-              <label class="toggle-control">
-                <span>Glass shading</span>
-                <input id="glassEnabled" type="checkbox">
-              </label>
-              <label class="control-row">
-                <span class="control-copy">
-                  <strong>Glass</strong>
-                  <span class="help-tip" tabindex="0" aria-label="Blend from legacy slime-only shading to environment glass under the slime.">?<span role="tooltip">Blend from legacy slime-only shading to environment glass under the slime.</span></span>
-                </span>
-                <input id="glassStrength" type="range" min="0" max="1" step="0.01" value="1" data-scale="100" data-suffix="%" data-digits="0">
-                <output for="glassStrength"></output>
-              </label>
-              <label class="control-row">
-                <span class="control-copy">
-                  <strong>Glass bend</strong>
-                  <span class="help-tip" tabindex="0" aria-label="Static normal-dependent bend for the environment sample.">?<span role="tooltip">Static normal-dependent bend for the environment sample.</span></span>
-                </span>
-                <input id="glassBend" type="range" min="0" max="1.5" step="0.01" value="0.55" data-digits="2">
-                <output for="glassBend"></output>
-              </label>
-              <label class="control-row">
-                <span class="control-copy">
-                  <strong>Glass split</strong>
-                  <span class="help-tip" tabindex="0" aria-label="Chromatic separation for bent glass samples.">?<span role="tooltip">Chromatic separation for bent glass samples.</span></span>
-                </span>
-                <input id="glassAberration" type="range" min="0" max="1" step="0.01" value="0.18" data-scale="100" data-suffix="%" data-digits="0">
-                <output for="glassAberration"></output>
-              </label>
-              <label class="control-row">
-                <span class="control-copy">
-                  <strong>Glass rim</strong>
-                  <span class="help-tip" tabindex="0" aria-label="Fresnel edge strength for glass tint and highlights.">?<span role="tooltip">Fresnel edge strength for glass tint and highlights.</span></span>
-                </span>
-                <input id="glassFresnelStrength" type="range" min="0" max="1.5" step="0.01" value="0.7" data-digits="2">
-                <output for="glassFresnelStrength"></output>
-              </label>
-              <label class="control-row">
-                <span class="control-copy">
-                  <strong>Glass tint</strong>
-                  <span class="help-tip" tabindex="0" aria-label="Rim tint used only when glass rim strength is above zero.">?<span role="tooltip">Rim tint used only when glass rim strength is above zero.</span></span>
-                </span>
-                <input id="glassTint" type="color" value="#b8ecff">
-                <output for="glassTint"></output>
               </label>
             </section>
 

@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { Reflector } from 'three/addons/objects/Reflector.js';
 import { MeshBVH, acceleratedRaycast } from 'three-mesh-bvh';
 
 const appEl = document.getElementById('app');
@@ -64,6 +63,14 @@ function setStylePropIfChanged(el, prop, value) {
   if (prop.startsWith('--')) el.style.setProperty(prop, value);
   else el.style[prop] = value;
 }
+
+// Phone-class devices get a reduced profile: lower pixel ratio and the 'fast'
+// performance mode. Detection is capability-based (coarse pointer + small
+// screen) rather than UA sniffing.
+const IS_MOBILE_DEVICE =
+  (window.matchMedia?.('(pointer: coarse)')?.matches ?? false) &&
+  Math.min(window.screen?.width ?? Infinity, window.screen?.height ?? Infinity) <= 820;
+const MAX_PIXEL_RATIO = IS_MOBILE_DEVICE ? 1.5 : 2;
 
 const FIELD_SIZE = 1024;
 const AGENT_SIDE = 512;
@@ -192,15 +199,7 @@ const STATS_READBACK_MAX_DT = 2.15;
 const STATS_READBACK_MAX_STALE_MS = 3200;
 const AGENT_HISTORY_SAMPLE_LIMIT = 180;
 const SLIME_COVERAGE_THRESHOLD = 0.006;
-const SKY_EQUIRECT_WIDTH = 1024;
-const SKY_EQUIRECT_HEIGHT = 512;
-const SKY_CUBE_SIZE = 512;
-const SKY_UPDATE_FPS = 12;
-const SKY_UPDATE_INTERVAL_MS = 1000 / SKY_UPDATE_FPS;
-const MIRROR_REFLECTION_SCALE = 0.5;
-const MIRROR_Y_EPSILON = 0.015 * WORLD_LINEAR_SCALE;
-const LAKE_CAMERA_FAR = 300 * WORLD_LINEAR_SCALE;
-const LAKE_MIRROR_SIZE = LAKE_CAMERA_FAR * 2.5;
+const CAMERA_FAR = 300 * WORLD_LINEAR_SCALE;
 const FRAME_DT_CLAMP = 2.2;
 const MAX_SIMULATION_STEPS = 8;
 const SEAM_REDIRECT_HALO_TEXELS = 1;
@@ -405,16 +404,6 @@ const BASE_RENDER_DISPLAY_PARAMS = Object.freeze({
   goldBodyColor: '#8a889e',
   lightBrightness: 1,
   useIcosaFaceLights: false,
-  environmentEnabled: false,
-  backdropAnimationSpeed: 0.12,
-  glassEnabled: false,
-  glassStrength: 1,
-  glassBend: 0.55,
-  glassAberration: 0.18,
-  glassFresnelStrength: 0.7,
-  glassTint: '#b8ecff',
-  mirrorTint: '#7f7f7f',
-  mirrorTintStrength: 0,
   spatialSmoothing: 1,
   temporalSmoothing: 1,
   observationTailLength: 0.15,
@@ -427,7 +416,6 @@ const BASE_RENDER_DISPLAY_PARAMS = Object.freeze({
   observationSlimeTriggerThreshold: 0.05,
   storyBoxesEnabled: true,
   showWireframe: false,
-  showLakeMirror: true,
 });
 
 function makeRenderDisplayPreset(id, label, note, overrides = {}) {
@@ -1043,8 +1031,7 @@ const renderer = new THREE.WebGLRenderer({
   preserveDrawingBuffer: false,
   powerPreference: 'high-performance',
 });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-// Keep the custom sky, glass shader, and Reflector background in one linear output path.
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO));
 renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
 renderer.autoClear = false;
 
@@ -1052,6 +1039,13 @@ if (!renderer.capabilities.isWebGL2) {
   fail('WebGL2 is required.');
   throw new Error('WebGL2 is required.');
 }
+
+// Mobile Safari drops WebGL contexts under memory pressure; without a handler
+// the page just freezes on the last frame.
+canvas.addEventListener('webglcontextlost', (event) => {
+  event.preventDefault();
+  fail('The graphics context was lost (usually memory pressure). Reload the page to continue.');
+});
 
 const colorBufferFloat = renderer.extensions.get('EXT_color_buffer_float');
 const floatBlend = renderer.extensions.get('EXT_float_blend');
@@ -1064,48 +1058,18 @@ if (!colorBufferFloat || !floatBlend) {
 
 const fieldFilter = linearFloat ? THREE.LinearFilter : THREE.NearestFilter;
 
-const skyEquirectRT = new THREE.WebGLRenderTarget(SKY_EQUIRECT_WIDTH, SKY_EQUIRECT_HEIGHT, {
-  depthBuffer: false,
-  stencilBuffer: false,
-  minFilter: THREE.LinearFilter,
-  magFilter: THREE.LinearFilter,
-  format: THREE.RGBAFormat,
-  type: colorBufferFloat ? THREE.HalfFloatType : THREE.UnsignedByteType,
-});
-skyEquirectRT.texture.generateMipmaps = false;
-skyEquirectRT.texture.colorSpace = THREE.NoColorSpace;
-skyEquirectRT.texture.mapping = THREE.EquirectangularReflectionMapping;
-skyEquirectRT.texture.wrapS = THREE.RepeatWrapping;
-skyEquirectRT.texture.wrapT = THREE.ClampToEdgeWrapping;
-skyEquirectRT.texture.name = 'storm-sky-equirect';
-
-const skyCubeRT = new THREE.WebGLCubeRenderTarget(SKY_CUBE_SIZE, {
-  depthBuffer: false,
-  stencilBuffer: false,
-  minFilter: THREE.LinearFilter,
-  magFilter: THREE.LinearFilter,
-  format: THREE.RGBAFormat,
-  type: colorBufferFloat ? THREE.HalfFloatType : THREE.UnsignedByteType,
-  generateMipmaps: false,
-  colorSpace: THREE.NoColorSpace,
-});
-skyCubeRT.texture.generateMipmaps = false;
-skyCubeRT.texture.colorSpace = THREE.NoColorSpace;
-skyCubeRT.texture.mapping = THREE.CubeReflectionMapping;
-skyCubeRT.texture.name = 'storm-sky-cube';
 
 // === scene / camera / controls / lights ===
 const scene = new THREE.Scene();
-const flatEnvironmentBackgroundColor = new THREE.Color(0.004, 0.006, 0.005);
-scene.background = skyCubeRT.texture;
+scene.background = new THREE.Color(0.004, 0.006, 0.005);
 
 const camera = new THREE.PerspectiveCamera(
   THREE.MathUtils.radToDeg(SURFACE_FOV),
   canvas.clientWidth / Math.max(canvas.clientHeight, 1),
   0.04,
-  LAKE_CAMERA_FAR,
+  CAMERA_FAR,
 );
-camera.far = LAKE_CAMERA_FAR;
+camera.far = CAMERA_FAR;
 camera.updateProjectionMatrix();
 
 // Default intro view.
@@ -1588,94 +1552,6 @@ function runFullscreenPass(material, target) {
   renderer.render(quadScene, quadCamera);
 }
 
-function getMirrorRenderTargetSize() {
-  return {
-    width: Math.max(1, Math.floor(canvas.width * MIRROR_REFLECTION_SCALE)),
-    height: Math.max(1, Math.floor(canvas.height * MIRROR_REFLECTION_SCALE)),
-  };
-}
-
-function resizeReflectorTarget() {
-  if (!lakeMirror?.isReflector) return;
-  const rt = lakeMirror.getRenderTarget?.() ?? lakeMirror.renderTarget ?? lakeMirror.userData?.renderTarget;
-  if (!rt) return;
-  const { width, height } = getMirrorRenderTargetSize();
-  if (rt.width !== width || rt.height !== height) rt.setSize(width, height);
-}
-
-function isEnvironmentEnabled() {
-  return params.environmentEnabled !== false;
-}
-
-function isGlassEnabled() {
-  return params.glassEnabled !== false && isEnvironmentEnabled();
-}
-
-function syncLakeMirrorVisibility() {
-  if (lakeMirror) lakeMirror.visible = isEnvironmentEnabled() && !!params.showLakeMirror;
-}
-
-const MIRROR_NEUTRAL_COLOR = new THREE.Color(0x7f7f7f);
-const mirrorTintTargetColor = new THREE.Color();
-const mirrorTintResolvedColor = new THREE.Color();
-
-function getLakeMirrorTintColor() {
-  const strength = THREE.MathUtils.clamp(Number(params.mirrorTintStrength ?? 0), 0, 1);
-  mirrorTintTargetColor.set(params.mirrorTint ?? '#7f7f7f');
-  return mirrorTintResolvedColor.copy(MIRROR_NEUTRAL_COLOR).lerp(mirrorTintTargetColor, strength);
-}
-
-function syncLakeMirrorTint() {
-  if (!lakeMirror?.material?.uniforms?.color?.value) return;
-  lakeMirror.material.uniforms.color.value.copy(getLakeMirrorTintColor());
-}
-
-function syncGlassMaterialMode() {
-  markGoldWaferBodyModeDirty({ uniforms: true });
-  syncGoldWaferBodyMode();
-  if (!slimeMaterial) return;
-  const enabled = isGlassEnabled();
-  const value = enabled ? 1 : 0;
-  if (slimeMaterial.defines?.GLASS_ENABLED === value) return;
-  slimeMaterial.defines = { ...(slimeMaterial.defines ?? {}), GLASS_ENABLED: value };
-  slimeMaterial.needsUpdate = true;
-}
-
-function syncEnvironmentEnabled({ forceSky = false } = {}) {
-  if (isEnvironmentEnabled()) {
-    scene.background = skyCubeRT.texture;
-    if (forceSky) updateStormSkyTexture(performance.now(), { force: true });
-  } else {
-    scene.background = flatEnvironmentBackgroundColor;
-  }
-  syncLakeMirrorVisibility();
-  syncGlassMaterialMode();
-}
-
-function createLakeMirror(bounds) {
-  if (!bounds) return null;
-  const lakeY = bounds.min.y - MIRROR_Y_EPSILON;
-  const { width, height } = getMirrorRenderTargetSize();
-  const geometry = new THREE.PlaneGeometry(LAKE_MIRROR_SIZE, LAKE_MIRROR_SIZE);
-  lakeMirror = new Reflector(geometry, {
-    clipBias: 0.003,
-    textureWidth: width,
-    textureHeight: height,
-    color: getLakeMirrorTintColor(),
-    multisample: 0,
-  });
-  lakeMirror.name = 'reflector-lake';
-  lakeMirror.rotation.x = -Math.PI * 0.5;
-  lakeMirror.position.set(controls.target.x, lakeY, controls.target.z);
-  lakeMirror.frustumCulled = false;
-  lakeMirror.renderOrder = -900;
-  scene.add(lakeMirror);
-  syncLakeMirrorVisibility();
-  syncLakeMirrorTint();
-  resizeReflectorTarget();
-  return lakeMirror;
-}
-
 // === RT pairs ===
 function makeCanonicalFieldRT() {
   return new THREE.WebGLRenderTarget(FIELD_SIZE, FIELD_SIZE, {
@@ -1979,124 +1855,6 @@ out vec2 v_uv;
 void main() {
   v_uv = position * 0.5 + 0.5;
   gl_Position = vec4(position, 0.0, 1.0);
-}
-`;
-
-const stormSkyGlsl = `
-const float PI = 3.141592653589793;
-float hash31(vec3 p) {
-  p = fract(p * 0.1031);
-  p += dot(p, p.yzx + 33.33);
-  return fract((p.x + p.y) * p.z);
-}
-float noise3(vec3 p) {
-  vec3 i = floor(p);
-  vec3 f = fract(p);
-  f = f * f * (3.0 - 2.0 * f);
-  float n000 = hash31(i + vec3(0.0, 0.0, 0.0));
-  float n100 = hash31(i + vec3(1.0, 0.0, 0.0));
-  float n010 = hash31(i + vec3(0.0, 1.0, 0.0));
-  float n110 = hash31(i + vec3(1.0, 1.0, 0.0));
-  float n001 = hash31(i + vec3(0.0, 0.0, 1.0));
-  float n101 = hash31(i + vec3(1.0, 0.0, 1.0));
-  float n011 = hash31(i + vec3(0.0, 1.0, 1.0));
-  float n111 = hash31(i + vec3(1.0, 1.0, 1.0));
-  float nx00 = mix(n000, n100, f.x);
-  float nx10 = mix(n010, n110, f.x);
-  float nx01 = mix(n001, n101, f.x);
-  float nx11 = mix(n011, n111, f.x);
-  float nxy0 = mix(nx00, nx10, f.y);
-  float nxy1 = mix(nx01, nx11, f.y);
-  return mix(nxy0, nxy1, f.z);
-}
-float fbm3(vec3 p) {
-  float sum = 0.0;
-  float amp = 0.5;
-  mat3 rot = mat3(
-    0.00, 0.80, 0.60,
-    -0.80, 0.36, -0.48,
-    -0.60, -0.48, 0.64
-  );
-  for (int i = 0; i < 5; i++) {
-    sum += noise3(p) * amp;
-    p = rot * p * 2.03 + vec3(13.7, 4.2, 9.1);
-    amp *= 0.52;
-  }
-  return sum;
-}
-float ridged3(vec3 p) {
-  float sum = 0.0;
-  float amp = 0.58;
-  float norm = 0.0;
-  for (int i = 0; i < 5; i++) {
-    float n = 1.0 - abs(noise3(p) * 2.0 - 1.0);
-    n *= n;
-    sum += n * amp;
-    norm += amp;
-    p = p * 2.11 + vec3(5.4, 11.7, 2.9);
-    amp *= 0.48;
-  }
-  return sum / max(norm, 1e-4);
-}
-vec3 sampleStormEnvironment(vec3 dir, float time) {
-  dir = normalize(dir);
-  dir.y = abs(dir.y);
-  float y = clamp(dir.y, 0.0, 1.0);
-
-  vec3 wind = vec3(time * 0.035, time * 0.006, -time * 0.024);
-  vec3 p = dir * 3.2 + wind;
-  float broad = fbm3(p * 0.85 + vec3(0.0, 1.7, 0.0));
-  float curls = ridged3(p * 2.15 + broad * 1.35);
-  vec3 anvilDomain = vec3(
-    dot(dir, normalize(vec3(0.72, 0.10, -0.69))),
-    dot(dir, normalize(vec3(-0.28, 0.62, 0.73))),
-    y * 1.7
-  );
-  float anvils = fbm3(anvilDomain * 2.35 + dir.yzx * 0.9 + wind.zyx * 0.65);
-  float cloud = smoothstep(0.18, 0.92, broad * 0.72 + curls * 0.46 + anvils * 0.28);
-  float highCloud = smoothstep(0.48, 0.96, curls + y * 0.22);
-  float horizon = pow(1.0 - y, 2.0);
-  float zenith = pow(y, 0.72);
-
-  vec3 horizonColor = vec3(0.36, 0.43, 0.45);
-  vec3 upperColor = vec3(0.105, 0.145, 0.18);
-  vec3 stormCore = vec3(0.045, 0.058, 0.072);
-  vec3 silver = vec3(0.58, 0.66, 0.68);
-
-  vec3 color = mix(horizonColor, upperColor, zenith);
-  color = mix(color, stormCore, cloud * (0.64 + y * 0.26));
-  color += silver * highCloud * (0.12 + horizon * 0.08);
-  color += vec3(0.10, 0.14, 0.16) * horizon * (1.0 - cloud * 0.55);
-  color += vec3(0.18, 0.24, 0.27) * pow(max(0.0, dot(dir, normalize(vec3(-0.45, 0.28, 0.82)))), 24.0) * 0.35;
-  return max(color, vec3(0.018, 0.022, 0.028));
-}
-`;
-
-const stormSkyFragment = `#version 300 es
-precision highp float;
-in vec2 v_uv;
-out vec4 outColor;
-uniform float uTime;
-uniform float uRotationAngle;
-uniform vec3 uRotationAxis;
-${stormSkyGlsl}
-vec3 rotateAroundAxis(vec3 v, vec3 axis, float angle) {
-  axis = normalize(axis);
-  float s = sin(angle);
-  float c = cos(angle);
-  return v * c + cross(axis, v) * s + axis * dot(axis, v) * (1.0 - c);
-}
-void main() {
-  float phi = v_uv.x * 2.0 * PI - PI;
-  float latitude = (v_uv.y - 0.5) * PI;
-  vec3 dir = normalize(vec3(
-    cos(latitude) * cos(phi),
-    sin(latitude),
-    cos(latitude) * sin(phi)
-  ));
-  vec3 sampleDir = normalize(rotateAroundAxis(dir, normalize(uRotationAxis), uRotationAngle));
-  vec3 color = sampleStormEnvironment(sampleDir, 0.0);
-  outColor = vec4(color, 1.0);
 }
 `;
 
@@ -3807,13 +3565,6 @@ out vec4 outColor;
 uniform sampler2D u_food;
 uniform sampler2D u_agentDensity;
 uniform sampler2D u_agentDensityOverlay;
-#if GLASS_ENABLED
-uniform samplerCube u_skyCube;
-uniform mat3 u_skyRotation;
-uniform vec2 u_resolution;
-uniform vec2 u_glassLensCenter;
-uniform float u_time;
-#endif
 uniform vec2 u_texel;
 uniform float u_heightScale;
 uniform float u_bumpStrength;
@@ -3834,13 +3585,6 @@ uniform int u_lightCount;
 uniform float u_lightRadianceScale;
 uniform vec3 u_cameraPos;
 uniform vec3 u_baseColor;
-#if GLASS_ENABLED
-uniform float u_glassStrength;
-uniform float u_glassBend;
-uniform float u_glassAberration;
-uniform float u_glassFresnelStrength;
-uniform vec3 u_glassTint;
-#endif
 uniform int u_meshOutlineEnabled;
 uniform int u_showAgentDots;
 uniform int u_bumpDiagonalTapsEnabled;
@@ -4030,40 +3774,6 @@ vec3 goldWaferFilmColor(float nDotV, float thicknessNm) {
   }
   return clamp(r, 0.0, 1.0);
 }
-#if GLASS_ENABLED
-vec3 sampleSky(vec3 dir) {
-  return texture(u_skyCube, u_skyRotation * normalize(dir)).rgb;
-}
-vec3 computeGlassBase(vec3 worldNormal, vec3 viewDir) {
-  vec3 N = normalize(worldNormal);
-  vec3 V = normalize(viewDir);
-
-  float fresnel = pow(1.0 - abs(dot(N, V)), 1.8);
-  float fresnelStrength = clamp(u_glassFresnelStrength, 0.0, 1.5);
-
-  vec3 baseDir = normalize(v_worldPos - u_cameraPos);
-  vec3 bendDir = normalize(baseDir + N * u_glassBend * (0.10 + fresnel * 0.20));
-
-  vec3 clean = sampleSky(bendDir);
-
-  float aberration = clamp(u_glassAberration, 0.0, 1.0) * abs(u_glassBend);
-  vec3 aberrated = vec3(
-    sampleSky(normalize(baseDir + N * u_glassBend * 0.115)).r,
-    sampleSky(normalize(baseDir + N * u_glassBend * 0.100)).g,
-    sampleSky(normalize(baseDir + N * u_glassBend * 0.085)).b
-  );
-
-  vec3 glassColor = mix(clean, aberrated, aberration);
-  vec3 tint = clamp(u_glassTint, 0.0, 1.0);
-
-  float edgeTintAmount = clamp(fresnel * fresnelStrength, 0.0, 1.0);
-  glassColor = mix(glassColor, glassColor * tint, edgeTintAmount * 0.22);
-  glassColor += tint * fresnel * fresnelStrength * 0.2;
-  glassColor += vec3(0.72, 0.86, 1.0) * fresnel * fresnelStrength * 0.075;
-
-  return max(glassColor, vec3(0.0));
-}
-#endif
 void main() {
   bool baseSafe = isAuthoritativeChartTexel(v_uv);
   float food = baseSafe ? max(texture(u_food, v_uv).r, 0.0) : 0.0;
@@ -4194,27 +3904,7 @@ void main() {
   vec3 slimeColor = color;
   vec3 legacySlimeOnly = pow(max(slimeColor, vec3(0.0)), vec3(0.78));
 
-#if GLASS_ENABLED
-  vec3 glassBase = computeGlassBase(N0, viewDir);
-  float slimeAlpha = slimeLayerAlpha;
-
-  vec3 slimeOverGlass = glassBase * (1.0 - 0.22 * slimeAlpha) + slimeColor;
-  vec3 composedRaw = mix(glassBase, slimeOverGlass, slimeAlpha);
-
-  vec3 composedDisplay = mix(
-    composedRaw,
-    pow(max(composedRaw, vec3(0.0)), vec3(0.78)),
-    slimeAlpha
-  );
-
-  vec3 finalColor = mix(
-    legacySlimeOnly,
-    composedDisplay,
-    clamp(u_glassStrength, 0.0, 1.0)
-  );
-#else
   vec3 finalColor = legacySlimeOnly;
-#endif
 
   if (u_useGoldWaferBodyUnderlay == 1) {
     outColor = vec4(max(finalColor, vec3(0.0)), slimeLayerAlpha);
@@ -4242,21 +3932,11 @@ function stripGlslVersion(shader) {
   return shader.replace(/^\s*#version\s+300\s+es\s*/, '');
 }
 
-const SKY_ROTATION_AXIS = new THREE.Vector3(0.38, 0.76, -0.53).normalize();
-const stormSkyMaterial = makeRawShaderMaterial(stormSkyFragment, {
-  uTime: { value: 0 },
-  uRotationAngle: { value: 0 },
-  uRotationAxis: { value: SKY_ROTATION_AXIS.clone() },
-});
 goldWaferBodyIcoEnvMaterial = makeRawShaderMaterial(goldWaferBodyIcoEnvFragment, {
   u_lightDirections: { value: icosahedronLightPositions.map((position) => position.clone().normalize()) },
   u_lightCount: { value: getActiveIcosaLightCount() },
   u_lightRadianceScale: { value: getActiveIcosaLightRadianceScale() },
 });
-let skyTextureRendered = false;
-let lastSkyTextureUpdateMs = -Infinity;
-let skyRotationAngle = 0;
-let lastSkyRotationUpdateMs = performance.now();
 
 function ensureGoldWaferBodyEnvironmentMap() {
   if (goldWaferBodyIcoEnvPmrem) return goldWaferBodyIcoEnvPmrem.texture;
@@ -4287,62 +3967,6 @@ function ensureGoldWaferBodyEnvironmentMap() {
   pmremGenerator.dispose();
   return goldWaferBodyIcoEnvPmrem.texture;
 }
-
-function updateSkyAnimation(nowMs = performance.now()) {
-  const speed = Math.max(0, Number(params.backdropAnimationSpeed ?? 0));
-  const dtSeconds = Math.max(0, Math.min((nowMs - lastSkyRotationUpdateMs) * 0.001, 0.25));
-  lastSkyRotationUpdateMs = nowMs;
-
-  if (speed > 0 && dtSeconds > 0) {
-    const radiansPerSecondAtFullSpeed = 0.18;
-    skyRotationAngle = THREE.MathUtils.euclideanModulo(
-      skyRotationAngle + dtSeconds * speed * radiansPerSecondAtFullSpeed,
-      Math.PI * 2,
-    );
-  }
-
-  return skyRotationAngle;
-}
-
-// The sky texture itself is static (uTime is pinned to 0); the "animation" is a
-// rigid rotation of the whole environment. Bake the equirect + cubemap once at
-// angle 0 and rotate at sample time (scene.backgroundRotation for the backdrop,
-// u_skyRotation for the glass reflections) instead of re-rendering both targets
-// on an interval.
-const skyRotationQuaternion = new THREE.Quaternion();
-const skyRotationMatrix4 = new THREE.Matrix4();
-const skySampleRotationMatrix = new THREE.Matrix3();
-
-function applySkyRotation() {
-  // three negates the background Euler before building the cube-sample matrix,
-  // so -angle here yields a sample-domain rotation of R(angle) — the same
-  // convention the equirect bake used (rotateAroundAxis of the sample dir).
-  skyRotationQuaternion.setFromAxisAngle(SKY_ROTATION_AXIS, -skyRotationAngle);
-  scene.backgroundRotation.setFromQuaternion(skyRotationQuaternion);
-  skyRotationQuaternion.setFromAxisAngle(SKY_ROTATION_AXIS, skyRotationAngle);
-  skyRotationMatrix4.makeRotationFromQuaternion(skyRotationQuaternion);
-  skySampleRotationMatrix.setFromMatrix4(skyRotationMatrix4);
-}
-
-function updateStormSkyTexture(nowMs = performance.now(), { force = false } = {}) {
-  if (!isEnvironmentEnabled()) return false;
-  updateSkyAnimation(nowMs);
-  applySkyRotation();
-  if (!force && skyTextureRendered) return false;
-
-  const previousTarget = renderer.getRenderTarget();
-  stormSkyMaterial.uniforms.uTime.value = 0;
-  stormSkyMaterial.uniforms.uRotationAngle.value = 0;
-  stormSkyMaterial.uniforms.uRotationAxis.value.copy(SKY_ROTATION_AXIS);
-  runFullscreenPass(stormSkyMaterial, skyEquirectRT);
-  skyCubeRT.fromEquirectangularTexture(renderer, skyEquirectRT.texture);
-  scene.background = skyCubeRT.texture;
-  renderer.setRenderTarget(previousTarget);
-  skyTextureRendered = true;
-  lastSkyTextureUpdateMs = nowMs;
-  return true;
-}
-updateStormSkyTexture(performance.now(), { force: true });
 
 const oatMaterial = makeRawShaderMaterial(oatFragment, {
   u_oatCount: { value: 0 },
@@ -5180,7 +4804,7 @@ function syncGoldWaferBodyMaterialUniforms({ force = false } = {}) {
   goldWaferBodyUniforms.uGoldBodyRoughness.value = params.goldBodyRoughness;
   goldWaferBodyUniforms.uGoldBodyReflectivity.value = params.goldBodyReflectivity;
   goldWaferBodyUniforms.uGoldBodyColor.value.set(params.goldBodyColor);
-  goldWaferBodyUniforms.uGoldBodyDiscardUnvisited.value = isGlassEnabled() ? 1 : 0;
+  goldWaferBodyUniforms.uGoldBodyDiscardUnvisited.value = 0;
   if (goldWaferBodyMaterial) {
     goldWaferBodyMaterial.roughness = params.goldBodyRoughness;
     goldWaferBodyMaterial.reflectivity = params.goldBodyReflectivity;
@@ -5264,12 +4888,11 @@ function syncGoldWaferBodyMode() {
   }
   syncGoldWaferBodyMaterialUniforms();
   if (goldWaferBodyMaterial) {
-    const shouldBeTransparent = active && isGlassEnabled();
-    if (goldWaferBodyMaterial.transparent !== shouldBeTransparent) {
-      goldWaferBodyMaterial.transparent = shouldBeTransparent;
+    if (goldWaferBodyMaterial.transparent) {
+      goldWaferBodyMaterial.transparent = false;
       goldWaferBodyMaterial.needsUpdate = true;
     }
-    goldWaferBodyMaterial.depthWrite = !shouldBeTransparent;
+    goldWaferBodyMaterial.depthWrite = true;
   }
   if (goldWaferBodyMesh) {
     goldWaferBodyMesh.visible = active;
@@ -5399,14 +5022,11 @@ function buildSlimeMaterial() {
     fragmentShader: slimeFragment,
     side: THREE.DoubleSide,
     defines: {
-      GLASS_ENABLED: isGlassEnabled() ? 1 : 0,
     },
     uniforms: {
 	      u_food: { value: renderSampleViewRT.read.texture },
 	      u_agentDensity: { value: densityRT.texture },
 	      u_agentDensityOverlay: { value: agentDensityOverlayRT.texture },
-	      u_skyCube: { value: skyCubeRT.texture },
-      u_skyRotation: { value: new THREE.Matrix3() },
       u_seamRedirectUv: { value: seamRedirectUvRT.texture },
       u_seamRedirectMeta: { value: seamRedirectMetaRT.texture },
       u_seamRedirectClaim: { value: seamRedirectClaimRT.texture },
@@ -5418,9 +5038,6 @@ function buildSlimeMaterial() {
       u_chartId: { value: chartIdRT.texture },
       u_chartUnsafe: { value: chartUnsafeRT.texture },
       u_texel: { value: new THREE.Vector2(1 / FIELD_SIZE, 1 / FIELD_SIZE) },
-      u_resolution: { value: new THREE.Vector2(canvas.width, canvas.height) },
-      u_glassLensCenter: { value: new THREE.Vector2(0.5, 0.5) },
-      u_time: { value: 0 },
       u_heightScale: { value: params.surfaceHeight },
       u_bumpStrength: { value: params.surfaceBump },
       u_normalSampleRadius: { value: getNormalSampleRadiusTexels(params) },
@@ -5440,11 +5057,6 @@ function buildSlimeMaterial() {
       u_lightRadianceScale: { value: getActiveIcosaLightRadianceScale() },
       u_cameraPos: { value: new THREE.Vector3() },
       u_baseColor: { value: new THREE.Color(params.slimeBaseColor) },
-      u_glassStrength: { value: params.glassStrength },
-      u_glassBend: { value: params.glassBend },
-      u_glassAberration: { value: params.glassAberration },
-      u_glassFresnelStrength: { value: params.glassFresnelStrength },
-      u_glassTint: { value: new THREE.Color(params.glassTint) },
       u_meshOutlineEnabled: { value: params.meshOutlineEnabled ? 1 : 0 },
       u_showAgentDots: { value: 0 },
       u_bumpDiagonalTapsEnabled: { value: getBumpDiagonalTapsEnabled(params) ? 1 : 0 },
@@ -5457,32 +5069,13 @@ function buildSlimeMaterial() {
   });
 }
 
-function syncSlimeMaterialForCamera(renderCamera, skyEnvironmentTexture, resolutionVector, nowMs = performance.now()) {
+function syncSlimeMaterialForCamera(renderCamera) {
   if (!slimeMaterial) return;
   const u = slimeMaterial.uniforms;
-  const glassEnabled = isGlassEnabled();
   u.u_food.value = renderSampleViewRT.read.texture;
   u.u_agentDensity.value = densityRT.texture;
   u.u_agentDensityOverlay.value = agentDensityOverlayRT.texture;
   u.u_cameraPos.value.copy(renderCamera.position);
-  if (glassEnabled) {
-    u.u_skyCube.value = skyEnvironmentTexture;
-    u.u_skyRotation.value.copy(skySampleRotationMatrix);
-    u.u_resolution.value.copy(resolutionVector);
-    u.u_time.value = nowMs * 0.001;
-    glassLensCenterWorld.copy(controls.target).project(renderCamera);
-    if (
-      Number.isFinite(glassLensCenterWorld.x) &&
-      Number.isFinite(glassLensCenterWorld.y)
-    ) {
-      u.u_glassLensCenter.value.set(
-        glassLensCenterWorld.x * 0.5 + 0.5,
-        glassLensCenterWorld.y * 0.5 + 0.5,
-      );
-    } else {
-      u.u_glassLensCenter.value.set(0.5, 0.5);
-    }
-  }
   u.u_meshOutlineEnabled.value = params.meshOutlineEnabled ? 1 : 0;
   u.u_showAgentDots.value = params.showAgentDots ? 1 : 0;
   u.u_bumpDiagonalTapsEnabled.value = getBumpDiagonalTapsEnabled(params) ? 1 : 0;
@@ -5500,13 +5093,6 @@ function syncSlimeMaterialForCamera(renderCamera, skyEnvironmentTexture, resolut
   u.u_lightRadianceScale.value = getActiveIcosaLightRadianceScale(params);
   u.u_foodClamp.value = params.foodClamp;
   u.u_baseColor.value.set(params.slimeBaseColor);
-  if (glassEnabled) {
-    u.u_glassStrength.value = params.glassStrength;
-    u.u_glassBend.value = params.glassBend;
-    u.u_glassAberration.value = params.glassAberration;
-    u.u_glassFresnelStrength.value = params.glassFresnelStrength;
-    u.u_glassTint.value.set(params.glassTint);
-  }
   u.u_filmFollowsSlimeHeight.value = params.filmFollowsSlimeHeight ? 1 : 0;
 }
 
@@ -7714,15 +7300,14 @@ function updateOatAnnotations() {
 // === state ===
 let mesh = null;
 let wireframeOverlay = null;
-let lakeMirror = null;
-const materialRenderResolution = new THREE.Vector2();
-const glassLensCenterWorld = new THREE.Vector3();
-let agentReadback = new Float32Array(AGENT_CAPACITY * 4);
+// Large readback scratch buffers are allocated on first use: agent full-scan is
+// a rare fallback and slime coverage is a manual/console stat, so keeping them
+// eager would pin ~20MB of heap (painful on phones) for nothing.
+let agentReadback = null;
 const agentPrefixCountReadback = new Float32Array(4);
 let agentPrefixCountValid = false;
-let slimeCoverageReadback = new Float32Array(FIELD_SIZE * FIELD_SIZE * 4);
+let slimeCoverageReadback = null;
 let coverageMaskReadback = new Uint8Array(FIELD_SIZE * FIELD_SIZE * 4);
-let legacyCoverageMaskReadback = new Uint8Array(FIELD_SIZE * FIELD_SIZE * 4);
 const observationTriggerScoreReadback = new Float32Array(MAX_OATS * 4);
 const observationTriggerScoreReadbackByteLength =
   observationTriggerScoreReadback.length * Float32Array.BYTES_PER_ELEMENT;
@@ -14832,20 +14417,7 @@ async function onLoad(gltf) {
   scene.add(goldWaferBodyMesh);
   mesh.onBeforeRender = function onCuttlefishBeforeRender(renderer, scene, renderCamera) {
     if (!mesh || mesh.material !== slimeMaterial) return;
-
-    const currentTarget = renderer.getRenderTarget();
-    if (currentTarget) {
-      materialRenderResolution.set(currentTarget.width, currentTarget.height);
-    } else {
-      renderer.getDrawingBufferSize(materialRenderResolution);
-    }
-
-    syncSlimeMaterialForCamera(
-      renderCamera,
-      skyCubeRT.texture,
-      materialRenderResolution,
-      performance.now(),
-    );
+    syncSlimeMaterialForCamera(renderCamera);
   };
   markGoldWaferBodyModeDirty({ uniforms: true });
   syncGoldWaferBodyMode();
@@ -14930,7 +14502,6 @@ async function onLoad(gltf) {
     },
   });
 
-  createLakeMirror(geom.boundingBox);
   setStartScreenLoadingProgress(98, 'starting');
 
   // Status reflects renderer + slot count, with "loading cuttlefish..." dropped.
@@ -14975,8 +14546,6 @@ async function onLoad(gltf) {
       soundCompressorState,
       soundCheckClips: SOUND_CHECK_CLIPS,
     },
-    skyEquirectRT,
-    skyCubeRT,
     getCameraPose,
     getCameraPoseCommand,
     setCameraPose,
@@ -15043,7 +14612,6 @@ async function onLoad(gltf) {
       now: performance.now(),
     }),
     mesh,
-    lakeMirror,
     syncSlimeMaterialForCamera,
     params,
     agentRT,
@@ -15219,18 +14787,19 @@ function buildUvMask(targetMesh) {
   renderer.clear(true, false, false);
   renderer.render(maskScene, quadCamera);
   renderer.setRenderTarget(null);
+  const legacyCoverageMask = new Uint8Array(FIELD_SIZE * FIELD_SIZE * 4);
   renderer.readRenderTargetPixels(
     legacyUvIslandMaskRT,
     0,
     0,
     FIELD_SIZE,
     FIELD_SIZE,
-    legacyCoverageMaskReadback,
+    legacyCoverageMask,
   );
 
   const { pixels, diagnostics } = buildConservativeSurfaceCoverageData(
     targetMesh,
-    legacyCoverageMaskReadback,
+    legacyCoverageMask,
   );
   const coverageTexture = makeDataTexture(pixels, THREE.UnsignedByteType);
   uploadDataTextureToRT(coverageTexture, surfaceCoverageRT);
@@ -17145,12 +16714,6 @@ function initControls() {
     goldBodyRoughness: 'goldBodyRoughness',
     goldBodyReflectivity: 'goldBodyReflectivity',
     lightBrightness: 'lightBrightness',
-    backdropAnimationSpeed: 'backdropAnimationSpeed',
-    glassStrength: 'glassStrength',
-    glassBend: 'glassBend',
-    glassAberration: 'glassAberration',
-    glassFresnelStrength: 'glassFresnelStrength',
-    mirrorTintStrength: 'mirrorTintStrength',
     observationTailLength: 'observationTailLength',
     observationStrokeOpacity: 'observationStrokeOpacity',
     observationCornerRadius: 'observationCornerRadius',
@@ -17194,9 +16757,6 @@ function initControls() {
         key === 'observationTintOpacity'
       ) {
         syncObservationCssVars();
-      }
-      if (key === 'mirrorTintStrength') {
-        syncLakeMirrorTint();
       }
       if (
         key === 'foodClamp' ||
@@ -17321,37 +16881,6 @@ function initControls() {
   boundParamControls.set('observationTintColor', syncTintColorFromParams);
   syncTintColorFromParams();
 
-  const glassTintInput = document.getElementById('glassTint');
-  const glassTintOutput = glassTintInput.parentElement.querySelector('output');
-  const syncGlassTint = ({ markCustom = true } = {}) => {
-    params.glassTint = glassTintInput.value;
-    glassTintOutput.value = glassTintInput.value.toUpperCase();
-    if (markCustom) setActiveRenderDisplayPreset('custom');
-  };
-  const syncGlassTintFromParams = () => {
-    glassTintInput.value = params.glassTint;
-    syncGlassTint({ markCustom: false });
-  };
-  glassTintInput.addEventListener('input', () => syncGlassTint());
-  boundParamControls.set('glassTint', syncGlassTintFromParams);
-  syncGlassTintFromParams();
-
-  const mirrorTintInput = document.getElementById('mirrorTint');
-  const mirrorTintOutput = mirrorTintInput.parentElement.querySelector('output');
-  const syncMirrorTint = ({ markCustom = true } = {}) => {
-    params.mirrorTint = mirrorTintInput.value;
-    mirrorTintOutput.value = mirrorTintInput.value.toUpperCase();
-    syncLakeMirrorTint();
-    if (markCustom) setActiveRenderDisplayPreset('custom');
-  };
-  const syncMirrorTintFromParams = () => {
-    mirrorTintInput.value = params.mirrorTint;
-    syncMirrorTint({ markCustom: false });
-  };
-  mirrorTintInput.addEventListener('input', () => syncMirrorTint());
-  boundParamControls.set('mirrorTint', syncMirrorTintFromParams);
-  syncMirrorTintFromParams();
-
   for (const tip of document.querySelectorAll('.help-tip')) {
     tip.addEventListener('pointerdown', (event) => {
       event.preventDefault();
@@ -17387,11 +16916,6 @@ function initControls() {
   bindToggle('showAgents', 'showAgentDots');
   bindToggle('showOats', 'showOats');
   bindToggle('meshOutline', 'meshOutlineEnabled');
-  bindToggle('environmentEnabled', 'environmentEnabled', {
-    onChange: () => syncEnvironmentEnabled({ forceSky: isEnvironmentEnabled() }),
-  });
-  bindToggle('glassEnabled', 'glassEnabled', { onChange: syncGlassMaterialMode });
-  bindToggle('showLakeMirror', 'showLakeMirror', { onChange: syncLakeMirrorVisibility });
   bindToggle('storyBoxesEnabled', 'storyBoxesEnabled', { onChange: syncStoryBoxesEnabled });
   bindToggle('endingTimeLimitEnabled', 'endingTimeLimitEnabled', {
     onChange: () => {
@@ -17556,6 +17080,13 @@ function initControls() {
 }
 initControls();
 
+if (IS_MOBILE_DEVICE) {
+  // Phone GPUs can't sustain the desktop profile: drop to the 'fast' smoothing
+  // mode. Users can still restore quality mode from the panels.
+  setPerformanceMode('fast');
+  syncBoundParamControls();
+}
+
 function ensureWireframeOverlay() {
   if (wireframeOverlay || !mesh?.geometry) return wireframeOverlay;
   wireframeOverlay = new THREE.LineSegments(
@@ -17647,7 +17178,6 @@ function frame(now) {
     if (mesh.visible !== slimeVisualVisible) mesh.visible = slimeVisualVisible;
     const activeWireframeOverlay = params.showWireframe ? ensureWireframeOverlay() : wireframeOverlay;
     if (activeWireframeOverlay) activeWireframeOverlay.visible = !!params.showWireframe;
-    syncLakeMirrorVisibility();
     oatGroup.visible = !!params.showOats;
     if (oatGroup.visible) updateOatGlowMarkers();
   }
@@ -17662,7 +17192,6 @@ function renderSceneOnce(now = performance.now(), { updateAnnotations = true } =
   controls.update();
   syncSlimeTumbleSpatialAudio();
   resizeIfNeeded();
-  updateStormSkyTexture(now);
   updateCameraPoseReadout();
   if (updateAnnotations) updateOatAnnotations();
 
@@ -18036,6 +17565,7 @@ function readAgentCountFromPrefix() {
 }
 
 function readAgentCountByFullScan() {
+  if (!agentReadback) agentReadback = new Float32Array(AGENT_CAPACITY * 4);
   renderer.readRenderTargetPixels(agentRT.read, 0, 0, AGENT_SIDE, AGENT_SIDE, agentReadback);
   let alive = 0;
   for (let i = 3; i < agentReadback.length; i += 4) {
@@ -18480,20 +18010,6 @@ function applyRuntimeParams(overrides = {}, options = {}) {
   if (Object.prototype.hasOwnProperty.call(overrides, 'debugView')) {
     markGoldWaferBodyModeDirty();
     syncGoldWaferBodyMode();
-  }
-  if (
-    Object.prototype.hasOwnProperty.call(overrides, 'mirrorTint') ||
-    Object.prototype.hasOwnProperty.call(overrides, 'mirrorTintStrength')
-  ) {
-    syncLakeMirrorTint();
-  }
-  if (Object.prototype.hasOwnProperty.call(overrides, 'environmentEnabled')) {
-    syncEnvironmentEnabled({ forceSky: isEnvironmentEnabled() });
-  } else if (Object.prototype.hasOwnProperty.call(overrides, 'glassEnabled')) {
-    syncGlassMaterialMode();
-  }
-  if (Object.prototype.hasOwnProperty.call(overrides, 'showLakeMirror')) {
-    syncLakeMirrorVisibility();
   }
   if (Object.prototype.hasOwnProperty.call(overrides, 'useIcosaFaceLights')) {
     syncIcosaLightRigUniforms();
@@ -19009,6 +18525,7 @@ function updateSlimeCoverageStat() {
     return 0;
   }
 
+  if (!slimeCoverageReadback) slimeCoverageReadback = new Float32Array(FIELD_SIZE * FIELD_SIZE * 4);
   renderer.readRenderTargetPixels(renderSampleViewRT.read, 0, 0, FIELD_SIZE, FIELD_SIZE, slimeCoverageReadback);
   let slimeTexels = 0;
   for (let i = 0; i < slimeCoverageReadback.length; i += 4) {
@@ -19032,7 +18549,7 @@ canvasResizeObserver?.observe(canvas);
 function resizeIfNeeded() {
   if (!canvasResizeDirty) return;
   canvasResizeDirty = false;
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const dpr = Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO);
   const width = Math.max(1, Math.floor(canvas.clientWidth * dpr));
   const height = Math.max(1, Math.floor(canvas.clientHeight * dpr));
   if (canvas.width !== width || canvas.height !== height) {
@@ -19040,7 +18557,6 @@ function resizeIfNeeded() {
     renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
     camera.aspect = canvas.clientWidth / Math.max(canvas.clientHeight, 1);
     camera.updateProjectionMatrix();
-    resizeReflectorTarget();
   }
 }
 
@@ -19054,7 +18570,6 @@ resizeIfNeeded();
 function waitFrame() {
   if (!started) {
     resizeIfNeeded();
-    updateStormSkyTexture(performance.now());
     renderer.setRenderTarget(null);
     renderer.setClearColor(0x000000, 1);
     renderer.clear(true, true, false);

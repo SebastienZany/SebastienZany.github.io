@@ -997,9 +997,9 @@ input[type="color"] {
 
 @media (max-width: 560px) {
   .panel {
-    top: 10px;
-    left: 10px;
-    width: calc(100vw - 20px);
+    top: max(10px, env(safe-area-inset-top));
+    left: max(10px, env(safe-area-inset-left));
+    width: calc(100vw - max(10px, env(safe-area-inset-left)) - max(10px, env(safe-area-inset-right)));
     padding: 12px;
   }
 
@@ -1013,10 +1013,10 @@ input[type="color"] {
   }
 
   .sound-check-panel {
-    top: 58px;
-    right: 10px;
-    width: calc(100vw - 20px);
-    max-height: calc(100vh - 68px);
+    top: calc(48px + max(10px, env(safe-area-inset-top)));
+    right: max(10px, env(safe-area-inset-right));
+    width: calc(100vw - max(10px, env(safe-area-inset-left)) - max(10px, env(safe-area-inset-right)));
+    max-height: calc(100vh - 68px - env(safe-area-inset-bottom));
     padding: 12px;
   }
 
