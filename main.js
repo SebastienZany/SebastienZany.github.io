@@ -66,18 +66,27 @@ function setStylePropIfChanged(el, prop, value) {
 
 // Phone-class devices get a reduced profile: lower pixel ratio and the 'fast'
 // performance mode. Detection is capability-based (coarse pointer + small
-// screen) rather than UA sniffing.
-const IS_MOBILE_DEVICE =
-  (window.matchMedia?.('(pointer: coarse)')?.matches ?? false) &&
-  Math.min(window.screen?.width ?? Infinity, window.screen?.height ?? Infinity) <= 820;
+// screen) rather than UA sniffing. ?mobile=1 / ?mobile=0 forces the profile
+// on or off so the phone configuration can be exercised from a desktop
+// browser.
+const MOBILE_PROFILE_OVERRIDE = new URLSearchParams(window.location.search).get('mobile');
+const IS_MOBILE_DEVICE = MOBILE_PROFILE_OVERRIDE !== null
+  ? MOBILE_PROFILE_OVERRIDE !== '0'
+  : (window.matchMedia?.('(pointer: coarse)')?.matches ?? false) &&
+    Math.min(window.screen?.width ?? Infinity, window.screen?.height ?? Infinity) <= 820;
 const MAX_PIXEL_RATIO = IS_MOBILE_DEVICE ? 1.5 : 2;
 
-// Same simulation resolution on desktop and mobile. The ?field= override
-// exists for generating seam bakes at other sizes from a desktop browser
-// (see exportSeamBake).
+// Phones get a reduced simulation profile. The desktop profile allocates
+// ~1.4 GB of float render targets (field buffers plus the 4-lane seam
+// transition atlases), which is far past iOS Safari's per-tab GPU budget --
+// WebKit kills the tab during load and the page never gets past "loading...".
+// 768^2 field / 384^2 agents keeps the total near 360 MB. The ?field=
+// override exists for generating seam bakes at other sizes from a desktop
+// browser (see exportSeamBake); ship a matching seam-bake-<size>.bin for any
+// size phones can hit, or load stalls for minutes building seams live.
 const FIELD_SIZE_OVERRIDE = Number(new URLSearchParams(window.location.search).get('field'));
-const FIELD_SIZE = FIELD_SIZE_OVERRIDE > 0 ? FIELD_SIZE_OVERRIDE : 1536;
-const AGENT_SIDE = 768;
+const FIELD_SIZE = FIELD_SIZE_OVERRIDE > 0 ? FIELD_SIZE_OVERRIDE : (IS_MOBILE_DEVICE ? 768 : 1536);
+const AGENT_SIDE = IS_MOBILE_DEVICE ? 384 : 768;
 const SEAM_BAKE_EXPORT_MODE = new URLSearchParams(window.location.search).has('bakeExport');
 const AGENT_CAPACITY = AGENT_SIDE * AGENT_SIDE;
 const AGENT_RECORD_STRIDE = 3; // updated parent plus two child proposal slots
@@ -13241,40 +13250,69 @@ function buildUvChartTopology(targetMesh) {
 
 function computeChartClearance(topo) {
   const thresholds = [1, 2, 4, 8, 16, 32, 64];
-  const chartPairSets = new Map(thresholds.map((threshold) => [threshold, new Set()]));
   const closestPairs = [];
   const segments = topo.boundarySegments;
+  const segmentCount = segments.length;
   const maxThresholdTexels = Math.max(...thresholds);
   const cellSize = maxThresholdTexels / FIELD_SIZE;
-  const grid = new Map();
   let minimum = Infinity;
 
-  function cellKey(x, y) {
-    return `${x},${y}`;
+  // Hot path at load: with ~60k boundary segments and a search radius of 64
+  // texels, tens of millions of segment pairs land in neighboring grid cells.
+  // Flatten the per-segment AABBs into typed arrays, key the grid numerically,
+  // and dedup visits with a generation stamp instead of a per-segment Set. An
+  // AABB lower bound then skips the exact segment distance whenever it cannot
+  // beat the pair's running minimum (which decides every threshold bucket) or
+  // the global minimum (which decides clearance and the closest-pair ties):
+  // both only ever decrease, so a bound that loses now loses forever.
+  const minXs = new Float64Array(segmentCount);
+  const maxXs = new Float64Array(segmentCount);
+  const minYs = new Float64Array(segmentCount);
+  const maxYs = new Float64Array(segmentCount);
+  const chartIds = new Int32Array(segmentCount);
+  for (let i = 0; i < segmentCount; i++) {
+    const seg = segments[i];
+    minXs[i] = Math.min(seg.ax, seg.bx);
+    maxXs[i] = Math.max(seg.ax, seg.bx);
+    minYs[i] = Math.min(seg.ay, seg.by);
+    maxYs[i] = Math.max(seg.ay, seg.by);
+    chartIds[i] = seg.chartId;
   }
 
-  for (let i = 0; i < segments.length; i++) {
+  const GRID_KEY_STRIDE = 4096;
+  const grid = new Map();
+  const lastVisitedBy = new Int32Array(segmentCount).fill(-1);
+  const pairMinDistances = new Map();
+
+  for (let i = 0; i < segmentCount; i++) {
     const seg = segments[i];
-    const minX = Math.min(seg.ax, seg.bx);
-    const maxX = Math.max(seg.ax, seg.bx);
-    const minY = Math.min(seg.ay, seg.by);
-    const maxY = Math.max(seg.ay, seg.by);
-    const cMinX = Math.floor(minX / cellSize) - 1;
-    const cMaxX = Math.floor(maxX / cellSize) + 1;
-    const cMinY = Math.floor(minY / cellSize) - 1;
-    const cMaxY = Math.floor(maxY / cellSize) + 1;
-    const seenOtherSegmentIndices = new Set();
+    const cMinX = Math.floor(minXs[i] / cellSize) - 1;
+    const cMaxX = Math.floor(maxXs[i] / cellSize) + 1;
+    const cMinY = Math.floor(minYs[i] / cellSize) - 1;
+    const cMaxY = Math.floor(maxYs[i] / cellSize) + 1;
 
     for (let cy = cMinY; cy <= cMaxY; cy++) {
       for (let cx = cMinX; cx <= cMaxX; cx++) {
-        const bucket = grid.get(cellKey(cx, cy));
+        const bucket = grid.get((cx + 2) * GRID_KEY_STRIDE + (cy + 2));
         if (!bucket) continue;
-        for (const otherIndex of bucket) {
+        for (let b = 0; b < bucket.length; b++) {
+          const otherIndex = bucket[b];
+          if (chartIds[otherIndex] === chartIds[i]) continue;
+          if (lastVisitedBy[otherIndex] === i) continue;
+          lastVisitedBy[otherIndex] = i;
+
+          const gapX = Math.max(0, minXs[otherIndex] - maxXs[i], minXs[i] - maxXs[otherIndex]);
+          const gapY = Math.max(0, minYs[otherIndex] - maxYs[i], minYs[i] - maxYs[otherIndex]);
+          const aabbGapTexels = Math.sqrt(gapX * gapX + gapY * gapY) * FIELD_SIZE;
+          const a = Math.min(chartIds[i], chartIds[otherIndex]);
+          const bChart = Math.max(chartIds[i], chartIds[otherIndex]);
+          const pairKey = a * 65536 + bChart;
+          const pairMin = pairMinDistances.get(pairKey) ?? Infinity;
+          if (aabbGapTexels >= pairMin && aabbGapTexels > minimum + 1e-6) continue;
+
           const other = segments[otherIndex];
-          if (other.chartId === seg.chartId) continue;
-          if (seenOtherSegmentIndices.has(otherIndex)) continue;
-          seenOtherSegmentIndices.add(otherIndex);
           const distanceTexels = segmentDistance(seg, other) * FIELD_SIZE;
+          if (distanceTexels < pairMin) pairMinDistances.set(pairKey, distanceTexels);
           if (distanceTexels < minimum) {
             minimum = distanceTexels;
             closestPairs.length = 0;
@@ -13288,29 +13326,30 @@ function computeChartClearance(topo) {
               segmentB: other.index,
             });
           }
-          for (const threshold of thresholds) {
-            if (distanceTexels <= threshold) {
-              const a = Math.min(seg.chartId, other.chartId);
-              const b = Math.max(seg.chartId, other.chartId);
-              chartPairSets.get(threshold).add(`${a}|${b}`);
-            }
-          }
         }
       }
     }
 
     for (let cy = cMinY + 1; cy <= cMaxY - 1; cy++) {
       for (let cx = cMinX + 1; cx <= cMaxX - 1; cx++) {
-        const key = cellKey(cx, cy);
-        if (!grid.has(key)) grid.set(key, []);
-        grid.get(key).push(i);
+        const key = (cx + 2) * GRID_KEY_STRIDE + (cy + 2);
+        let bucket = grid.get(key);
+        if (!bucket) {
+          bucket = [];
+          grid.set(key, bucket);
+        }
+        bucket.push(i);
       }
     }
   }
 
   const chartPairsCloserThanTexels = {};
   for (const threshold of thresholds) {
-    chartPairsCloserThanTexels[threshold] = chartPairSets.get(threshold).size;
+    let pairCount = 0;
+    for (const pairMin of pairMinDistances.values()) {
+      if (pairMin <= threshold) pairCount++;
+    }
+    chartPairsCloserThanTexels[threshold] = pairCount;
   }
 
   return {
