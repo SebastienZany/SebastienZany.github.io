@@ -9,6 +9,191 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
+    <script>
+    // Load diagnostics. Runs before the module script so it can report
+    // environments where main.js never executes (no import-map support,
+    // failed CDN fetch, crash-reload loops). main.js feeds load phases in
+    // through window.__diag. Triple-tap the start screen (or add ?diag=1) to
+    // open the report; it auto-opens if loading stalls or errors out.
+    (() => {
+      const t0 = performance.now();
+      const events = [];
+      const state = { loaded: false, overlay: null, textEl: null };
+      let previousRun = null;
+      try { previousRun = JSON.parse(localStorage.getItem('cuttle-diag-last') || 'null'); } catch {}
+      let loadCount = 0;
+      try {
+        loadCount = Number(sessionStorage.getItem('cuttle-diag-loads') || 0) + 1;
+        sessionStorage.setItem('cuttle-diag-loads', String(loadCount));
+      } catch {}
+
+      let persistTimer = 0;
+      function persist() {
+        persistTimer = 0;
+        try {
+          localStorage.setItem('cuttle-diag-last', JSON.stringify({
+            at: new Date().toISOString(),
+            loaded: state.loaded,
+            events: events.slice(-150),
+          }));
+        } catch {}
+      }
+      function log(tag, detail) {
+        const line = `+${(performance.now() - t0).toFixed(0).padStart(6)}ms  ${tag}${detail ? `  ${detail}` : ''}`;
+        events.push(line);
+        if (events.length > 400) events.splice(0, events.length - 400);
+        if (!persistTimer) persistTimer = setTimeout(persist, 250);
+        if (state.textEl) renderReport();
+      }
+
+      function buildReport() {
+        const lines = [
+          `cuttle diagnostics — ${new Date().toISOString()}`,
+          location.href,
+          `load #${loadCount} in this tab${loadCount > 1 ? ' (a count above 1 without you reloading means the browser killed and reloaded the page)' : ''}`,
+          '',
+          '--- this run ---',
+          ...events,
+        ];
+        if (previousRun?.events?.length) {
+          lines.push('', `--- previous run (${previousRun.at}${previousRun.loaded ? ', completed' : ', DID NOT FINISH LOADING'}) ---`, ...previousRun.events);
+        }
+        return lines.join('\n');
+      }
+
+      function renderReport() {
+        if (state.textEl) state.textEl.textContent = buildReport();
+      }
+
+      function copyReport(button) {
+        const text = buildReport();
+        const done = () => {
+          button.textContent = 'copied';
+          setTimeout(() => { button.textContent = 'copy'; }, 1500);
+        };
+        const fallback = () => {
+          const area = document.createElement('textarea');
+          area.value = text;
+          area.style.cssText = 'position:fixed;opacity:0;';
+          document.body.appendChild(area);
+          area.focus();
+          area.select();
+          try { document.execCommand('copy'); done(); } catch {}
+          area.remove();
+        };
+        if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).then(done, fallback);
+        else fallback();
+      }
+
+      function showOverlay() {
+        if (!document.body) return;
+        if (state.overlay) {
+          state.overlay.style.display = 'flex';
+          renderReport();
+          return;
+        }
+        const el = document.createElement('div');
+        el.style.cssText = 'position:fixed;inset:max(8px, env(safe-area-inset-top)) 8px max(8px, env(safe-area-inset-bottom)) 8px;z-index:99999;background:rgba(8,10,12,0.95);color:#cfd8e3;font:11px/1.5 ui-monospace,Menlo,monospace;border:1px solid #3a4a5a;border-radius:10px;display:flex;flex-direction:column;-webkit-user-select:text;user-select:text;';
+        const buttonCss = 'background:#22303e;color:#cfd8e3;border:1px solid #3a4a5a;border-radius:6px;font:inherit;padding:4px 12px;';
+        const head = document.createElement('div');
+        head.style.cssText = 'display:flex;gap:8px;align-items:center;padding:8px 10px;border-bottom:1px solid #3a4a5a;flex:none;';
+        const title = document.createElement('strong');
+        title.textContent = 'diagnostics';
+        title.style.cssText = 'flex:1;';
+        const copyButton = document.createElement('button');
+        copyButton.textContent = 'copy';
+        copyButton.style.cssText = buttonCss;
+        copyButton.addEventListener('click', () => copyReport(copyButton));
+        const closeButton = document.createElement('button');
+        closeButton.textContent = 'close';
+        closeButton.style.cssText = buttonCss;
+        closeButton.addEventListener('click', () => { el.style.display = 'none'; });
+        head.append(title, copyButton, closeButton);
+        const text = document.createElement('pre');
+        text.style.cssText = 'flex:1;overflow:auto;margin:0;padding:10px;white-space:pre-wrap;word-break:break-word;-webkit-overflow-scrolling:touch;';
+        el.append(head, text);
+        document.body.appendChild(el);
+        state.overlay = el;
+        state.textEl = text;
+        renderReport();
+      }
+      function toggleOverlay() {
+        if (state.overlay && state.overlay.style.display !== 'none') state.overlay.style.display = 'none';
+        else showOverlay();
+      }
+
+      log('boot', `load #${loadCount}`);
+      log('env', JSON.stringify({
+        ua: navigator.userAgent,
+        screen: `${screen.width}x${screen.height}@${devicePixelRatio}`,
+        cores: navigator.hardwareConcurrency ?? null,
+        importMapSupport: Boolean(HTMLScriptElement.supports && HTMLScriptElement.supports('importmap')),
+        visibility: document.visibilityState,
+        online: navigator.onLine,
+      }));
+      if (!(HTMLScriptElement.supports && HTMLScriptElement.supports('importmap'))) {
+        log('fatal', 'import maps unsupported — main.js will never run (needs iOS 16.4+ / a 2023+ browser)');
+      }
+
+      window.addEventListener('error', (event) => {
+        if (event.target && event.target !== window && (event.target.src || event.target.href)) {
+          log('resource-error', String(event.target.src || event.target.href));
+        } else {
+          log('js-error', `${event.message} @ ${event.filename ?? '?'}:${event.lineno ?? '?'}:${event.colno ?? '?'}`);
+        }
+        if (!state.loaded) showOverlay();
+      }, true);
+      window.addEventListener('unhandledrejection', (event) => {
+        const reason = event.reason;
+        log('unhandled-rejection', String((reason && (reason.stack || reason.message)) || reason));
+        if (!state.loaded) showOverlay();
+      });
+      for (const level of ['warn', 'error']) {
+        const original = console[level].bind(console);
+        console[level] = (...args) => {
+          try { log(`console.${level}`, args.map((a) => (typeof a === 'string' ? a : String(a && a.message || a))).join(' ')); } catch {}
+          original(...args);
+        };
+      }
+      document.addEventListener('visibilitychange', () => log('visibility', document.visibilityState));
+      window.addEventListener('pagehide', persist);
+
+      // The status text itself is pointer-events:none, so use a triple-tap
+      // anywhere on the start screen to toggle the report.
+      let tapTimes = [];
+      document.addEventListener('click', (event) => {
+        if (!(event.target && event.target.closest && event.target.closest('#startScreen'))) return;
+        const now = performance.now();
+        tapTimes = tapTimes.filter((t) => now - t < 1200);
+        tapTimes.push(now);
+        if (tapTimes.length >= 3) {
+          tapTimes = [];
+          toggleOverlay();
+        }
+      });
+
+      window.setTimeout(() => {
+        if (!state.loaded) {
+          log('watchdog', 'still not loaded after 20s — showing diagnostics');
+          showOverlay();
+        }
+      }, 20000);
+      window.addEventListener('DOMContentLoaded', () => {
+        log('dom', 'DOMContentLoaded');
+        if (new URLSearchParams(location.search).has('diag')) showOverlay();
+      });
+
+      window.__diag = {
+        log,
+        show: showOverlay,
+        markLoaded() {
+          state.loaded = true;
+          log('ready', 'start button shown');
+          persist();
+        },
+      };
+    })();
+    </script>
     <script type="importmap">
     {
       "imports": {

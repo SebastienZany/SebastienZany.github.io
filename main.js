@@ -3,6 +3,11 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { MeshBVH, acceleratedRaycast } from 'three-mesh-bvh';
 
+// Load diagnostics hook installed by the inline bootstrap in index.html.
+// No-ops when absent so main.js keeps working standalone.
+const diagLog = (tag, detail) => window.__diag?.log?.(tag, detail);
+diagLog('module', 'main.js evaluating (imports resolved)');
+
 const appEl = document.getElementById('app');
 const canvas = document.getElementById('sim');
 const statusEl = document.getElementById('gpuStatus');
@@ -1064,6 +1069,23 @@ canvas.addEventListener('webglcontextlost', (event) => {
 const colorBufferFloat = renderer.extensions.get('EXT_color_buffer_float');
 const floatBlend = renderer.extensions.get('EXT_float_blend');
 const linearFloat = renderer.extensions.get('OES_texture_float_linear');
+
+diagLog('webgl', JSON.stringify({
+  webgl2: renderer.capabilities.isWebGL2,
+  renderer: (() => {
+    const gl = renderer.getContext();
+    const info = gl.getExtension('WEBGL_debug_renderer_info');
+    return String(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER));
+  })(),
+  maxTextureSize: renderer.getContext().getParameter(renderer.getContext().MAX_TEXTURE_SIZE),
+  colorBufferFloat: Boolean(colorBufferFloat),
+  floatBlend: Boolean(floatBlend),
+  linearFloat: Boolean(linearFloat),
+  mobileProfile: IS_MOBILE_DEVICE,
+  fieldSize: FIELD_SIZE,
+  agentSide: AGENT_SIDE,
+  pixelRatio: renderer.getPixelRatio(),
+}));
 
 if (!colorBufferFloat || !floatBlend) {
   fail('WebGL2 float render targets and float blending are required.');
@@ -9122,8 +9144,14 @@ function runReadbackDiagnostic(
 }
 
 // === fail ===
+let lastLoggedLoadingProgress = '';
 function setStartScreenLoadingProgress(percent = null, label = 'loading') {
   if (!startScreenStatus || startScreenReady) return;
+  const progressLine = `${label}${percent !== null ? ` ~${Math.floor(percent / 5) * 5}%` : ''}`;
+  if (progressLine !== lastLoggedLoadingProgress) {
+    lastLoggedLoadingProgress = progressLine;
+    diagLog('progress', progressLine);
+  }
   startScreenUiState.readyAt = 0;
   startScreenUiState.clickedAt = 0;
   startScreenUiState.beginFadeOutAt = 0;
@@ -9162,6 +9190,7 @@ function showStartScreenError(message) {
 
 function showStartButton() {
   console.info(`[load] start button ready at ${Math.round(performance.now())}ms`);
+  window.__diag?.markLoaded?.();
   startScreenReady = true;
   startScreenUiState.readyAt = performance.now();
   startScreenUiState.clickedAt = 0;
@@ -9181,6 +9210,8 @@ function showStartButton() {
 }
 
 function fail(message) {
+  diagLog('fail', String(message));
+  window.__diag?.show?.();
   statusEl.textContent = message;
   statusEl.classList.add('error');
   showStartScreenError(message);
@@ -14487,9 +14518,11 @@ async function exportSeamBake() {
   return { rawBytes: bytes.length, gzippedBytes: gzipped.length, recordCount };
 }
 
+diagLog('glb', `fetching ${GLB_PATH}`);
 new GLTFLoader().load(
   GLB_PATH,
   (gltf) => {
+    diagLog('glb', 'downloaded and parsed');
     Promise.resolve()
       .then(() => {
         setStartScreenLoadingProgress(72, 'preparing');
@@ -14572,6 +14605,7 @@ async function onLoad(gltf) {
   const loadPhase = (label) => {
     const now = performance.now();
     console.info(`[load] ${label}: ${Math.round(now - loadPhaseLast)}ms`);
+    diagLog('phase', `${label} took ${Math.round(now - loadPhaseLast)}ms`);
     loadPhaseLast = now;
   };
   // Build UV mask
