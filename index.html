@@ -17,8 +17,11 @@
     // open the report; it auto-opens if loading stalls or errors out.
     (() => {
       const t0 = performance.now();
+      // Build stamp so a stale cached copy is obvious in the diagnostics report.
+      // BUMP THIS (and the matching BUILD_VERSION in main.js) on every deploy.
+      const BUILD_VERSION = '2026-07-06-ios-float-blend';
       const events = [];
-      const state = { loaded: false, overlay: null, textEl: null };
+      const state = { loaded: false, overlay: null, textEl: null, mainVersion: null };
       let previousRun = null;
       try { previousRun = JSON.parse(localStorage.getItem('cuttle-diag-last') || 'null'); } catch {}
       let loadCount = 0;
@@ -47,9 +50,13 @@
       }
 
       function buildReport() {
+        const versionLine = state.mainVersion && state.mainVersion !== BUILD_VERSION
+          ? `build ${BUILD_VERSION} (index.html) / ${state.mainVersion} (main.js) — MISMATCH: one file is cached, hard-reload`
+          : `build ${BUILD_VERSION}${state.mainVersion ? ' (index.html + main.js match)' : ' (index.html; main.js not yet loaded)'}`;
         const lines = [
           `cuttle diagnostics — ${new Date().toISOString()}`,
           location.href,
+          versionLine,
           `load #${loadCount} in this tab${loadCount > 1 ? ' (a count above 1 without you reloading means the browser killed and reloaded the page)' : ''}`,
           '',
           '--- this run ---',
@@ -122,7 +129,7 @@
         else showOverlay();
       }
 
-      log('boot', `load #${loadCount}`);
+      log('boot', `build ${BUILD_VERSION} — load #${loadCount}`);
       log('env', JSON.stringify({
         ua: navigator.userAgent,
         screen: `${screen.width}x${screen.height}@${devicePixelRatio}`,
@@ -186,6 +193,15 @@
       window.__diag = {
         log,
         show: showOverlay,
+        buildVersion: BUILD_VERSION,
+        // main.js reports its own build stamp here; a mismatch means index.html
+        // and main.js came from different (one cached) copies.
+        checkMainVersion(mainVersion) {
+          state.mainVersion = mainVersion;
+          if (mainVersion !== BUILD_VERSION) {
+            log('version-mismatch', `index.html=${BUILD_VERSION} main.js=${mainVersion} — one file is cached; hard-reload`);
+          }
+        },
         markLoaded() {
           state.loaded = true;
           log('ready', 'start button shown');

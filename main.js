@@ -3,10 +3,17 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { MeshBVH, acceleratedRaycast } from 'three-mesh-bvh';
 
+// Build stamp so a stale cached copy is obvious in the diagnostics report.
+// BUMP THIS (and the matching BUILD_VERSION in index.html) on every deploy.
+// index.html and main.js cache independently, so they carry the same value and
+// the bootstrap flags a mismatch — that means one of the two files is cached.
+const BUILD_VERSION = '2026-07-06-ios-float-blend';
+
 // Load diagnostics hook installed by the inline bootstrap in index.html.
 // No-ops when absent so main.js keeps working standalone.
 const diagLog = (tag, detail) => window.__diag?.log?.(tag, detail);
-diagLog('module', 'main.js evaluating (imports resolved)');
+diagLog('module', `main.js evaluating (imports resolved) — build ${BUILD_VERSION}`);
+window.__diag?.checkMainVersion?.(BUILD_VERSION);
 
 const appEl = document.getElementById('app');
 const canvas = document.getElementById('sim');
