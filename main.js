@@ -31,6 +31,20 @@ const endingCountdownLayer = document.getElementById('endingCountdownLayer');
 const endingCountdownLeft = document.getElementById('endingCountdownLeft');
 const endingCountdownRight = document.getElementById('endingCountdownRight');
 let startScreenReady = false;
+// Declared early (used only as a plain literal) so the fail() path can run
+// during top-level module evaluation — e.g. an unsupported-WebGL bail-out
+// happens long before this object's original in-order position, and touching
+// it there would throw a temporal-dead-zone ReferenceError, crashing the very
+// error handler meant to show the message.
+const startScreenUiState = {
+  readyAt: 0,
+  clickedAt: 0,
+  beginFadeOutAt: 0,
+  hoverStartedAt: 0,
+  hoverFrom: 0,
+  hoverTo: 0,
+  hoverMix: 0,
+};
 const cameraAzimuthEl = document.getElementById('cameraAzimuth');
 const cameraElevationEl = document.getElementById('cameraElevation');
 const cameraPolarEl = document.getElementById('cameraPolar');
@@ -1066,9 +1080,17 @@ canvas.addEventListener('webglcontextlost', (event) => {
   fail('The graphics context was lost (usually memory pressure). Reload the page to continue.');
 });
 
+// iOS Safari exposes EXT_color_buffer_float (float32 targets are renderable)
+// but NOT EXT_float_blend (can't blend into float32) or
+// OES_texture_float_linear (can't linear-filter float textures). Those two
+// gaps are the whole reason this used to bail on iPhones. ?nofloatblend=1 /
+// ?nolinearfloat=1 force those extensions to read as absent so the iOS code
+// paths can be exercised from a desktop browser (Chrome enforces the same
+// restriction once the extension is left un-enabled).
+const EXT_SIM = new URLSearchParams(window.location.search);
 const colorBufferFloat = renderer.extensions.get('EXT_color_buffer_float');
-const floatBlend = renderer.extensions.get('EXT_float_blend');
-const linearFloat = renderer.extensions.get('OES_texture_float_linear');
+const floatBlend = EXT_SIM.has('nofloatblend') ? null : renderer.extensions.get('EXT_float_blend');
+const linearFloat = EXT_SIM.has('nolinearfloat') ? null : renderer.extensions.get('OES_texture_float_linear');
 
 diagLog('webgl', JSON.stringify({
   webgl2: renderer.capabilities.isWebGL2,
@@ -1087,10 +1109,20 @@ diagLog('webgl', JSON.stringify({
   pixelRatio: renderer.getPixelRatio(),
 }));
 
-if (!colorBufferFloat || !floatBlend) {
-  fail('WebGL2 float render targets and float blending are required.');
+if (!colorBufferFloat) {
+  fail('WebGL2 float render targets (EXT_color_buffer_float) are required.');
   throw new Error('Required WebGL2 float extensions are unavailable.');
 }
+
+// EXT_float_blend (blending INTO 32-bit float targets) is unavailable on iOS
+// Safari, which used to fail the guard above. It is not actually required: the
+// only float targets we additively blend into (the per-frame deposit-density
+// splat and the load-time seam "claim" masks) use makeBlendableFloatRT, which
+// falls back to RGBA16F when EXT_float_blend is missing. Half-float blending is
+// core WebGL2, and those targets only hold small integer/summed values that are
+// lossless in half-float. Everything else is NoBlending and stays RGBA32F.
+const BLENDABLE_FLOAT_TYPE = floatBlend ? THREE.FloatType : THREE.HalfFloatType;
+const BLENDABLE_FLOAT_INTERNAL_FORMAT = floatBlend ? 'RGBA32F' : 'RGBA16F';
 
 const fieldFilter = linearFloat ? THREE.LinearFilter : THREE.NearestFilter;
 
@@ -1705,6 +1737,25 @@ function makeDebugRT() {
     stencilBuffer: false,
   });
 }
+// A FIELD_SIZE^2 float target that is additively BLENDED into (the deposit
+// splat and the seam claim masks). RGBA32F blending needs EXT_float_blend,
+// which iOS Safari lacks, so BLENDABLE_FLOAT_TYPE downgrades these — and only
+// these — to RGBA16F there. Their contents (per-frame splat sums, integer
+// overlap counts) stay lossless in half-float; NoBlending float fields keep
+// full RGBA32F precision.
+function makeBlendableFloatRT() {
+  return new THREE.WebGLRenderTarget(FIELD_SIZE, FIELD_SIZE, {
+    type: BLENDABLE_FLOAT_TYPE,
+    format: THREE.RGBAFormat,
+    internalFormat: BLENDABLE_FLOAT_INTERNAL_FORMAT,
+    minFilter: THREE.NearestFilter,
+    magFilter: THREE.NearestFilter,
+    wrapS: THREE.ClampToEdgeWrapping,
+    wrapT: THREE.ClampToEdgeWrapping,
+    depthBuffer: false,
+    stencilBuffer: false,
+  });
+}
 function makeAgentRT() {
   return new THREE.WebGLRenderTarget(AGENT_SIDE, AGENT_SIDE, {
     type: THREE.FloatType,
@@ -1836,7 +1887,7 @@ function makeGoldWaferBodyMaxFoodRT() {
   return makeGoldWaferBodyMaxFoodCandidateRT(getGoldWaferBodyMaxFoodRTConfig());
 }
 const oatRT = makeCanonicalFieldRT();
-const depositDensityRT = makeCanonicalFieldRT();
+const depositDensityRT = makeBlendableFloatRT();
 const densityRT = makeDensityRT();
 const agentDensityOverlayRT = makeDensityRT();
 // Phase 1: uvIslandMaskRT is now the conservative surface coverage mask used by
@@ -1846,10 +1897,12 @@ const surfaceCoverageRT = uvIslandMaskRT;
 const legacyUvIslandMaskRT = makeMaskRT();
 const seamRedirectUvRT = makeSeamMetadataRT();
 const seamRedirectMetaRT = makeSeamMetadataRT();
-// Future packing notes: seamRedirectClaimRT may not need RGBA32F and
-// seamPaddingDebugRT is debug-only, but topology metadata packing needs a
-// dedicated audit before changing correctness-critical formats.
-const seamRedirectClaimRT = makeDebugRT();
+// The claim masks are additively blended (overlap counts), so they must use a
+// blendable float format — RGBA16F on iOS where EXT_float_blend is missing.
+// Counts are small integers, exact in half-float, so hasRedirectClaimCollision
+// (.r >= 1.5) stays correct. seamPaddingDebugRT is debug-only; topology
+// metadata packing still needs a dedicated audit before changing its formats.
+const seamRedirectClaimRT = makeBlendableFloatRT();
 // Twin maps for on-island texels along seam edges. Same UV/meta split as the
 // redirect maps but rasterized INWARD, so on-island edge texels can be welded.
 const seamWeldUvRT = makeSeamMetadataRT();
@@ -1869,7 +1922,7 @@ const seamTransitionUvRT = seamTransitionUvAtlasRT;
 const seamTransitionMetaRT = seamTransitionMetaAtlasRT;
 const seamTransitionDirectionRT = seamTransitionDirectionAtlasRT;
 const seamTransitionBasisRT = seamTransitionBasisAtlasRT;
-const seamTransitionClaimRT = makeDebugRT();
+const seamTransitionClaimRT = makeBlendableFloatRT();
 // Legacy aliases exposed for existing console probes; use the split names in new code.
 const seamRedirectRT = seamRedirectUvRT;
 const seamWeldRT = seamWeldUvRT;
@@ -7528,15 +7581,6 @@ const introSequenceState = {
   sprite: null,
   startPos: new THREE.Vector3(),
   targetPos: new THREE.Vector3(),
-};
-const startScreenUiState = {
-  readyAt: 0,
-  clickedAt: 0,
-  beginFadeOutAt: 0,
-  hoverStartedAt: 0,
-  hoverFrom: 0,
-  hoverTo: 0,
-  hoverMix: 0,
 };
 const initialAgentSeedState = {
   pending: false,
