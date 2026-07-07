@@ -7,7 +7,7 @@ import { MeshBVH, acceleratedRaycast } from 'three-mesh-bvh';
 // BUMP THIS (and the matching BUILD_VERSION in index.html) on every deploy.
 // index.html and main.js cache independently, so they carry the same value and
 // the bootstrap flags a mismatch — that means one of the two files is cached.
-const BUILD_VERSION = '2026-07-07-mobile-panel-tap';
+const BUILD_VERSION = '2026-07-07-smooth-default-off';
 
 // Load diagnostics hook installed by the inline bootstrap in index.html.
 // No-ops when absent so main.js keeps working standalone.
@@ -117,9 +117,11 @@ const FIELD_SIZE_OVERRIDE = Number(new URLSearchParams(window.location.search).g
 const FIELD_SIZE = FIELD_SIZE_OVERRIDE > 0 ? FIELD_SIZE_OVERRIDE : (IS_MOBILE_DEVICE ? MOBILE_FIELD_SIZE : 1536);
 // Display-only smoothing of the low-res field (see sampleFoodSmooth and the
 // fused sample-view copy pass). Runtime-togglable via params.smoothFieldDisplay
-// ("Smooth field" in the parameters panel); this URL flag only sets the
-// initial default (?smoothfield=0 starts with it off).
-const SMOOTH_FIELD_DISPLAY = new URLSearchParams(window.location.search).get('smoothfield') !== '0';
+// ("Smooth field" in the parameters panel). Defaults OFF: on the already
+// spatially+temporally smoothed render field the extra reconstruction reads as
+// a busier, more cellular surface than plain point sampling. This URL flag only
+// sets the initial default (?smoothfield=1 starts with it on).
+const SMOOTH_FIELD_DISPLAY = new URLSearchParams(window.location.search).get('smoothfield') === '1';
 // Agents run at half the field resolution on both profiles.
 const AGENT_SIDE = Math.round(FIELD_SIZE / 2);
 const SEAM_BAKE_EXPORT_MODE = new URLSearchParams(window.location.search).has('bakeExport');
