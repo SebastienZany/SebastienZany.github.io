@@ -7,7 +7,7 @@ import { MeshBVH, acceleratedRaycast } from 'three-mesh-bvh';
 // BUMP THIS (and the matching BUILD_VERSION in index.html) on every deploy.
 // index.html and main.js cache independently, so they carry the same value and
 // the bootstrap flags a mismatch — that means one of the two files is cached.
-const BUILD_VERSION = '2026-07-06-ios-float-blend';
+const BUILD_VERSION = '2026-07-06-mobile-1024';
 
 // Load diagnostics hook installed by the inline bootstrap in index.html.
 // No-ops when absent so main.js keeps working standalone.
@@ -104,15 +104,20 @@ const MAX_PIXEL_RATIO = IS_MOBILE_DEVICE ? 1.5 : 2;
 
 // Phones get a reduced simulation profile. The desktop profile allocates
 // ~1.4 GB of float render targets (field buffers plus the 4-lane seam
-// transition atlases), which is far past iOS Safari's per-tab GPU budget --
-// WebKit kills the tab during load and the page never gets past "loading...".
-// 768^2 field / 384^2 agents keeps the total near 360 MB. The ?field=
-// override exists for generating seam bakes at other sizes from a desktop
-// browser (see exportSeamBake); ship a matching seam-bake-<size>.bin for any
-// size phones can hit, or load stalls for minutes building seams live.
+// transition atlases) — genuinely past iOS Safari's per-tab budget. NOTE: the
+// original "iPhones get stuck loading because of memory" diagnosis was wrong;
+// the real blocker was the EXT_float_blend capability gate (now fixed). So 768
+// was an over-correction — iOS has real memory headroom above it, and a higher
+// field size sharply reduces the blocky low-res look. MOBILE_FIELD_SIZE is the
+// dial: raise it as far as devices tolerate (watch the diagnostics overlay for
+// a load #2 / context-lost, which means WebKit killed the tab). Every size a
+// phone can reach needs a matching seam-bake-<size>.bin committed, or the seam
+// transitions build live (tens of seconds). ?field= overrides it for testing.
+const MOBILE_FIELD_SIZE = 1024;
 const FIELD_SIZE_OVERRIDE = Number(new URLSearchParams(window.location.search).get('field'));
-const FIELD_SIZE = FIELD_SIZE_OVERRIDE > 0 ? FIELD_SIZE_OVERRIDE : (IS_MOBILE_DEVICE ? 768 : 1536);
-const AGENT_SIDE = IS_MOBILE_DEVICE ? 384 : 768;
+const FIELD_SIZE = FIELD_SIZE_OVERRIDE > 0 ? FIELD_SIZE_OVERRIDE : (IS_MOBILE_DEVICE ? MOBILE_FIELD_SIZE : 1536);
+// Agents run at half the field resolution on both profiles.
+const AGENT_SIDE = Math.round(FIELD_SIZE / 2);
 const SEAM_BAKE_EXPORT_MODE = new URLSearchParams(window.location.search).has('bakeExport');
 const AGENT_CAPACITY = AGENT_SIDE * AGENT_SIDE;
 const AGENT_RECORD_STRIDE = 3; // updated parent plus two child proposal slots
