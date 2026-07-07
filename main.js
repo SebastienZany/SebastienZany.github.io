@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { MeshBVH, acceleratedRaycast } from 'three-mesh-bvh';
+import { createPhysarumSim } from './webgpu/sim.js';
 
 // Build stamp so a stale cached copy is obvious in the diagnostics report.
 // BUMP THIS (and the matching BUILD_VERSION in index.html) on every deploy.
@@ -128,6 +129,27 @@ const LEGACY_GLOW_TEXTURE = new URLSearchParams(window.location.search).has('leg
 // lands straight in a running sim. Pairs with __cuttle.growFast()/frameMesh()
 // for fast headless verification. Off in production.
 const DEV_MODE = new URLSearchParams(window.location.search).has('dev');
+// WebGPU sim bridge (migration step 1): ?webgpu=1 runs the whole simulation on
+// WebGPU compute and feeds its field back into the WebGL surface shader. Fully
+// gated — the normal WebGL path is untouched when the flag is absent.
+const WEBGPU_SIM = new URLSearchParams(window.location.search).get('webgpu') === '1';
+let webgpuSim = null;            // resolved createPhysarumSim() object
+let webgpuFieldData = null;      // Float32Array scratch for the field readback
+let webgpuFieldTexture = null;   // THREE.DataTexture the slime shader samples
+let webgpuBridgeFrame = 0;
+let webgpuReadbackMs = 0;        // EMA of the field readback round-trip (the bridge tax)
+// ?webgpu=1&seam=1: feed the app's real baked seam atlases into the WebGPU sim so
+// agent sensing is chart-aware (else the sim runs flat and shows seam artifacts).
+const WEBGPU_SEAM = WEBGPU_SIM && new URLSearchParams(window.location.search).get('seam') === '1';
+// Unified per-edge seam sampler (the correct-by-construction replacement for the
+// per-texel redirect/transition atlases). Staged migration; each flag defaults
+// ON once its step is verified, with the query param to force it off for A/B:
+//   ?ptex=0     — display path falls back to the legacy resolveSampleUvSafe
+//   ?ptexsim=0  — simulation shaders fall back to the legacy resolver
+// While a step is unverified its default stays 0 (legacy) — see the constants.
+const PTEX_QUERY = new URLSearchParams(window.location.search);
+const PTEX_DISPLAY = PTEX_QUERY.get('ptex') === '1'; // step 2: default flips to !== '0' once verified
+const PTEX_SIM = PTEX_QUERY.get('ptexsim') === '1'; // step 3: default flips to !== '0' once verified
 // Agents run at half the field resolution on both profiles.
 const AGENT_SIDE = Math.round(FIELD_SIZE / 2);
 const SEAM_BAKE_EXPORT_MODE = new URLSearchParams(window.location.search).has('bakeExport');
@@ -1881,6 +1903,28 @@ const fieldSampleViewRT = makeSampleViewFieldRT();
 const renderRT = new RTPair(makeRenderFieldRT);
 const renderSampleViewRT = new RTPair(makeDisplaySampleViewFieldRT);
 const renderScratchRT = makeRenderFieldRT();
+// === Unified per-edge seam adjacency (Ptex-style; correct-by-construction
+// replacement for the per-texel redirect/transition candidate atlases) ===
+// Step 1 builds these CPU-side and verifies them against the existing atlases;
+// steps 2-3 wire them into a shared GLSL resolver and delete the atlases.
+// ptexFrameData: 24 floats per directional seam frame (frameId 0 = "none"):
+//   [0,1]=srcEdgeA uv  [2,3]=srcEdge tangent  [4]=srcEdge len  [5,6]=src inward
+//   [7,8]=dstEdgeA uv  [9,10]=dstEdgeB uv  [11,12]=dst inward  [13]=sinT [14]=cosT
+//   [15]=srcChart  [16]=dstChart  (17..23 reserved)
+// This is exactly makeTransitionCandidateFrame's data, stored per edge instead
+// of rasterized per texel. ptexBoundaryFrameId[texel] = winning (nearest-seam,
+// source-owned) frameId, the single-winner boundary index (corners get a
+// bounded multi-winner list in the sim step).
+const PTEX_FRAME_FLOATS = 24;
+const PTEX_FRAME_TEX_WIDTH = 2048; // < MAX_TEXTURE_SIZE; frame f texel c at linear f*6+c
+let ptexFrameData = null;
+let ptexFrameCount = 0;
+let ptexBoundaryFrameId = null;
+let ptexAdjacencyDiagnostics = null;
+let ptexFrameTex = null; // RGBA32F DataTexture: the per-edge affine frames
+let ptexBoundaryTex = null; // R32UI DataTexture: winning frameId per field texel
+let ptexDisplayActive = PTEX_DISPLAY; // mutable so __cuttle.setPtex can A/B live
+let ptexDebugActive = false; // renders the bump normal as color for A/B
 const observationTriggerScoreRT = makeObservationTriggerScoreRT();
 const observationTriggerQueryRT = makeObservationTriggerQueryRT();
 let goldWaferBodyMaxFoodRT = null;
@@ -3881,7 +3925,45 @@ uniform int u_smoothFieldSampling;
 uniform int u_filmFollowsSlimeHeight;
 uniform int u_useGoldWaferFilm;
 uniform int u_useGoldWaferBodyUnderlay;
+uniform int u_usePtex;
+uniform int u_ptexDebug;
+uniform sampler2D u_ptexFrame;
+uniform highp usampler2D u_ptexBoundary;
 ${safeSamplingGlsl}
+// Unified per-edge seam resolver (correct-by-construction replacement for the
+// per-texel redirect/transition atlases). The boundary index (u_ptexBoundary)
+// selects the governing seam frame; the per-edge affine (u_ptexFrame) maps the
+// CONTINUOUS source fragment UV across the seam — no per-texel quantization, so
+// the reconstructed destination (and thus the bump gradient) is continuous.
+// Crossing math is identical to tryZeroGutterTransitionCandidate.
+vec4 ptexFrameTexel(int f, int comp) {
+  int g = f * 6 + comp;
+  return texelFetch(u_ptexFrame, ivec2(g % ${PTEX_FRAME_TEX_WIDTH}, g / ${PTEX_FRAME_TEX_WIDTH}), 0);
+}
+vec2 resolveSampleUvSeam(vec2 baseUv, vec2 sampleUv, out float valid) {
+  valid = 0.0;
+  if (!isAuthoritativeChartTexel(baseUv)) return baseUv;
+  float baseChart = chartIdAt(baseUv);
+  if (chartIdAt(sampleUv) == baseChart && !isOwnershipUnsafe(sampleUv)) { valid = 1.0; return sampleUv; }
+  vec2 fs = vec2(float(${FIELD_SIZE}));
+  ivec2 bt = ivec2(clamp(floor(baseUv * fs), vec2(0.0), fs - 1.0));
+  uint fid = texelFetch(u_ptexBoundary, bt, 0).r;
+  if (fid == 0u) return baseUv;
+  int f = int(fid);
+  vec4 t0 = ptexFrameTexel(f, 0); // src ref uv (xy), dst ref uv (zw)
+  vec4 t1 = ptexFrameTexel(f, 1); // M columns
+  vec4 t2 = ptexFrameTexel(f, 2); // srcChart, dstChart, sinT, cosT
+  float srcChart = t2.x; float dstChart = t2.y;
+  if (abs(baseChart - srcChart) > 0.5) return baseUv;
+  // Full metric affine: destUv = M * (sampleUv - srcRef) + dstRef. This carries
+  // the per-chart scale/shear, so the reconstructed field (and its derivative,
+  // the bump normal) is continuous across the seam regardless of tap direction.
+  mat2 M = mat2(t1.x, t1.y, t1.z, t1.w);
+  vec2 destUv = M * (sampleUv - t0.xy) + t0.zw;
+  if (isOutsideAtlas(destUv) || isOwnershipUnsafe(destUv) || abs(chartIdAt(destUv) - dstChart) > 0.5) return baseUv;
+  valid = 1.0;
+  return destUv;
+}
 float heightFromFood(float food) {
   return (1.0 - exp(-max(food, 0.0) * 4.0)) * u_heightScale;
 }
@@ -3907,7 +3989,9 @@ float sampleFoodSmooth(vec2 uv) {
 }
 float readFoodSafe(vec2 sampleUv, float fallback) {
   float valid = 0.0;
-  vec2 r = resolveSampleUvSafe(v_uv, sampleUv, valid);
+  vec2 r = (u_usePtex == 1)
+    ? resolveSampleUvSeam(v_uv, sampleUv, valid)
+    : resolveSampleUvSafe(v_uv, sampleUv, valid);
   if (valid < 0.5) return fallback;
   return sampleFoodSmooth(r);
 }
@@ -4122,6 +4206,7 @@ void main() {
   }
   vec3 perturbed = N0 - T * gradX * normalScale - B * gradY * normalScale;
   vec3 normal = normalize(perturbed);
+  if (u_ptexDebug == 1) { outColor = vec4(normal * 0.5 + 0.5, 1.0); return; }
 
   float foodViz = 1.0 - exp(-food * 2.4);
   float trail = pow(foodViz, 0.68);
@@ -5379,6 +5464,10 @@ function buildSlimeMaterial() {
       u_filmFollowsSlimeHeight: { value: params.filmFollowsSlimeHeight ? 1 : 0 },
       u_useGoldWaferFilm: { value: 0 },
       u_useGoldWaferBodyUnderlay: { value: 0 },
+      u_usePtex: { value: 0 },
+      u_ptexDebug: { value: 0 },
+      u_ptexFrame: { value: null },
+      u_ptexBoundary: { value: null },
       u_useSeamStitching: { value: 1 },
       u_useZeroGutterTransitions: { value: 1 },
     },
@@ -5403,8 +5492,12 @@ function syncSlimeMaterialForCamera(renderCamera) {
   if (!slimeMaterial) return;
   applySmoothFieldDisplayFilters();
   const u = slimeMaterial.uniforms;
+  u.u_usePtex.value = (ptexDisplayActive && ptexBoundaryTex && ptexFrameTex) ? 1 : 0;
+  u.u_ptexDebug.value = ptexDebugActive ? 1 : 0;
+  u.u_ptexFrame.value = ptexFrameTex;
+  u.u_ptexBoundary.value = ptexBoundaryTex;
   u.u_smoothFieldSampling.value = params.smoothFieldDisplay ? 1 : 0;
-  u.u_food.value = renderSampleViewRT.read.texture;
+  u.u_food.value = (WEBGPU_SIM && webgpuFieldTexture) ? webgpuFieldTexture : renderSampleViewRT.read.texture;
   u.u_agentDensity.value = densityRT.texture;
   u.u_agentDensityOverlay.value = agentDensityOverlayRT.texture;
   u.u_cameraPos.value.copy(renderCamera.position);
@@ -15318,6 +15411,7 @@ async function onLoad(gltf) {
   resetSimulation({ resetOats: true, spawnAgents: false });
   started = true;
   loadPhase('resetSimulation');
+  await initWebGPUSimBridge();
   lastFrameTime = performance.now();
   requestAnimationFrame(frame);
 
@@ -15608,6 +15702,69 @@ async function onLoad(gltf) {
     },
     saveState: saveDevState,
     loadState: loadDevState,
+    ptexAdjacency: () => ptexAdjacencyDiagnostics,
+    setPtex: (on) => { ptexDisplayActive = !!on; return { ptexDisplayActive, hasTextures: !!(ptexBoundaryTex && ptexFrameTex) }; },
+    setPtexDebug: (on) => { ptexDebugActive = !!on; return { ptexDebugActive }; },
+    paintSurfaceField,
+    // Verify step 1: the per-edge adjacency reproduces the candidate atlas the
+    // runtime actually samples. For each boundary texel, reconstruct the
+    // destination-seam UV + distance + charts from the frame and compare to the
+    // atlas slot with the smallest crossing distance (the nearest winner).
+    verifyPtexAdjacency({ eps = 1e-4, distEps = 0.75 } = {}) {
+      if (!ptexFrameData || !ptexBoundaryFrameId) return { error: 'ptex adjacency not built' };
+      const N = FIELD_SIZE;
+      const W = N * SEAM_TRANSITION_CANDIDATE_COUNT;
+      const uvA = new Float32Array(W * N * 4);
+      const metaA = new Float32Array(W * N * 4);
+      renderer.readRenderTargetPixels(seamTransitionUvAtlasRT, 0, 0, W, N, uvA);
+      renderer.readRenderTargetPixels(seamTransitionMetaAtlasRT, 0, 0, W, N, metaA);
+      const BAND = SEAM_CROSSING_TRANSITION_BAND_TEXELS;
+      let checked = 0, matched = 0, atlasEmpty = 0, mismatched = 0;
+      const samples = [];
+      for (let y = 0; y < N; y++) {
+        for (let x = 0; x < N; x++) {
+          const idx = y * N + x;
+          const f = ptexBoundaryFrameId[idx];
+          if (f === 0) continue;
+          checked++;
+          const p = f * PTEX_FRAME_FLOATS;
+          const ax = ptexFrameData[p], ay = ptexFrameData[p + 1];
+          const ex = ptexFrameData[p + 2], ey = ptexFrameData[p + 3];
+          const elen = ptexFrameData[p + 4];
+          const inx = ptexFrameData[p + 5], iny = ptexFrameData[p + 6];
+          const dax = ptexFrameData[p + 7], day = ptexFrameData[p + 8];
+          const dbx = ptexFrameData[p + 9], dby = ptexFrameData[p + 10];
+          const srcChart = ptexFrameData[p + 15], dstChart = ptexFrameData[p + 16];
+          const cu = (x + 0.5) / N, cv = (y + 0.5) / N;
+          const along = (cu - ax) * ex + (cv - ay) * ey;
+          const t = Math.min(1, Math.max(0, elen > 0 ? along / elen : 0));
+          const depth = Math.max(0, (cu - ax) * inx + (cv - ay) * iny);
+          const rDestU = dax + (dbx - dax) * t;
+          const rDestV = day + (dby - day) * t;
+          const rDist = Math.min(BAND, depth * N);
+          // Find the atlas slot at (x,y) with the smallest valid crossing distance.
+          let bestW = Infinity, bU = 0, bV = 0, bSrc = 0, bDst = 0, found = false;
+          for (let s = 0; s < SEAM_TRANSITION_CANDIDATE_COUNT; s++) {
+            const ap = (y * W + s * N + x) * 4;
+            if (uvA[ap + 2] < 0.5) continue;
+            if (uvA[ap + 3] < bestW) { bestW = uvA[ap + 3]; bU = uvA[ap]; bV = uvA[ap + 1]; bSrc = metaA[ap]; bDst = metaA[ap + 1]; found = true; }
+          }
+          if (!found) { atlasEmpty++; continue; }
+          const ok = Math.abs(rDestU - bU) < eps && Math.abs(rDestV - bV) < eps &&
+            Math.abs(rDist - bestW) < distEps && Math.round(bSrc) === Math.round(srcChart) && Math.round(bDst) === Math.round(dstChart);
+          if (ok) matched++; else { mismatched++; if (samples.length < 8) samples.push({ x, y, f, recon: [+rDestU.toFixed(5), +rDestV.toFixed(5), +rDist.toFixed(2), srcChart, dstChart], atlas: [+bU.toFixed(5), +bV.toFixed(5), +bestW.toFixed(2), bSrc, bDst] }); }
+        }
+      }
+      return {
+        boundaryTexels: checked,
+        matched,
+        mismatched,
+        atlasEmpty,
+        matchRate: checked ? +(100 * matched / (checked - atlasEmpty || 1)).toFixed(3) + '%' : 'n/a',
+        note: 'matched = per-edge reconstruction equals the atlas nearest-winner slot. Mismatches expected mainly at corners (>1 seam) where single-winner differs from the atlas eviction/dedup outcome.',
+        mismatchSamples: samples,
+      };
+    },
   };
   showStartButton();
   if (DEV_MODE) {
@@ -16336,6 +16493,11 @@ function buildSeamData(targetMesh, uvTopology = null) {
       }
     }
 
+    // Step 1: build the per-edge adjacency (frames + single-winner boundary
+    // index) independently from seamEdges, reusing the exact frame math. Runs
+    // for both the baked and live paths.
+    buildPtexAdjacency();
+
     for (let texel = 0; texel < texelCount; texel++) {
       const p = texel * 4;
       claimPixels[p] = candidateCounts[texel];
@@ -16662,6 +16824,153 @@ function buildSeamData(targetMesh, uvTopology = null) {
         edgeY: frame.edgeY,
         dstEdgeX: frame.dstEdgeX,
         dstEdgeY: frame.dstEdgeY,
+      };
+    }
+
+    // Ptex step 1: build ptexFrameData (per-edge affine) + ptexBoundaryFrameId
+    // (single-winner boundary index) using the SAME frame math + seam-band
+    // raster as the candidate atlases, so the two are directly comparable.
+    function buildPtexAdjacency() {
+      const N = FIELD_SIZE;
+      const maxFrames = seamEdges.length * 2 + 1; // frameId 0 reserved = "none"
+      const frameData = new Float32Array(maxFrames * PTEX_FRAME_FLOATS);
+      const boundaryFrameId = new Uint32Array(N * N); // 0 = no seam here
+      const boundaryDist = new Float32Array(N * N).fill(Infinity);
+      const owner = chartOwnership?.owner;
+      const conflict = chartOwnership?.conflict;
+      const outPad = SEAM_WELD_OUT_PAD_TEXELS / N;
+      const inDepth = SEAM_CROSSING_TRANSITION_BAND_TEXELS / N;
+      let frameId = 1;
+      let seamTexels = 0;
+
+      // Per-triangle UV->world Jacobian [dP/dU | dP/dV] (unnormalized tangents).
+      const triJacobian = (side) => {
+        const a = side.vA, b = side.vB, cc = side.vC;
+        const e1x = pos[b * 3] - pos[a * 3], e1y = pos[b * 3 + 1] - pos[a * 3 + 1], e1z = pos[b * 3 + 2] - pos[a * 3 + 2];
+        const e2x = pos[cc * 3] - pos[a * 3], e2y = pos[cc * 3 + 1] - pos[a * 3 + 1], e2z = pos[cc * 3 + 2] - pos[a * 3 + 2];
+        const d1u = uvAttr[b * 2] - uvAttr[a * 2], d1v = uvAttr[b * 2 + 1] - uvAttr[a * 2 + 1];
+        const d2u = uvAttr[cc * 2] - uvAttr[a * 2], d2v = uvAttr[cc * 2 + 1] - uvAttr[a * 2 + 1];
+        const det = d1u * d2v - d1v * d2u;
+        if (Math.abs(det) < 1e-20) return null;
+        const inv = 1 / det;
+        return {
+          dU: [(e1x * d2v - e2x * d1v) * inv, (e1y * d2v - e2y * d1v) * inv, (e1z * d2v - e2z * d1v) * inv],
+          dV: [(e2x * d1u - e1x * d2u) * inv, (e2y * d1u - e1y * d2u) * inv, (e2z * d1u - e1z * d2u) * inv],
+        };
+      };
+      const dot3 = (x, y) => x[0] * y[0] + x[1] * y[1] + x[2] * y[2];
+      // Full metric affine A_uv -> B_uv near the seam: M = pinv(J_dst) * J_src,
+      // with reference points at the corresponding shared vertex. This carries
+      // the per-chart scale/shear the old isometric candidate map dropped, so
+      // the cross-seam field derivative (hence the bump normal) is continuous.
+      const computeSeamAffine = (srcSide, dstSide) => {
+        const Js = triJacobian(srcSide), Jd = triJacobian(dstSide);
+        if (!Js || !Jd) return null;
+        const a00 = dot3(Jd.dU, Js.dU), a01 = dot3(Jd.dU, Js.dV);
+        const a10 = dot3(Jd.dV, Js.dU), a11 = dot3(Jd.dV, Js.dV);
+        const g00 = dot3(Jd.dU, Jd.dU), g01 = dot3(Jd.dU, Jd.dV), g11 = dot3(Jd.dV, Jd.dV);
+        const gdet = g00 * g11 - g01 * g01;
+        if (Math.abs(gdet) < 1e-20) return null;
+        const gi = 1 / gdet;
+        const ig00 = g11 * gi, ig01 = -g01 * gi, ig10 = -g01 * gi, ig11 = g00 * gi;
+        return {
+          m00: ig00 * a00 + ig01 * a10, m01: ig00 * a01 + ig01 * a11,
+          m10: ig10 * a00 + ig11 * a10, m11: ig10 * a01 + ig11 * a11,
+          uvARefX: uvAttr[srcSide.vA * 2], uvARefY: uvAttr[srcSide.vA * 2 + 1],
+          dstARefX: uvAttr[dstSide.vA * 2], dstARefY: uvAttr[dstSide.vA * 2 + 1],
+        };
+      };
+      const packFrame = (frame, aff) => {
+        const p = frame.seamId * PTEX_FRAME_FLOATS;
+        // texel0: src ref uv (xy), dst ref uv (zw)
+        frameData[p] = aff.uvARefX; frameData[p + 1] = aff.uvARefY;
+        frameData[p + 2] = aff.dstARefX; frameData[p + 3] = aff.dstARefY;
+        // texel1: M as mat2(t.x,t.y,t.z,t.w) = columns (m00,m10),(m01,m11)
+        frameData[p + 4] = aff.m00; frameData[p + 5] = aff.m10;
+        frameData[p + 6] = aff.m01; frameData[p + 7] = aff.m11;
+        // texel2: charts + tangent rotation (rotation reserved for the sim step)
+        frameData[p + 8] = frame.sourceChart; frameData[p + 9] = frame.destinationChart;
+        frameData[p + 10] = frame.sinT; frameData[p + 11] = frame.cosT;
+      };
+
+      const claimFrame = (frame) => {
+        // Same seam-band quad the atlas rasterizer uses (pushTransitionCandidate).
+        const { uvA, uvB, inX_src, inY_src } = frame;
+        const qA = [uvA[0] - inX_src * outPad, uvA[1] - inY_src * outPad];
+        const qB = [uvB[0] - inX_src * outPad, uvB[1] - inY_src * outPad];
+        const qBi = [uvB[0] + inX_src * inDepth, uvB[1] + inY_src * inDepth];
+        const qAi = [uvA[0] + inX_src * inDepth, uvA[1] + inY_src * inDepth];
+        const minX = Math.max(0, Math.floor(Math.min(qA[0], qB[0], qBi[0], qAi[0]) * N) - 1);
+        const maxX = Math.min(N - 1, Math.ceil(Math.max(qA[0], qB[0], qBi[0], qAi[0]) * N) + 1);
+        const minY = Math.max(0, Math.floor(Math.min(qA[1], qB[1], qBi[1], qAi[1]) * N) - 1);
+        const maxY = Math.min(N - 1, Math.ceil(Math.max(qA[1], qB[1], qBi[1], qAi[1]) * N) + 1);
+        const areaA = orient2d(qA[0], qA[1], qB[0], qB[1], qBi[0], qBi[1]);
+        const areaB = orient2d(qA[0], qA[1], qBi[0], qBi[1], qAi[0], qAi[1]);
+        for (let y = minY; y <= maxY; y++) {
+          for (let x = minX; x <= maxX; x++) {
+            const touches =
+              triangleTouchesTexel(qA[0], qA[1], qB[0], qB[1], qBi[0], qBi[1], areaA, x, y) ||
+              triangleTouchesTexel(qA[0], qA[1], qBi[0], qBi[1], qAi[0], qAi[1], areaB, x, y);
+            if (!touches) continue;
+            const idx = y * N + x;
+            // Only the source-owning chart's authoritative texels claim (matches
+            // the atlas packer's appendCandidate ownership filter).
+            if (!owner || owner[idx] !== frame.sourceChart || (conflict && conflict[idx] !== 0)) continue;
+            const dist = candidateAtTexel(frame, x, y).distanceTexels;
+            if (dist < boundaryDist[idx]) {
+              if (boundaryFrameId[idx] === 0) seamTexels++;
+              boundaryDist[idx] = dist;
+              boundaryFrameId[idx] = frame.seamId;
+            }
+          }
+        }
+      };
+
+      for (const seam of seamEdges) {
+        const fAB = makeTransitionCandidateFrame(seam.A, seam.B, frameId);
+        const aAB = fAB && computeSeamAffine(seam.A, seam.B);
+        if (fAB && aAB) { packFrame(fAB, aAB); claimFrame(fAB); }
+        frameId++;
+        const fBA = makeTransitionCandidateFrame(seam.B, seam.A, frameId);
+        const aBA = fBA && computeSeamAffine(seam.B, seam.A);
+        if (fBA && aBA) { packFrame(fBA, aBA); claimFrame(fBA); }
+        frameId++;
+      }
+
+      ptexFrameData = frameData;
+      ptexFrameCount = frameId;
+      ptexBoundaryFrameId = boundaryFrameId;
+
+      // Upload GPU textures the resolver samples.
+      const texelsPerFrame = PTEX_FRAME_FLOATS / 4; // 6
+      const totalTexels = maxFrames * texelsPerFrame;
+      const HT = Math.ceil(totalTexels / PTEX_FRAME_TEX_WIDTH);
+      const padded = new Float32Array(PTEX_FRAME_TEX_WIDTH * HT * 4);
+      padded.set(frameData);
+      ptexFrameTex?.dispose?.();
+      ptexFrameTex = new THREE.DataTexture(padded, PTEX_FRAME_TEX_WIDTH, HT, THREE.RGBAFormat, THREE.FloatType);
+      ptexFrameTex.internalFormat = 'RGBA32F';
+      ptexFrameTex.minFilter = THREE.NearestFilter;
+      ptexFrameTex.magFilter = THREE.NearestFilter;
+      ptexFrameTex.wrapS = THREE.ClampToEdgeWrapping;
+      ptexFrameTex.wrapT = THREE.ClampToEdgeWrapping;
+      ptexFrameTex.needsUpdate = true;
+      ptexBoundaryTex?.dispose?.();
+      ptexBoundaryTex = new THREE.DataTexture(boundaryFrameId, N, N, THREE.RedIntegerFormat, THREE.UnsignedIntType);
+      ptexBoundaryTex.internalFormat = 'R32UI';
+      ptexBoundaryTex.minFilter = THREE.NearestFilter;
+      ptexBoundaryTex.magFilter = THREE.NearestFilter;
+      ptexBoundaryTex.wrapS = THREE.ClampToEdgeWrapping;
+      ptexBoundaryTex.wrapT = THREE.ClampToEdgeWrapping;
+      ptexBoundaryTex.needsUpdate = true;
+
+      ptexAdjacencyDiagnostics = {
+        frameCount: frameId - 1,
+        boundaryTexels: seamTexels,
+        maxFrames,
+        frameTexBytes: PTEX_FRAME_TEX_WIDTH * HT * 16,
+        boundaryTexBytes: N * N * 4,
+        note: 'Ptex per-edge affine + single-winner boundary index (replaces the candidate atlases).',
       };
     }
 
@@ -17633,6 +17942,48 @@ async function loadDevState(name = 'dev') {
   return { loaded: name };
 }
 
+// Dev-only: rasterize a SURFACE-CONTINUOUS test field (a smooth function of 3D
+// world position — identical on both sides of every seam by construction) into
+// the atlas, so seam artifacts become visible everywhere at once for A/B,
+// independent of the slow simulation. A perfect seam sampler shows no seam; the
+// legacy path staircases at every seam.
+let surfacePaintMaterial = null;
+function paintSurfaceField(freq = 11) {
+  if (!mesh) return { error: 'no mesh' };
+  if (!surfacePaintMaterial) {
+    surfacePaintMaterial = new THREE.ShaderMaterial({
+      glslVersion: THREE.GLSL3,
+      uniforms: { u_freq: { value: freq } },
+      vertexShader: `out vec3 vWorld;
+        void main(){ vWorld = (modelMatrix * vec4(position, 1.0)).xyz; gl_Position = vec4(uv * 2.0 - 1.0, 0.0, 1.0); }`,
+      fragmentShader: `precision highp float; in vec3 vWorld; out vec4 o; uniform float u_freq;
+        void main(){ float k = u_freq; float f = 0.32 + 0.16*sin(vWorld.x*k) + 0.16*cos(vWorld.y*k*0.86) + 0.12*sin(vWorld.z*k*1.18);
+          o = vec4(max(f, 0.0), 0.0, 0.0, 1.0); }`,
+      side: THREE.DoubleSide, depthTest: false, depthWrite: false,
+    });
+  }
+  surfacePaintMaterial.uniforms.u_freq.value = freq;
+  const scene = new THREE.Scene();
+  const m = new THREE.Mesh(mesh.geometry, surfacePaintMaterial);
+  m.frustumCulled = false;
+  m.matrixAutoUpdate = false;
+  m.matrixWorld.copy(mesh.matrixWorld);
+  scene.add(m);
+  const prev = renderer.getRenderTarget();
+  renderer.setRenderTarget(fieldRT.read);
+  renderer.setClearColor(0x000000, 1);
+  renderer.clear(true, false, false);
+  renderer.render(scene, quadCamera);
+  renderer.setRenderTarget(prev);
+  clipCanonicalField(fieldRT);
+  updateFieldSampleView();
+  markRenderFieldChanged();
+  smoothInitialized = false;
+  for (let i = 0; i < 8; i++) smoothRenderField();
+  renderSceneOnce(performance.now(), { updateAnnotations: false });
+  return { painted: true };
+}
+
 function simulate(now, dt) {
   renderOats();
   renderDensity();
@@ -18167,6 +18518,85 @@ function ensureWireframeOverlay() {
 }
 
 // === frame loop ===
+// Read the app's baked seam atlases (WebGL render targets) back to the CPU and
+// upload them as WebGPU rgba32float textures the compute sim can sample. Run once
+// at init (atlases are static after the mapping phase). chartUnsafe is RGBA8; the
+// rest are RGBA32F. Keys/order must match SEAM_TEXTURE_KEYS in webgpu/seam.js.
+function buildSeamTexturesForWebGPU(device) {
+  const N = FIELD_SIZE;
+  const W = FIELD_SIZE * SEAM_TRANSITION_CANDIDATE_COUNT;   // 4-wide candidate atlases
+  const mkTex = (w, h) => device.createTexture({
+    size: [w, h], format: 'rgba32float',
+    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+  });
+  const uploadFloat = (rt, w, h) => {
+    const buf = new Float32Array(w * h * 4);
+    renderer.readRenderTargetPixels(rt, 0, 0, w, h, buf);
+    const tex = mkTex(w, h);
+    device.queue.writeTexture({ texture: tex }, buf, { bytesPerRow: w * 16, rowsPerImage: h }, [w, h]);
+    return tex;
+  };
+  const uploadByteAsFloat = (rt, w, h) => {
+    const bytes = new Uint8Array(w * h * 4);
+    renderer.readRenderTargetPixels(rt, 0, 0, w, h, bytes);
+    const buf = new Float32Array(w * h * 4);
+    for (let i = 0; i < buf.length; i++) buf[i] = bytes[i] / 255;   // RGBA8 → normalized float
+    const tex = mkTex(w, h);
+    device.queue.writeTexture({ texture: tex }, buf, { bytesPerRow: w * 16, rowsPerImage: h }, [w, h]);
+    return tex;
+  };
+  return {
+    chartId: uploadFloat(chartIdRT, N, N),
+    chartUnsafe: uploadByteAsFloat(chartUnsafeRT, N, N),
+    redirectUv: uploadFloat(seamRedirectUvRT, N, N),
+    redirectMeta: uploadFloat(seamRedirectMetaRT, N, N),
+    redirectClaim: uploadFloat(seamRedirectClaimRT, N, N),
+    transitionUv: uploadFloat(seamTransitionUvAtlasRT, W, N),
+    transitionMeta: uploadFloat(seamTransitionMetaAtlasRT, W, N),
+    transitionDirection: uploadFloat(seamTransitionDirectionAtlasRT, W, N),
+    transitionBasis: uploadFloat(seamTransitionBasisAtlasRT, W, N),
+  };
+}
+
+async function initWebGPUSimBridge() {
+  if (!WEBGPU_SIM) return;
+  try {
+    // Create the device up front so seam atlases can be uploaded to it before the sim binds them.
+    const adapter = await navigator.gpu?.requestAdapter?.({ powerPreference: 'high-performance' });
+    const device = adapter ? await adapter.requestDevice() : null;
+    if (!device) throw new Error('no WebGPU adapter/device');
+    const seamTextures = WEBGPU_SEAM ? buildSeamTexturesForWebGPU(device) : null;
+    webgpuSim = await createPhysarumSim({
+      device,
+      fieldSize: FIELD_SIZE,
+      capacity: AGENT_CAPACITY,
+      seedCount: Math.min(60000, AGENT_CAPACITY),
+      seam: WEBGPU_SEAM,
+      seamTextures,
+    });
+    if (webgpuSim.seamSetupError) console.warn('[webgpu] seam setup:', webgpuSim.seamSetupError);
+    webgpuFieldData = new Float32Array(FIELD_SIZE * FIELD_SIZE);
+    webgpuFieldTexture = new THREE.DataTexture(
+      webgpuFieldData, FIELD_SIZE, FIELD_SIZE, THREE.RedFormat, THREE.FloatType,
+    );
+    webgpuFieldTexture.minFilter = THREE.NearestFilter;
+    webgpuFieldTexture.magFilter = THREE.NearestFilter;
+    webgpuFieldTexture.wrapS = THREE.ClampToEdgeWrapping;
+    webgpuFieldTexture.wrapT = THREE.ClampToEdgeWrapping;
+    webgpuFieldTexture.needsUpdate = true;
+    window.__webgpuBridge = {
+      sim: webgpuSim,
+      fieldSize: FIELD_SIZE,
+      get readbackMs() { return +webgpuReadbackMs.toFixed(2); },
+      get liveAgents() { return webgpuSim ? webgpuSim.getLiveEstimate() : 0; },
+    };
+    diagLog('webgpu', `WebGPU sim bridge active (?webgpu=1): field ${FIELD_SIZE}², cap ${AGENT_CAPACITY}, seam=${WEBGPU_SEAM ? 'on' : 'off'}`);
+  } catch (e) {
+    console.error('[webgpu] bridge init failed; falling back to WebGL sim:', e);
+    webgpuSim = null;
+  }
+}
+
 function frame(now) {
   const rawDt = Math.min((now - lastFrameTime) / 16.6667, FRAME_DT_CLAMP);
   lastFrameTime = now;
@@ -18178,7 +18608,20 @@ function frame(now) {
 
   if (started) {
     updateOatFoodDecay(now);
-    if (!paused) {
+    if (WEBGPU_SIM && webgpuSim) {
+      // Bridge: WebGPU compute runs the whole sim; pull its field back into a
+      // DataTexture for the WebGL surface shader (?webgpu=1). Readback is async
+      // (double-buffered by the sim) so it never stalls the frame.
+      if (!paused) webgpuSim.step();
+      const webgpuRbStart = performance.now();
+      webgpuSim.readFieldInto(webgpuFieldData).then((ok) => {
+        if (!ok) return;
+        const dt = performance.now() - webgpuRbStart;
+        webgpuReadbackMs = webgpuReadbackMs ? webgpuReadbackMs * 0.9 + dt * 0.1 : dt;
+        if (webgpuFieldTexture) webgpuFieldTexture.needsUpdate = true;
+      });
+      if ((webgpuBridgeFrame++ & 15) === 0) webgpuSim.liveCount();
+    } else if (!paused) {
       const steps = Math.max(0, Math.min(MAX_SIMULATION_STEPS, Math.round(params.simulationSteps)));
       if (steps > 0) {
         const stepDt = rawDt / steps;
@@ -18201,7 +18644,7 @@ function frame(now) {
       lastSmoothingParamsSignature = smoothingSignature;
       markRenderFieldChanged();
     }
-    if (smoothSettleFramesRemaining > 0) {
+    if (!WEBGPU_SIM && smoothSettleFramesRemaining > 0) {
       smoothSettleFramesRemaining--;
       smoothRenderField();
     }
