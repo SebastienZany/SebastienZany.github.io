@@ -24,7 +24,7 @@
       const t0 = performance.now();
       // Build stamp so a stale cached copy is obvious in the diagnostics report.
       // BUMP THIS (and the matching BUILD_VERSION in main.js) on every deploy.
-      const BUILD_VERSION = '2026-07-06-smooth-field-toggle';
+      const BUILD_VERSION = '2026-07-07-mobile-panel-tap';
       const events = [];
       const state = { loaded: false, overlay: null, textEl: null, mainVersion: null };
       let previousRun = null;
@@ -228,6 +228,10 @@
   <body>
     <main id="app" data-panels-visible="false">
       <canvas id="sim" aria-label="Slime mold on cuttlefish skin"></canvas>
+      <!-- Touch-only corner hotspot: triple-tap toggles the parameters panel on
+           phones (there is no keyboard for the P shortcut). Sits above the panel
+           so it can close it too; invisible by design. -->
+      <div id="panelTouchToggle" aria-hidden="true"></div>
       <div id="annotationLayer" class="annotation-layer" aria-hidden="true"></div>
       <div id="endingFadeOverlay" class="ending-fade-overlay" aria-hidden="true"></div>
       <div id="endingCountdownLayer" class="ending-countdown-layer" aria-hidden="true">

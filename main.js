@@ -7,7 +7,7 @@ import { MeshBVH, acceleratedRaycast } from 'three-mesh-bvh';
 // BUMP THIS (and the matching BUILD_VERSION in index.html) on every deploy.
 // index.html and main.js cache independently, so they carry the same value and
 // the bootstrap flags a mismatch — that means one of the two files is cached.
-const BUILD_VERSION = '2026-07-06-smooth-field-toggle';
+const BUILD_VERSION = '2026-07-07-mobile-panel-tap';
 
 // Load diagnostics hook installed by the inline bootstrap in index.html.
 // No-ops when absent so main.js keeps working standalone.
@@ -8059,6 +8059,44 @@ function handlePanelVisibilityKeydown(event) {
   if (isPanelShortcutEditableTarget(event.target)) return;
   event.preventDefault();
   toggleUiPanelsVisible();
+}
+
+// Phones have no P key, so a triple-tap on the corner hotspot toggles the
+// parameters panel. Same 3-taps-within-1200ms window as the diagnostics
+// gesture in index.html. A tap that drags (> 12px) is treated as a scroll and
+// resets the count, so panel-scroll flicks starting in the corner don't fire.
+function registerPanelTouchToggle() {
+  const target = document.getElementById('panelTouchToggle');
+  if (!target) return;
+  const TRIPLE_TAP_WINDOW_MS = 1200;
+  const TAP_MOVE_TOLERANCE_PX = 12;
+  let tapTimes = [];
+  let down = null;
+  target.addEventListener('pointerdown', (event) => {
+    down = { x: event.clientX, y: event.clientY, id: event.pointerId };
+  });
+  target.addEventListener('pointerup', (event) => {
+    if (!down || down.id !== event.pointerId) {
+      down = null;
+      return;
+    }
+    const moved = Math.hypot(event.clientX - down.x, event.clientY - down.y);
+    down = null;
+    if (moved > TAP_MOVE_TOLERANCE_PX) {
+      tapTimes = [];
+      return;
+    }
+    const now = performance.now();
+    tapTimes = tapTimes.filter((t) => now - t < TRIPLE_TAP_WINDOW_MS);
+    tapTimes.push(now);
+    if (tapTimes.length >= 3) {
+      tapTimes = [];
+      toggleUiPanelsVisible();
+    }
+  });
+  target.addEventListener('pointercancel', () => {
+    down = null;
+  });
 }
 
 function handleIntroSkipKeydown(event) {
@@ -17851,6 +17889,7 @@ function initControls() {
     if (!collapsed) drawAgentCharts();
   });
   setUiPanelsVisible(uiPanelsVisible);
+  registerPanelTouchToggle();
   window.addEventListener('keydown', handlePanelVisibilityKeydown);
   window.addEventListener('keydown', handleIntroSkipKeydown);
   window.addEventListener('keydown', handleStoryBoxesKeydown);

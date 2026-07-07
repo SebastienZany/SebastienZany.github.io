@@ -419,6 +419,29 @@ select {
   display: none;
 }
 
+/* Touch-only triple-tap target for opening/closing the parameters panel on
+   phones. Above the panel (z beats .panel/.sound-check-panel) so it can close
+   a full-screen panel; below the diagnostics overlay (z 99999). Pointer input
+   only, so it never steals a corner of the pointer from desktop OrbitControls. */
+#panelTouchToggle {
+  display: none;
+}
+
+@media (pointer: coarse) {
+  #panelTouchToggle {
+    display: block;
+    position: fixed;
+    z-index: 100;
+    right: 0;
+    bottom: 0;
+    width: max(60px, env(safe-area-inset-right));
+    height: max(60px, env(safe-area-inset-bottom));
+    min-width: 60px;
+    min-height: 60px;
+    background: transparent;
+  }
+}
+
 #app[data-panels-visible="false"] .panel,
 #app[data-panels-visible="false"] .sound-check-panel {
   display: none;
