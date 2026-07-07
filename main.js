@@ -7,7 +7,7 @@ import { MeshBVH, acceleratedRaycast } from 'three-mesh-bvh';
 // BUMP THIS (and the matching BUILD_VERSION in index.html) on every deploy.
 // index.html and main.js cache independently, so they carry the same value and
 // the bootstrap flags a mismatch — that means one of the two files is cached.
-const BUILD_VERSION = '2026-07-06-sliver-and-splat-fix';
+const BUILD_VERSION = '2026-07-06-smooth-field-display';
 
 // Load diagnostics hook installed by the inline bootstrap in index.html.
 // No-ops when absent so main.js keeps working standalone.
@@ -115,6 +115,13 @@ const MAX_PIXEL_RATIO = IS_MOBILE_DEVICE ? 1.5 : 2;
 const MOBILE_FIELD_SIZE = 768;
 const FIELD_SIZE_OVERRIDE = Number(new URLSearchParams(window.location.search).get('field'));
 const FIELD_SIZE = FIELD_SIZE_OVERRIDE > 0 ? FIELD_SIZE_OVERRIDE : (IS_MOBILE_DEVICE ? MOBILE_FIELD_SIZE : 1536);
+// Display-only smoothing of the low-res field: the surface shader warps each
+// food read's sub-texel fraction with a quintic smoothstep before one hardware
+// bilinear tap (the render sample view is RGBA16F + LinearFilter). Same fetch
+// count and same 2x2 footprint as plain bilinear, so it is seam-halo-safe and
+// costs no extra memory or bandwidth. ?smoothfield=0 restores unwarped
+// sampling for A/B comparison.
+const SMOOTH_FIELD_DISPLAY = new URLSearchParams(window.location.search).get('smoothfield') !== '0';
 // Agents run at half the field resolution on both profiles.
 const AGENT_SIDE = Math.round(FIELD_SIZE / 2);
 const SEAM_BAKE_EXPORT_MODE = new URLSearchParams(window.location.search).has('bakeExport');
@@ -1127,6 +1134,7 @@ diagLog('webgl', JSON.stringify({
   mobileProfile: IS_MOBILE_DEVICE,
   fieldSize: FIELD_SIZE,
   agentSide: AGENT_SIDE,
+  smoothFieldDisplay: SMOOTH_FIELD_DISPLAY,
   pixelRatio: renderer.getPixelRatio(),
 }));
 
@@ -1668,6 +1676,27 @@ function makeSampleViewFieldRT() {
     stencilBuffer: false,
   });
 }
+// The render sample view is display-only (the slime surface shader, OAT
+// trigger scoring, and gold-wafer max-food history read it; nothing feeds it
+// back into the canonical simulation fields, which stay RGBA32F). Half-float
+// filtering is core WebGL2 — including iOS Safari, which cannot linear-filter
+// RGBA32F (OES_texture_float_linear is absent there) — so RGBA16F + Linear is
+// what lets the surface shader interpolate the low-res field smoothly instead
+// of showing per-texel facets. It also halves this pair's memory. Renderable
+// via EXT_color_buffer_float, which is a hard requirement at startup.
+function makeDisplaySampleViewFieldRT() {
+  return new THREE.WebGLRenderTarget(FIELD_SIZE, FIELD_SIZE, {
+    type: THREE.HalfFloatType,
+    format: THREE.RGBAFormat,
+    internalFormat: 'RGBA16F',
+    minFilter: THREE.LinearFilter,
+    magFilter: THREE.LinearFilter,
+    wrapS: THREE.ClampToEdgeWrapping,
+    wrapT: THREE.ClampToEdgeWrapping,
+    depthBuffer: false,
+    stencilBuffer: false,
+  });
+}
 function makeObservationTriggerScoreRT() {
   return new THREE.WebGLRenderTarget(MAX_OATS, 1, {
     type: THREE.FloatType,
@@ -1824,7 +1853,7 @@ const agentPrefixRT = new RTPair(makeAgentCandidateRT);
 const fieldRT = new RTPair(makeCanonicalFieldRT);
 const fieldSampleViewRT = makeSampleViewFieldRT();
 const renderRT = new RTPair(makeCanonicalFieldRT);
-const renderSampleViewRT = new RTPair(makeSampleViewFieldRT);
+const renderSampleViewRT = new RTPair(makeDisplaySampleViewFieldRT);
 const renderScratchRT = makeSampleViewFieldRT();
 const observationTriggerScoreRT = makeObservationTriggerScoreRT();
 const observationTriggerQueryRT = makeObservationTriggerQueryRT();
@@ -2661,6 +2690,99 @@ void main() {
     food = mix(spatialFood, previousFood, clamp(temporalBlend, 0.0, 0.995));
   }
   outColor = vec4(clamp(food, 0.0, u_foodClamp), 0.0, 0.0, 1.0);
+}
+`;
+
+// Display-only 3x3 cubic-B-spline prefilter over the render sample view. The
+// slime surface shader magnifies this field far past screen resolution, so
+// texel-frequency noise in the deposits reads as hard blocky patches (the
+// thin-film hue is hypersensitive to food). Filtering once per texel here is
+// strictly cheaper than filtering per fragment in the surface shader, and the
+// kernel never leaks across charts — a wider per-fragment kernel (e.g.
+// bicubic's 4x4) cannot make that guarantee because the seam halo is only 1
+// texel deep.
+//
+// Running resolveSampleUvSafe for all 8 neighbors of every texel costs ~50
+// dependent texture reads per texel and measurably drops the frame rate
+// (41 -> 33 fps at 1536 on an M5), so texels whose whole 3x3 ring stays
+// inside their own chart (the vast majority — chart topology is static after
+// load) take a fast path of 9 plain reads, steered by a mask baked once at
+// load: r = authoritative, g = ring is same-chart interior. Non-authoritative
+// texels write 0; padFieldAcrossSeamsSafe rebuilds the halo afterwards.
+const displayPrefilterMaskFragment = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+out vec4 outColor;
+uniform sampler2D u_chartId;
+uniform sampler2D u_chartUnsafe;
+uniform vec2 u_texel;
+bool isOutsideAtlas(vec2 uv) {
+  return uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0;
+}
+float chartIdAt(vec2 uv) {
+  if (isOutsideAtlas(uv)) return -1.0;
+  return floor(texture(u_chartId, uv).r + 0.5);
+}
+bool isSafeChartTexel(vec2 uv, float chart) {
+  return !isOutsideAtlas(uv) &&
+    abs(chartIdAt(uv) - chart) < 0.5 &&
+    texture(u_chartUnsafe, uv).r < 0.5;
+}
+void main() {
+  float baseChart = chartIdAt(v_uv);
+  bool authoritative = baseChart > 0.5 && texture(u_chartUnsafe, v_uv).r < 0.5;
+  bool interior = authoritative;
+  if (interior) {
+    for (int dy = -1; dy <= 1; dy++) {
+      for (int dx = -1; dx <= 1; dx++) {
+        if (dx == 0 && dy == 0) continue;
+        if (!isSafeChartTexel(v_uv + vec2(float(dx), float(dy)) * u_texel, baseChart)) {
+          interior = false;
+        }
+      }
+    }
+  }
+  outColor = vec4(authoritative ? 1.0 : 0.0, interior ? 1.0 : 0.0, 0.0, 1.0);
+}
+`;
+
+// Deliberately does NOT include safeSamplingGlsl: compiling the seam-resolve
+// machinery into this pass (10 samplers + the candidate loop) throttles GPU
+// occupancy for every texel even when the slow branch never runs. Instead,
+// seam-adjacent texels (mask.g == 0, ~12% of authoritative texels) pass
+// through unfiltered — a 1-texel band along seams that the surface shader's
+// quintic warp still displays smoothly.
+const displayPrefilterFragment = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+out vec4 outColor;
+uniform sampler2D u_food;
+uniform sampler2D u_interiorMask;
+uniform vec2 u_texel;
+uniform float u_foodClamp;
+void main() {
+  vec2 mask = texture(u_interiorMask, v_uv).rg;
+  if (mask.r < 0.5) {
+    outColor = vec4(0.0, 0.0, 0.0, 1.0);
+    return;
+  }
+  float value;
+  if (mask.g > 0.5) {
+    // The 3x3 (1/6, 2/3, 1/6)^2 kernel expressed as 4 hardware bilinear taps
+    // at (+/-1/3, +/-1/3) texel: each tap blends center and neighbor 2/3:1/3
+    // per axis, and averaging the 4 symmetric taps reproduces the kernel
+    // exactly. The interior mask guarantees the 3x3 footprint is same-chart,
+    // so the taps never blend across a seam or into a zeroed gutter.
+    vec2 o = u_texel / 3.0;
+    value = 0.25 * (
+      max(texture(u_food, v_uv - o).r, 0.0) +
+      max(texture(u_food, v_uv + vec2(o.x, -o.y)).r, 0.0) +
+      max(texture(u_food, v_uv + vec2(-o.x, o.y)).r, 0.0) +
+      max(texture(u_food, v_uv + o).r, 0.0));
+  } else {
+    value = max(texture(u_food, v_uv).r, 0.0);
+  }
+  outColor = vec4(clamp(value, 0.0, u_foodClamp), 0.0, 0.0, 1.0);
 }
 `;
 
@@ -3742,11 +3864,34 @@ float filmThickness01FromFood(float food) {
   if (denom < 0.00001) return clamp(x / maxFood, 0.0, 1.0);
   return clamp((1.0 - exp(-curve * x)) / denom, 0.0, 1.0);
 }
+// Magnification filter for the food field. The field is far below screen
+// resolution, so point/bilinear samples read as facets: bilinear is only C0,
+// which makes the finite-difference bump gradient piecewise-constant and
+// lights each texel as a flat mirror tile. Warping the sub-texel fraction with
+// a quintic smoothstep before ONE hardware bilinear tap makes the
+// reconstruction C2 — height and gradient vary continuously across texels —
+// while reading exactly the same 2x2 texel footprint as plain bilinear. That
+// footprint bound is load-bearing: the seam halo pads only
+// SEAM_REDIRECT_HALO_TEXELS (1) texel of cross-chart values into gutters, so
+// any wider kernel (e.g. bicubic's 4x4) reads foreign charts at seams. Same
+// texture-fetch count as the original point sampling, so no per-fragment cost.
+float sampleFoodSmooth(vec2 uv) {
+${SMOOTH_FIELD_DISPLAY ? `
+  vec2 texelIndex = uv / u_texel - 0.5;
+  vec2 base = floor(texelIndex);
+  vec2 f = texelIndex - base;
+  vec2 fw = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+  vec2 smoothUv = (base + 0.5 + fw) * u_texel;
+  return max(texture(u_food, smoothUv).r, 0.0);
+` : `
+  return max(texture(u_food, uv).r, 0.0);
+`}
+}
 float readFoodSafe(vec2 sampleUv, float fallback) {
   float valid = 0.0;
   vec2 r = resolveSampleUvSafe(v_uv, sampleUv, valid);
   if (valid < 0.5) return fallback;
-  return max(texture(u_food, r).r, 0.0);
+  return sampleFoodSmooth(r);
 }
 float readDensitySafe(vec2 baseUv, vec2 sampleUv, float fallback) {
   float valid = 0.0;
@@ -3915,7 +4060,7 @@ vec3 goldWaferFilmColor(float nDotV, float thicknessNm) {
 }
 void main() {
   bool baseSafe = isAuthoritativeChartTexel(v_uv);
-  float food = baseSafe ? max(texture(u_food, v_uv).r, 0.0) : 0.0;
+  float food = baseSafe ? sampleFoodSmooth(v_uv) : 0.0;
 
   // Build tangent space from screen-space derivatives.
   vec3 dp1 = dFdx(v_worldPos);
@@ -4214,6 +4359,19 @@ const smoothMaterial = makeRawShaderMaterial(smoothFragment, {
   u_smoothingTapCount: { value: getRenderSmoothingTapCount(params) },
   ...sharedSafeSamplingUniforms(),
   u_useZeroGutterTransitions: { value: 1 },
+});
+
+const displayPrefilterMaskMaterial = makeRawShaderMaterial(displayPrefilterMaskFragment, {
+  u_chartId: { value: chartIdRT.texture },
+  u_chartUnsafe: { value: chartUnsafeRT.texture },
+  u_texel: { value: new THREE.Vector2(1 / FIELD_SIZE, 1 / FIELD_SIZE) },
+});
+
+const displayPrefilterMaterial = makeRawShaderMaterial(displayPrefilterFragment, {
+  u_food: { value: null },
+  u_interiorMask: { value: null },
+  u_texel: { value: new THREE.Vector2(1 / FIELD_SIZE, 1 / FIELD_SIZE) },
+  u_foodClamp: { value: params.foodClamp },
 });
 
 const maxFoodHistoryMaterial = makeRawShaderMaterial(maxFoodHistoryFragment, {
@@ -10537,8 +10695,7 @@ function createUvDiagnostics(targetMesh, initialTopology = null, initialOwnershi
     const state = ownership();
 
     function summarize(rt) {
-      const buf = new Float32Array(FIELD_SIZE * FIELD_SIZE * 4);
-      renderer.readRenderTargetPixels(rt, 0, 0, FIELD_SIZE, FIELD_SIZE, buf);
+      const buf = readRTPixelsAsFloat(rt, FIELD_SIZE, FIELD_SIZE);
       let authoritativeEnergy = 0;
       let nonAuthoritativeEnergy = 0;
       let unsafeEnergy = 0;
@@ -10585,11 +10742,7 @@ function createUvDiagnostics(targetMesh, initialTopology = null, initialOwnershi
     const state = ownership();
 
     function summarize(rt) {
-      const isByteTarget = rt.texture.type === THREE.UnsignedByteType;
-      const ArrayType = isByteTarget ? Uint8Array : Float32Array;
-      const scale = isByteTarget ? 1 / 255 : 1;
-      const buf = new ArrayType(FIELD_SIZE * FIELD_SIZE * 4);
-      renderer.readRenderTargetPixels(rt, 0, 0, FIELD_SIZE, FIELD_SIZE, buf);
+      const buf = readRTPixelsAsFloat(rt, FIELD_SIZE, FIELD_SIZE);
       let authoritativeEnergy = 0;
       let nonAuthoritativeEnergy = 0;
       let unsafeEnergy = 0;
@@ -10597,7 +10750,7 @@ function createUvDiagnostics(targetMesh, initialTopology = null, initialOwnershi
       let nonAuthoritativeNonZeroTexels = 0;
       let unsafeNonZeroTexels = 0;
       for (let i = 0, texel = 0; i < buf.length; i += 4, texel++) {
-        const value = Math.max(0, buf[i] * scale);
+        const value = Math.max(0, buf[i]);
         if (value <= 1e-8) continue;
         const authoritative = state.owner[texel] > 0 && state.conflict[texel] === 0;
         const unsafe = state.conflict[texel] !== 0;
@@ -14361,6 +14514,31 @@ function runNamedPass(passName) {
   return fn();
 }
 
+// Readback that tolerates the mixed RT types used for field-sized targets:
+// byte masks, RGBA16F display/blendable targets (readRenderTargetPixels
+// requires a Uint16Array there, decoded to float here), and RGBA32F canonical
+// fields. Always returns values in float scale (bytes normalized to 0..1).
+function readRTPixelsAsFloat(rt, width = rt.width, height = rt.height) {
+  const texelCount = width * height * 4;
+  if (rt.texture.type === THREE.UnsignedByteType) {
+    const bytes = new Uint8Array(texelCount);
+    renderer.readRenderTargetPixels(rt, 0, 0, width, height, bytes);
+    const out = new Float32Array(texelCount);
+    for (let i = 0; i < texelCount; i++) out[i] = bytes[i] / 255;
+    return out;
+  }
+  if (rt.texture.type === THREE.HalfFloatType) {
+    const halves = new Uint16Array(texelCount);
+    renderer.readRenderTargetPixels(rt, 0, 0, width, height, halves);
+    const out = new Float32Array(texelCount);
+    for (let i = 0; i < texelCount; i++) out[i] = THREE.DataUtils.fromHalfFloat(halves[i]);
+    return out;
+  }
+  const out = new Float32Array(texelCount);
+  renderer.readRenderTargetPixels(rt, 0, 0, width, height, out);
+  return out;
+}
+
 function estimateRenderTargetMemory() {
   const targets = [
     ['agentRT.read', agentRT.read],
@@ -15213,12 +15391,8 @@ async function onLoad(gltf) {
       });
     },
     dumpField(rt = renderSampleViewRT.read) {
-      return runReadbackDiagnostic('dumpField', () => {
-        const ArrayType = rt.texture.type === THREE.UnsignedByteType ? Uint8Array : Float32Array;
-        const buf = new ArrayType(FIELD_SIZE * FIELD_SIZE * 4);
-        renderer.readRenderTargetPixels(rt, 0, 0, FIELD_SIZE, FIELD_SIZE, buf);
-        return buf;
-      });
+      return runReadbackDiagnostic('dumpField', () =>
+        readRTPixelsAsFloat(rt, FIELD_SIZE, FIELD_SIZE));
     },
     runOnce(passName) {
       return runNamedPass(passName);
@@ -17060,9 +17234,31 @@ function padFieldAcrossSeamsSafe({
   return lastSeamPaddingDiagnostics;
 }
 
+// Baked lazily on first use: chart topology is static once the mapping phase
+// has populated chartIdRT/chartUnsafeRT, and updateRenderSampleView only runs
+// after that.
+let displayPrefilterMaskRT = null;
+function ensureDisplayPrefilterInteriorMask() {
+  if (displayPrefilterMaskRT) return;
+  displayPrefilterMaskRT = makeMaskRT();
+  runFullscreenPass(displayPrefilterMaskMaterial, displayPrefilterMaskRT);
+  renderer.setRenderTarget(null);
+}
+
 function updateRenderSampleView({ applySeamEqualization = true } = {}) {
   copyAndClipToAuthoritativeTexels(renderRT.read, renderSampleViewRT.write);
   renderSampleViewRT.swap();
+  if (SMOOTH_FIELD_DISPLAY) {
+    // Must run before padFieldAcrossSeamsSafe: the prefilter zeroes
+    // non-authoritative texels, so the halo has to be rebuilt after it.
+    ensureDisplayPrefilterInteriorMask();
+    const u = displayPrefilterMaterial.uniforms;
+    u.u_food.value = renderSampleViewRT.read.texture;
+    u.u_interiorMask.value = displayPrefilterMaskRT.texture;
+    u.u_foodClamp.value = params.foodClamp;
+    runFullscreenPass(displayPrefilterMaterial, renderSampleViewRT.write);
+    renderSampleViewRT.swap();
+  }
   padFieldAcrossSeamsSafe({
     sourceCanonicalRT: renderRT.read,
     destinationSampleViewRT: renderSampleViewRT,
