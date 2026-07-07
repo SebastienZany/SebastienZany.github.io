@@ -8,7 +8,7 @@ import { createPhysarumSim } from './webgpu/sim.js';
 // BUMP THIS (and the matching BUILD_VERSION in index.html) on every deploy.
 // index.html and main.js cache independently, so they carry the same value and
 // the bootstrap flags a mismatch — that means one of the two files is cached.
-const BUILD_VERSION = '2026-07-07-bilinear-smooth';
+const BUILD_VERSION = '2026-07-07-ptex-seam-wip';
 
 // Load diagnostics hook installed by the inline bootstrap in index.html.
 // No-ops when absent so main.js keeps working standalone.
