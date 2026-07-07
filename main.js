@@ -8,7 +8,7 @@ import { createPhysarumSim } from './webgpu/sim.js';
 // BUMP THIS (and the matching BUILD_VERSION in index.html) on every deploy.
 // index.html and main.js cache independently, so they carry the same value and
 // the bootstrap flags a mismatch — that means one of the two files is cached.
-const BUILD_VERSION = '2026-07-07-ptex-seam-wip';
+const BUILD_VERSION = '2026-07-07-ptex-unify-display';
 
 // Load diagnostics hook installed by the inline bootstrap in index.html.
 // No-ops when absent so main.js keeps working standalone.
@@ -2183,6 +2183,59 @@ bool canReceiveSeamKernelContribution(vec2 receiverUv, float receiverChart, floa
 }
 `;
 
+// Unified per-edge seam resolver (correct-by-construction replacement for the
+// per-texel redirect/transition atlases). ONE shared implementation, included
+// only by the shaders that opt in (behind u_usePtex) so the two extra samplers
+// don't add register pressure to passes that don't need them. The boundary
+// index (u_ptexBoundary) selects the governing seam frame; the per-edge full
+// metric affine (u_ptexFrame) maps the CONTINUOUS source fragment UV across the
+// seam. Because the affine carries the two charts' differing scale/shear, the
+// reconstructed destination — and therefore the field's derivative (the bump
+// gradient, the diffusion flux) — is continuous across the seam, which the old
+// per-texel, value-only, isometric-assumption atlas never was.
+// Must be included AFTER ${safeSamplingGlsl}: it calls isAuthoritativeChartTexel,
+// chartIdAt, isOwnershipUnsafe, isOutsideAtlas, and resolveSampleUvSafe.
+const ptexResolverGlsl = `
+uniform int u_usePtex;
+uniform sampler2D u_ptexFrame;
+uniform highp usampler2D u_ptexBoundary;
+vec4 ptexFrameTexel(int f, int comp) {
+  int g = f * 6 + comp;
+  return texelFetch(u_ptexFrame, ivec2(g % ${PTEX_FRAME_TEX_WIDTH}, g / ${PTEX_FRAME_TEX_WIDTH}), 0);
+}
+vec2 resolveSampleUvSeam(vec2 baseUv, vec2 sampleUv, out float valid) {
+  valid = 0.0;
+  if (!isAuthoritativeChartTexel(baseUv)) return baseUv;
+  float baseChart = chartIdAt(baseUv);
+  if (chartIdAt(sampleUv) == baseChart && !isOwnershipUnsafe(sampleUv)) { valid = 1.0; return sampleUv; }
+  vec2 fs = vec2(float(${FIELD_SIZE}));
+  ivec2 bt = ivec2(clamp(floor(baseUv * fs), vec2(0.0), fs - 1.0));
+  uint fid = texelFetch(u_ptexBoundary, bt, 0).r;
+  if (fid == 0u) return baseUv;
+  int f = int(fid);
+  vec4 t0 = ptexFrameTexel(f, 0); // src ref uv (xy), dst ref uv (zw)
+  vec4 t1 = ptexFrameTexel(f, 1); // M columns
+  vec4 t2 = ptexFrameTexel(f, 2); // srcChart, dstChart, sinT, cosT
+  float srcChart = t2.x; float dstChart = t2.y;
+  if (abs(baseChart - srcChart) > 0.5) return baseUv;
+  // Full metric affine: destUv = M * (sampleUv - srcRef) + dstRef. This carries
+  // the per-chart scale/shear, so the reconstructed field (and its derivative,
+  // the bump normal) is continuous across the seam regardless of tap direction.
+  mat2 M = mat2(t1.x, t1.y, t1.z, t1.w);
+  vec2 destUv = M * (sampleUv - t0.xy) + t0.zw;
+  if (isOutsideAtlas(destUv) || isOwnershipUnsafe(destUv) || abs(chartIdAt(destUv) - dstChart) > 0.5) return baseUv;
+  valid = 1.0;
+  return destUv;
+}
+// Single call site every field-sampling shader routes through: the affine
+// resolver when ptex is active, else the legacy per-texel atlas resolver.
+vec2 resolveSampleUvUnified(vec2 baseUv, vec2 sampleUv, out float valid) {
+  return (u_usePtex == 1)
+    ? resolveSampleUvSeam(baseUv, sampleUv, valid)
+    : resolveSampleUvSafe(baseUv, sampleUv, valid);
+}
+`;
+
 const oatFragment = `#version 300 es
 precision highp float;
 #define MAX_OATS 64
@@ -2724,9 +2777,10 @@ uniform float u_foodClamp;
 uniform int u_applyTemporal;
 uniform int u_smoothingTapCount;
 ${safeSamplingGlsl}
+${ptexResolverGlsl}
 float readFoodSafe(vec2 offset, float fallback) {
   float valid = 0.0;
-  vec2 r = resolveSampleUvSafe(v_uv, v_uv + offset, valid);
+  vec2 r = resolveSampleUvUnified(v_uv, v_uv + offset, valid);
   if (valid < 0.5) return fallback;
   return max(texture(u_currentFood, r).r, 0.0);
 }
@@ -3925,45 +3979,9 @@ uniform int u_smoothFieldSampling;
 uniform int u_filmFollowsSlimeHeight;
 uniform int u_useGoldWaferFilm;
 uniform int u_useGoldWaferBodyUnderlay;
-uniform int u_usePtex;
 uniform int u_ptexDebug;
-uniform sampler2D u_ptexFrame;
-uniform highp usampler2D u_ptexBoundary;
 ${safeSamplingGlsl}
-// Unified per-edge seam resolver (correct-by-construction replacement for the
-// per-texel redirect/transition atlases). The boundary index (u_ptexBoundary)
-// selects the governing seam frame; the per-edge affine (u_ptexFrame) maps the
-// CONTINUOUS source fragment UV across the seam — no per-texel quantization, so
-// the reconstructed destination (and thus the bump gradient) is continuous.
-// Crossing math is identical to tryZeroGutterTransitionCandidate.
-vec4 ptexFrameTexel(int f, int comp) {
-  int g = f * 6 + comp;
-  return texelFetch(u_ptexFrame, ivec2(g % ${PTEX_FRAME_TEX_WIDTH}, g / ${PTEX_FRAME_TEX_WIDTH}), 0);
-}
-vec2 resolveSampleUvSeam(vec2 baseUv, vec2 sampleUv, out float valid) {
-  valid = 0.0;
-  if (!isAuthoritativeChartTexel(baseUv)) return baseUv;
-  float baseChart = chartIdAt(baseUv);
-  if (chartIdAt(sampleUv) == baseChart && !isOwnershipUnsafe(sampleUv)) { valid = 1.0; return sampleUv; }
-  vec2 fs = vec2(float(${FIELD_SIZE}));
-  ivec2 bt = ivec2(clamp(floor(baseUv * fs), vec2(0.0), fs - 1.0));
-  uint fid = texelFetch(u_ptexBoundary, bt, 0).r;
-  if (fid == 0u) return baseUv;
-  int f = int(fid);
-  vec4 t0 = ptexFrameTexel(f, 0); // src ref uv (xy), dst ref uv (zw)
-  vec4 t1 = ptexFrameTexel(f, 1); // M columns
-  vec4 t2 = ptexFrameTexel(f, 2); // srcChart, dstChart, sinT, cosT
-  float srcChart = t2.x; float dstChart = t2.y;
-  if (abs(baseChart - srcChart) > 0.5) return baseUv;
-  // Full metric affine: destUv = M * (sampleUv - srcRef) + dstRef. This carries
-  // the per-chart scale/shear, so the reconstructed field (and its derivative,
-  // the bump normal) is continuous across the seam regardless of tap direction.
-  mat2 M = mat2(t1.x, t1.y, t1.z, t1.w);
-  vec2 destUv = M * (sampleUv - t0.xy) + t0.zw;
-  if (isOutsideAtlas(destUv) || isOwnershipUnsafe(destUv) || abs(chartIdAt(destUv) - dstChart) > 0.5) return baseUv;
-  valid = 1.0;
-  return destUv;
-}
+${ptexResolverGlsl}
 float heightFromFood(float food) {
   return (1.0 - exp(-max(food, 0.0) * 4.0)) * u_heightScale;
 }
@@ -3989,9 +4007,7 @@ float sampleFoodSmooth(vec2 uv) {
 }
 float readFoodSafe(vec2 sampleUv, float fallback) {
   float valid = 0.0;
-  vec2 r = (u_usePtex == 1)
-    ? resolveSampleUvSeam(v_uv, sampleUv, valid)
-    : resolveSampleUvSafe(v_uv, sampleUv, valid);
+  vec2 r = resolveSampleUvUnified(v_uv, sampleUv, valid);
   if (valid < 0.5) return fallback;
   return sampleFoodSmooth(r);
 }
@@ -4395,6 +4411,16 @@ const sharedSafeSamplingUniforms = () => ({
   u_useZeroGutterTransitions: { value: 0 },
 });
 
+// Uniforms for the shared ptex resolver snippet (${ptexResolverGlsl}). Spread
+// into any material that includes it. Textures start null and are wired by
+// syncPtexResolverUniforms() once buildPtexAdjacency() has built them; u_usePtex
+// stays 0 (legacy resolver) until then.
+const ptexUniforms = () => ({
+  u_usePtex: { value: 0 },
+  u_ptexFrame: { value: null },
+  u_ptexBoundary: { value: null },
+});
+
 const diffuseMaterial = makeRawShaderMaterial(diffuseFragment, {
   u_food: { value: null },
   u_texel: { value: new THREE.Vector2(1 / FIELD_SIZE, 1 / FIELD_SIZE) },
@@ -4461,6 +4487,7 @@ const smoothMaterial = makeRawShaderMaterial(smoothFragment, {
   u_applyTemporal: { value: 0 },
   u_smoothingTapCount: { value: getRenderSmoothingTapCount(params) },
   ...sharedSafeSamplingUniforms(),
+  ...ptexUniforms(),
   u_useZeroGutterTransitions: { value: 1 },
 });
 
@@ -17856,6 +17883,13 @@ function smoothRenderField() {
   u.u_smoothingTapCount.value = getRenderSmoothingTapCount(params);
   u.u_useSeamStitching.value = params.useSeamStitching ? 1 : 0;
   u.u_useZeroGutterTransitions.value = params.useSeamStitching ? 1 : 0;
+  // Derive the display field through the same affine resolver the bump uses, so
+  // the smoothed cross-seam values renderSampleViewRT is built from are C1 —
+  // otherwise the bump crosses correctly but reads a field that was itself
+  // stitched with the old value-only map, leaving a thin residual seam line.
+  u.u_usePtex.value = (ptexDisplayActive && ptexBoundaryTex && ptexFrameTex) ? 1 : 0;
+  u.u_ptexFrame.value = ptexFrameTex;
+  u.u_ptexBoundary.value = ptexBoundaryTex;
   runFullscreenPass(smoothMaterial, renderScratchRT);
 
   u.u_currentFood.value = renderScratchRT.texture;

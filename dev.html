@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Physarum — WebGPU agent pipeline (dev)</title>
+  <style>
+    :root { color-scheme: dark; }
+    html, body { margin: 0; height: 100%; background: #05060a; color: #cfe8ff;
+      font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; overflow: hidden; }
+    #gpu-canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
+    #hud { position: fixed; top: 10px; left: 10px; z-index: 5; max-width: 300px;
+      background: rgba(4, 8, 14, 0.62); border: 1px solid rgba(90, 140, 190, 0.28);
+      border-radius: 10px; padding: 10px 12px; backdrop-filter: blur(6px); }
+    #hud h1 { font-size: 12px; margin: 0 0 6px; letter-spacing: 0.04em; color: #9fdcff; font-weight: 600; }
+    #hud .stat { display: flex; justify-content: space-between; gap: 12px; }
+    #hud .stat b { color: #eafaff; font-weight: 600; font-variant-numeric: tabular-nums; }
+    #hud .row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+    #hud label { flex: 0 0 92px; color: #8fb4d6; }
+    #hud input[type="range"] { flex: 1; accent-color: #4fd6c8; }
+    #hud .val { flex: 0 0 46px; text-align: right; color: #eafaff; font-variant-numeric: tabular-nums; }
+    #hud .btns { display: flex; gap: 6px; margin-top: 8px; }
+    #hud button { flex: 1; background: rgba(40, 80, 120, 0.35); color: #cfe8ff; cursor: pointer;
+      border: 1px solid rgba(90, 140, 190, 0.4); border-radius: 6px; padding: 5px 8px; font: inherit; }
+    #hud button:hover { background: rgba(60, 110, 160, 0.5); }
+    #hud .note { margin-top: 8px; color: #6f90ad; font-size: 11px; }
+    #fatal { position: fixed; inset: 0; display: none; place-items: center; z-index: 10; padding: 24px;
+      background: #05060a; text-align: center; }
+    #fatal .box { max-width: 520px; }
+    #fatal h2 { color: #ff9db0; }
+    #fatal code { color: #9fdcff; background: rgba(90,140,190,0.14); padding: 1px 5px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <canvas id="gpu-canvas"></canvas>
+  <div id="hud">
+    <h1>PHYSARUM · WebGPU</h1>
+    <div class="stat"><span>fps</span><b id="s-fps">—</b></div>
+    <div class="stat"><span>live agents</span><b id="s-agents">—</b></div>
+    <div class="stat"><span>field</span><b id="s-field">—</b></div>
+    <div class="stat"><span>sim ms/frame</span><b id="s-ms">—</b></div>
+    <div class="row"><label>sensor dist</label><input id="p-sensorDistance" type="range" min="0.001" max="0.03" step="0.0005" /><span class="val" id="v-sensorDistance"></span></div>
+    <div class="row"><label>sensor angle</label><input id="p-sensorAngle" type="range" min="0.1" max="1.4" step="0.01" /><span class="val" id="v-sensorAngle"></span></div>
+    <div class="row"><label>turn angle</label><input id="p-turnAngle" type="range" min="0.05" max="1.0" step="0.01" /><span class="val" id="v-turnAngle"></span></div>
+    <div class="row"><label>step size</label><input id="p-stepSize" type="range" min="0.0002" max="0.004" step="0.0001" /><span class="val" id="v-stepSize"></span></div>
+    <div class="row"><label>deposit</label><input id="p-depositRate" type="range" min="0.001" max="0.03" step="0.001" /><span class="val" id="v-depositRate"></span></div>
+    <div class="row"><label>decay</label><input id="p-fieldDecay" type="range" min="0.95" max="0.999" step="0.001" /><span class="val" id="v-fieldDecay"></span></div>
+    <div class="row"><label>diffusion</label><input id="p-fieldDiffusion" type="range" min="0.0" max="0.5" step="0.01" /><span class="val" id="v-fieldDiffusion"></span></div>
+    <div class="row"><label>burn rate</label><input id="p-burnRate" type="range" min="0.002" max="0.02" step="0.001" /><span class="val" id="v-burnRate"></span></div>
+    <div class="row"><label>repro crowd</label><input id="p-reproCrowdCap" type="range" min="0.05" max="1.5" step="0.05" /><span class="val" id="v-reproCrowdCap"></span></div>
+    <div class="btns">
+      <button id="b-pause">pause</button>
+      <button id="b-reset">reset</button>
+    </div>
+    <div class="note">Agent births/deaths use a single atomic-append compute pass — no prefix scan, no compaction. Sim lives in <code>webgpu/sim.js</code>; this page is just a harness.</div>
+  </div>
+  <div id="fatal"><div class="box">
+    <h2>WebGPU not available</h2>
+    <p id="fatal-msg"></p>
+    <p>Try a recent <code>Chrome</code>, <code>Edge</code>, or <code>Safari 18+</code> over <code>https://</code> or <code>localhost</code>.</p>
+  </div></div>
+
+  <script type="module">
+  import { createPhysarumSim } from './webgpu/sim.js?v=11';
+  import { createFieldRenderer } from './webgpu/render2d.js?v=11';
+  import { createMeshRenderer } from './webgpu/mesh3d.js?v=11';
+
+  // Thin harness around the shared WebGPU sim (webgpu/sim.js) + flat renderer
+  // (webgpu/render2d.js). All simulation logic lives in the modules so main.js
+  // can import the same sim for the bridge; this page only drives the loop + UI.
+
+  const q = new URLSearchParams(location.search);
+  const FIELD_SIZE = Number(q.get('field')) || 1024;   // ?field=1536 to match the app
+  const CAPACITY = Number(q.get('cap')) || 500000;     // ?cap=589824 to match AGENT_CAPACITY
+  const SEED_COUNT = Number(q.get('seed')) || 60000;
+
+  const el = (id) => document.getElementById(id);
+  const fatal = (msg) => {
+    el('fatal-msg').textContent = msg;
+    el('fatal').style.display = 'grid';
+    el('hud').style.display = 'none';
+  };
+
+  async function main() {
+    const sim = await createPhysarumSim({ fieldSize: FIELD_SIZE, capacity: CAPACITY, seedCount: SEED_COUNT,
+      seam: q.get('seam') === '1', populationTarget: Number(q.get('target')) || null });
+    sim.device.addEventListener?.('uncapturederror', (e) => console.error('WebGPU:', e.error?.message || e));
+
+    const canvas = el('gpu-canvas');
+    // ?mesh=1 → Phase-B WebGPU 3D mesh renderer (samples the field texture directly
+    // on a sphere, no readback); default → the flat-field renderer.
+    const renderer = q.get('mesh') === '1' ? createMeshRenderer({ sim, canvas }) : createFieldRenderer({ sim, canvas });
+    window.addEventListener('resize', () => renderer.resize());
+
+    let paused = false;
+    let frameN = 0;
+    let lastT = performance.now();
+    let emaFps = 0;
+    el('s-field').textContent = `${sim.fieldSize}² · cap ${(sim.capacity / 1e6).toFixed(1)}M`;
+
+    function frame(now) {
+      const dtMs = now - lastT; lastT = now;
+      if (dtMs > 0) emaFps = emaFps ? emaFps * 0.9 + (1000 / dtMs) * 0.1 : 1000 / dtMs;
+      el('s-fps').textContent = emaFps.toFixed(0);
+      el('s-agents').textContent = sim.getLiveEstimate().toLocaleString();
+      el('s-ms').textContent = dtMs.toFixed(1);
+
+      if (!paused) sim.step();
+      renderer.render(now);
+      if ((frameN & 15) === 0) sim.liveCount();
+      frameN++;
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+
+    // Debug hook for headless verification (the preview tab is hidden so rAF
+    // never fires — drive the sim manually via window.__dev).
+    window.__dev = {
+      sim,
+      renderer,
+      simStep: () => sim.step(),
+      seed: () => sim.seedRandom(),
+      count: () => sim.liveCount(),
+      getParity: sim.getParity,
+      renderTestFrame: renderer.renderTestFrame,   // mesh renderer only
+    };
+
+    // ── UI ──
+    const bindSlider = (key) => {
+      const inp = el('p-' + key), val = el('v-' + key);
+      if (!inp) return;
+      const fmt = (v) => (Math.abs(v) < 0.01 ? v.toFixed(4) : v.toFixed(3));
+      inp.value = sim.params[key];
+      val.textContent = fmt(sim.params[key]);
+      inp.addEventListener('input', () => { sim.params[key] = parseFloat(inp.value); val.textContent = fmt(sim.params[key]); });
+    };
+    ['sensorDistance', 'sensorAngle', 'turnAngle', 'stepSize', 'depositRate', 'fieldDecay', 'fieldDiffusion', 'burnRate', 'reproCrowdCap'].forEach(bindSlider);
+    el('b-pause').addEventListener('click', (e) => { paused = !paused; e.target.textContent = paused ? 'resume' : 'pause'; });
+    el('b-reset').addEventListener('click', () => sim.seedRandom());
+  }
+
+  main().catch((e) => { console.error(e); fatal(e.message || String(e)); });
+  </script>
+</body>
+</html>
