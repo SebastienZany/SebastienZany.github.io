@@ -7,7 +7,7 @@ import { MeshBVH, acceleratedRaycast } from 'three-mesh-bvh';
 // BUMP THIS (and the matching BUILD_VERSION in index.html) on every deploy.
 // index.html and main.js cache independently, so they carry the same value and
 // the bootstrap flags a mismatch — that means one of the two files is cached.
-const BUILD_VERSION = '2026-07-07-smooth-default-off';
+const BUILD_VERSION = '2026-07-07-oat-glow-pox';
 
 // Load diagnostics hook installed by the inline bootstrap in index.html.
 // No-ops when absent so main.js keeps working standalone.
@@ -122,6 +122,9 @@ const FIELD_SIZE = FIELD_SIZE_OVERRIDE > 0 ? FIELD_SIZE_OVERRIDE : (IS_MOBILE_DE
 // a busier, more cellular surface than plain point sampling. This URL flag only
 // sets the initial default (?smoothfield=1 starts with it on).
 const SMOOTH_FIELD_DISPLAY = new URLSearchParams(window.location.search).get('smoothfield') === '1';
+// ?legacyglow restores the old Canvas2D createRadialGradient path for the oat
+// glow textures, for A/B testing the iOS "green pox" speckle on a real device.
+const LEGACY_GLOW_TEXTURE = new URLSearchParams(window.location.search).has('legacyglow');
 // Agents run at half the field resolution on both profiles.
 const AGENT_SIDE = Math.round(FIELD_SIZE / 2);
 const SEAM_BAKE_EXPORT_MODE = new URLSearchParams(window.location.search).has('bakeExport');
@@ -5436,6 +5439,41 @@ function syncSlimeMaterialForCamera(renderCamera) {
 const oatGroup = new THREE.Group();
 scene.add(oatGroup);
 
+function parseGlowStops(stops) {
+  return stops
+    .map(([pos, color]) => {
+      const inside = /rgba?\(([^)]+)\)/.exec(color)[1].split(',').map((s) => parseFloat(s.trim()));
+      return { pos, r: inside[0], g: inside[1], b: inside[2], a: inside.length > 3 ? inside[3] : 1 };
+    })
+    .sort((a, b) => a.pos - b.pos);
+}
+
+function sampleGlowStops(parsed, t) {
+  if (t <= parsed[0].pos) return parsed[0];
+  const last = parsed[parsed.length - 1];
+  if (t >= last.pos) return last;
+  for (let i = 0; i < parsed.length - 1; i++) {
+    const a = parsed[i];
+    const b = parsed[i + 1];
+    if (t >= a.pos && t <= b.pos) {
+      const f = (t - a.pos) / Math.max(b.pos - a.pos, 1e-6);
+      return {
+        r: a.r + (b.r - a.r) * f,
+        g: a.g + (b.g - a.g) * f,
+        b: a.b + (b.b - a.b) * f,
+        a: a.a + (b.a - a.a) * f,
+      };
+    }
+  }
+  return last;
+}
+
+// The oat glow. iOS Safari renders Canvas2D `createRadialGradient` with a
+// dither and defaults canvases to Display-P3; both are invisible on desktop
+// but on-device turn this additive yellow sprite into scattered green speckles
+// ("pox") on every oat. So force an sRGB canvas and fill the radial ramp
+// exactly per-pixel (no browser gradient, no dither). ?legacyglow restores the
+// old path for A/B comparison.
 function makeRadialGlowTexture({
   size = 96,
   inner = 0.05,
@@ -5450,12 +5488,41 @@ function makeRadialGlowTexture({
   const canvas = document.createElement('canvas');
   canvas.width = size;
   canvas.height = size;
-  const ctx = canvas.getContext('2d');
+  let ctx;
+  try {
+    ctx = canvas.getContext('2d', { colorSpace: 'srgb' });
+  } catch {
+    ctx = null;
+  }
+  if (!ctx) ctx = canvas.getContext('2d');
   const center = size * 0.5;
-  const gradient = ctx.createRadialGradient(center, center, size * inner, center, center, center);
-  for (const [position, color] of stops) gradient.addColorStop(position, color);
-  ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, size, size);
+  if (LEGACY_GLOW_TEXTURE) {
+    const gradient = ctx.createRadialGradient(center, center, size * inner, center, center, center);
+    for (const [position, color] of stops) gradient.addColorStop(position, color);
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, size, size);
+  } else {
+    const parsed = parseGlowStops(stops);
+    const image = ctx.createImageData(size, size);
+    const data = image.data;
+    const innerR = size * inner;
+    const radius = center;
+    const span = Math.max(radius - innerR, 1e-6);
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const dx = x + 0.5 - center;
+        const dy = y + 0.5 - center;
+        const t = Math.min(1, Math.max(0, (Math.hypot(dx, dy) - innerR) / span));
+        const c = sampleGlowStops(parsed, t);
+        const i = (y * size + x) * 4;
+        data[i] = Math.round(c.r);
+        data[i + 1] = Math.round(c.g);
+        data[i + 2] = Math.round(c.b);
+        data[i + 3] = Math.round(c.a * 255);
+      }
+    }
+    ctx.putImageData(image, 0, 0);
+  }
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.minFilter = THREE.LinearFilter;
