@@ -15,11 +15,14 @@
     // failed CDN fetch, crash-reload loops). main.js feeds load phases in
     // through window.__diag. Triple-tap the start screen (or add ?diag=1) to
     // open the report; it auto-opens if loading stalls or errors out.
+    if (new URLSearchParams(location.search).has('rafshim')) {
+      window.requestAnimationFrame = (cb) => setTimeout(() => cb(performance.now()), 16);
+    }
     (() => {
       const t0 = performance.now();
       // Build stamp so a stale cached copy is obvious in the diagnostics report.
       // BUMP THIS (and the matching BUILD_VERSION in main.js) on every deploy.
-      const BUILD_VERSION = '2026-07-06-mobile-768-safe';
+      const BUILD_VERSION = '2026-07-06-sliver-and-splat-fix';
       const events = [];
       const state = { loaded: false, overlay: null, textEl: null, mainVersion: null };
       let previousRun = null;

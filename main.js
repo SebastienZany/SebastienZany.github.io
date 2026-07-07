@@ -7,7 +7,7 @@ import { MeshBVH, acceleratedRaycast } from 'three-mesh-bvh';
 // BUMP THIS (and the matching BUILD_VERSION in index.html) on every deploy.
 // index.html and main.js cache independently, so they carry the same value and
 // the bootstrap flags a mismatch — that means one of the two files is cached.
-const BUILD_VERSION = '2026-07-06-mobile-768-safe';
+const BUILD_VERSION = '2026-07-06-sliver-and-splat-fix';
 
 // Load diagnostics hook installed by the inline bootstrap in index.html.
 // No-ops when absent so main.js keeps working standalone.
@@ -729,8 +729,18 @@ function getAgentTransitionFootprint(settings = params, rawDtClamp = FRAME_DT_CL
   };
 }
 
+// Splat kernel sizes are expressed in field-RT pixels but tuned on the desktop
+// 1536 field. Without rescaling, a coarser field renders every splat larger in
+// world terms — at 768 each agent's density blob covered 2x the surface width
+// and 4x the area, which made the first revealed seed agents read as discrete
+// green "pox" under the landing oat glow instead of desktop's subtle sparkle.
+// Scaling by FIELD_SIZE keeps the kernel's world-space footprint constant
+// across profiles (and keeps sensing/deposit dynamics closer to desktop).
+const SPLAT_REFERENCE_FIELD_SIZE = 1536;
+const SPLAT_FIELD_SCALE = FIELD_SIZE / SPLAT_REFERENCE_FIELD_SIZE;
+
 function getDensityPointSizePixels(settings = params) {
-  return Math.max(1.0, settings.densityBlur / WORLD_LINEAR_SCALE);
+  return Math.max(1.0, (settings.densityBlur / WORLD_LINEAR_SCALE) * SPLAT_FIELD_SCALE);
 }
 
 function getDensityKernelRadiusTexels(settings = params) {
@@ -738,7 +748,7 @@ function getDensityKernelRadiusTexels(settings = params) {
 }
 
 function getDepositPointSizePixels() {
-  return Math.max(1.0, DEPOSIT_POINT_SIZE_WORLD / WORLD_LINEAR_SCALE);
+  return Math.max(1.0, (DEPOSIT_POINT_SIZE_WORLD / WORLD_LINEAR_SCALE) * SPLAT_FIELD_SCALE);
 }
 
 function getDepositKernelRadiusTexels() {
@@ -3660,13 +3670,19 @@ void main() {
 // auto-injected attributes (position, normal, uv).
 
 const slimeVertex = `
+// a_renderUv equals the uv attribute everywhere except on "quarantined" micro
+// UV charts (sub-texel islands excluded from chart ownership), whose vertices
+// are remapped to the nearest healthy chart's UV so their fragments sample the
+// same field data as their 3D neighbours instead of rendering a black hole.
+// See buildRenderUvFallbackAttribute.
+in vec2 a_renderUv;
 out vec2 v_uv;
 out vec3 v_worldPos;
 out vec3 v_worldNormal;
 out vec3 v_viewPos;
 out vec3 v_viewNormal;
 void main() {
-  v_uv = uv;
+  v_uv = a_renderUv;
   vec4 worldPos = modelMatrix * vec4(position, 1.0);
   vec4 viewPos = modelViewMatrix * vec4(position, 1.0);
   v_worldPos = worldPos.xyz;
@@ -13838,6 +13854,147 @@ function buildChartOwnershipTextures(topo) {
   return ownership;
 }
 
+// Micro UV charts (sub-texel islands, mostly unwrap slivers parked at the
+// atlas borders — 188 of the mesh's 1233 islands at FIELD_SIZE 768) are
+// deliberately quarantined from chart ownership by rasterizeUvOwnershipMaps,
+// so their texels carry no field data and their triangles rendered as black
+// holes on the body (visible on phones where the coarser field quarantines
+// more charts). The simulation must keep ignoring them, so the fix is purely
+// visual: build an a_renderUv attribute that equals uv everywhere except on
+// quarantined charts, whose vertices all take the UV of the healthy-chart
+// vertex nearest the chart's 3D centroid. Their fragments then sample the
+// same field texel as their physical neighbours and shade like the
+// surrounding surface. Flat-mapping the whole island to one UV is deliberate:
+// these islands span less than a texel, and interpolating between fallback
+// UVs from different charts would sweep across unrelated field regions.
+function buildRenderUvFallbackAttribute(targetMesh, topo, ownership) {
+  const geom = targetMesh.geometry;
+  const uvAttr = geom.attributes.uv?.array;
+  const posAttr = geom.attributes.position?.array;
+  const idx = geom.index?.array;
+  const vertCount = geom.attributes.position?.count ?? 0;
+  const diagnostics = {
+    quarantinedCharts: 0,
+    remappedCharts: 0,
+    remappedVertices: 0,
+    unmatchedCharts: 0,
+  };
+  if (!uvAttr || !posAttr || !idx) return diagnostics;
+  const renderUv = new Float32Array(uvAttr.length);
+  renderUv.set(uvAttr);
+  const attach = () => {
+    geom.setAttribute('a_renderUv', new THREE.BufferAttribute(renderUv, 2));
+  };
+  const quarantined = new Set([
+    ...(ownership?.summary?.ambiguousUnsafeChartIds ?? []),
+    ...(ownership?.summary?.zeroOwnedChartIds ?? []),
+  ]);
+  diagnostics.quarantinedCharts = quarantined.size;
+  if (!quarantined.size || !topo?.faceChartIds) {
+    attach();
+    return diagnostics;
+  }
+
+  const vertChart = new Int32Array(vertCount);
+  for (let f = 0; f < topo.faceCount; f++) {
+    const chartId = topo.faceChartIds[f];
+    vertChart[idx[f * 3]] = chartId;
+    vertChart[idx[f * 3 + 1]] = chartId;
+    vertChart[idx[f * 3 + 2]] = chartId;
+  }
+
+  // Spatial hash over healthy-chart vertices for nearest-neighbour lookups.
+  const cellSize = Math.max(1e-6, (geom.boundingSphere?.radius ?? 1) / 128);
+  const cellKey = (x, y, z) =>
+    `${Math.round(x / cellSize)},${Math.round(y / cellSize)},${Math.round(z / cellSize)}`;
+  const grid = new Map();
+  const quarantinedChartVerts = new Map();
+  for (let v = 0; v < vertCount; v++) {
+    const chartId = vertChart[v];
+    if (chartId === 0) continue;
+    if (quarantined.has(chartId)) {
+      let list = quarantinedChartVerts.get(chartId);
+      if (!list) {
+        list = [];
+        quarantinedChartVerts.set(chartId, list);
+      }
+      list.push(v);
+      continue;
+    }
+    const key = cellKey(posAttr[v * 3], posAttr[v * 3 + 1], posAttr[v * 3 + 2]);
+    let bucket = grid.get(key);
+    if (!bucket) {
+      bucket = [];
+      grid.set(key, bucket);
+    }
+    bucket.push(v);
+  }
+
+  const MAX_SEARCH_RING = 8;
+  function nearestHealthyVertex(x, y, z) {
+    const cx = Math.round(x / cellSize);
+    const cy = Math.round(y / cellSize);
+    const cz = Math.round(z / cellSize);
+    let best = -1;
+    let bestDistSq = Infinity;
+    let foundRing = -1;
+    for (let ring = 0; ring <= MAX_SEARCH_RING; ring++) {
+      // A hit in ring r can still be beaten by a vertex in ring r+1, so scan
+      // one ring past the first hit before stopping.
+      if (foundRing >= 0 && ring > foundRing + 1) break;
+      for (let dx = -ring; dx <= ring; dx++) {
+        for (let dy = -ring; dy <= ring; dy++) {
+          for (let dz = -ring; dz <= ring; dz++) {
+            if (Math.max(Math.abs(dx), Math.abs(dy), Math.abs(dz)) !== ring) continue;
+            const bucket = grid.get(`${cx + dx},${cy + dy},${cz + dz}`);
+            if (!bucket) continue;
+            for (const v of bucket) {
+              const ddx = posAttr[v * 3] - x;
+              const ddy = posAttr[v * 3 + 1] - y;
+              const ddz = posAttr[v * 3 + 2] - z;
+              const distSq = ddx * ddx + ddy * ddy + ddz * ddz;
+              if (distSq < bestDistSq) {
+                bestDistSq = distSq;
+                best = v;
+              }
+            }
+          }
+        }
+      }
+      if (best >= 0 && foundRing < 0) foundRing = ring;
+    }
+    return best;
+  }
+
+  for (const [, verts] of quarantinedChartVerts) {
+    let sx = 0;
+    let sy = 0;
+    let sz = 0;
+    for (const v of verts) {
+      sx += posAttr[v * 3];
+      sy += posAttr[v * 3 + 1];
+      sz += posAttr[v * 3 + 2];
+    }
+    const inv = 1 / verts.length;
+    const anchor = nearestHealthyVertex(sx * inv, sy * inv, sz * inv);
+    if (anchor < 0) {
+      diagnostics.unmatchedCharts++;
+      continue;
+    }
+    const anchorU = uvAttr[anchor * 2];
+    const anchorV = uvAttr[anchor * 2 + 1];
+    for (const v of verts) {
+      renderUv[v * 2] = anchorU;
+      renderUv[v * 2 + 1] = anchorV;
+    }
+    diagnostics.remappedCharts++;
+    diagnostics.remappedVertices += verts.length;
+  }
+
+  attach();
+  return diagnostics;
+}
+
 function makeDataTexture(data, type) {
   return makeDataTexture2D(data, FIELD_SIZE, FIELD_SIZE, type);
 }
@@ -14671,6 +14828,9 @@ async function onLoad(gltf) {
   loadPhase('chartTopology');
   chartOwnership = buildChartOwnershipTextures(uvTopology);
   loadPhase('chartOwnership');
+  const renderUvFallback = buildRenderUvFallbackAttribute(mesh, uvTopology, chartOwnership);
+  diagLog('renderUvFallback', JSON.stringify(renderUvFallback));
+  loadPhase('renderUvFallback');
   setStartScreenLoadingProgress(88, 'mapping');
   // Build seam data
   seamBakeData = await seamBakeFetchPromise;
