@@ -7,7 +7,7 @@ import { MeshBVH, acceleratedRaycast } from 'three-mesh-bvh';
 // BUMP THIS (and the matching BUILD_VERSION in index.html) on every deploy.
 // index.html and main.js cache independently, so they carry the same value and
 // the bootstrap flags a mismatch — that means one of the two files is cached.
-const BUILD_VERSION = '2026-07-06-mobile-1024';
+const BUILD_VERSION = '2026-07-06-mobile-768-safe';
 
 // Load diagnostics hook installed by the inline bootstrap in index.html.
 // No-ops when absent so main.js keeps working standalone.
@@ -104,16 +104,15 @@ const MAX_PIXEL_RATIO = IS_MOBILE_DEVICE ? 1.5 : 2;
 
 // Phones get a reduced simulation profile. The desktop profile allocates
 // ~1.4 GB of float render targets (field buffers plus the 4-lane seam
-// transition atlases) — genuinely past iOS Safari's per-tab budget. NOTE: the
-// original "iPhones get stuck loading because of memory" diagnosis was wrong;
-// the real blocker was the EXT_float_blend capability gate (now fixed). So 768
-// was an over-correction — iOS has real memory headroom above it, and a higher
-// field size sharply reduces the blocky low-res look. MOBILE_FIELD_SIZE is the
-// dial: raise it as far as devices tolerate (watch the diagnostics overlay for
-// a load #2 / context-lost, which means WebKit killed the tab). Every size a
-// phone can reach needs a matching seam-bake-<size>.bin committed, or the seam
-// transitions build live (tens of seconds). ?field= overrides it for testing.
-const MOBILE_FIELD_SIZE = 1024;
+// transition atlases) — genuinely past iOS Safari's per-tab budget. MOBILE_FIELD_SIZE
+// is the memory/quality dial. Measured ceiling: 768 loads and runs on an iPhone
+// (iOS 18.7); 1024 (~600 MB of RTs) crashes it repeatedly ("A problem repeatedly
+// occurred" = WebKit killing the tab on load). So 768 is the safe default until
+// per-RT memory is cut (e.g. half-float seam atlases) to buy headroom. Each size
+// a phone can reach needs a matching seam-bake-<size>.bin committed (768/1024/1280
+// exist), or seam transitions build live (tens of seconds). ?field= overrides it,
+// but going above 768 on a memory-limited phone will crash-loop.
+const MOBILE_FIELD_SIZE = 768;
 const FIELD_SIZE_OVERRIDE = Number(new URLSearchParams(window.location.search).get('field'));
 const FIELD_SIZE = FIELD_SIZE_OVERRIDE > 0 ? FIELD_SIZE_OVERRIDE : (IS_MOBILE_DEVICE ? MOBILE_FIELD_SIZE : 1536);
 // Agents run at half the field resolution on both profiles.
