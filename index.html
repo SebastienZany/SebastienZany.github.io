@@ -14,7 +14,9 @@
     // environments where main.js never executes (no import-map support,
     // failed CDN fetch, crash-reload loops). main.js feeds load phases in
     // through window.__diag. Triple-tap the start screen (or add ?diag=1) to
-    // open the report; it auto-opens if loading stalls or errors out.
+    // open the report; it auto-opens if loading stalls or errors out. If the
+    // tab is being killed before anything renders, load with ?safe=1 to read
+    // the previous run's log without starting the app at all.
     if (new URLSearchParams(location.search).has('rafshim')) {
       window.requestAnimationFrame = (cb) => setTimeout(() => cb(performance.now()), 16);
     }
@@ -22,7 +24,7 @@
       const t0 = performance.now();
       // Build stamp so a stale cached copy is obvious in the diagnostics report.
       // BUMP THIS (and the matching BUILD_VERSION in main.js) on every deploy.
-      const BUILD_VERSION = '2026-07-06-smooth-field-display';
+      const BUILD_VERSION = '2026-07-06-smooth-field-toggle';
       const events = [];
       const state = { loaded: false, overlay: null, textEl: null, mainVersion: null };
       let previousRun = null;
@@ -503,6 +505,10 @@
             <section class="control-group" aria-labelledby="surfaceControls">
               <h2 id="surfaceControls">Surface</h2>
 
+              <label class="toggle-control">
+                <span>Smooth field <span class="help-tip" tabindex="0" aria-label="Interpolate the low-resolution simulation field on the surface (prefilter + smooth sampling). Off shows the raw per-texel facets.">?<span role="tooltip">Interpolate the low-resolution simulation field on the surface (prefilter + smooth sampling). Off shows the raw per-texel facets.</span></span></span>
+                <input id="smoothFieldDisplay" type="checkbox" checked>
+              </label>
               <label class="control-row">
                 <span class="control-copy">
                   <strong>Spatial</strong>
@@ -835,6 +841,21 @@
         </section>
       </section>
     </main>
-    <script type="module" src="main.js"></script>
+    <script>
+    // ?safe=1: diagnostics-only mode. Loads nothing heavy — no three.js, no
+    // simulation — so a phone whose tab crash-loops ("A problem repeatedly
+    // occurred") can still open this page and read the PREVIOUS run's last
+    // events (persisted to localStorage every 250ms) to see how far the dying
+    // load got. The diagnostics overlay opens automatically.
+    if (new URLSearchParams(location.search).has('safe')) {
+      window.__diag?.log?.('safe-mode', 'main.js intentionally not loaded; see previous-run section below for the crashed run');
+      window.__diag?.show?.();
+    } else {
+      const script = document.createElement('script');
+      script.type = 'module';
+      script.src = 'main.js';
+      document.body.appendChild(script);
+    }
+    </script>
   </body>
 </html>

@@ -7,7 +7,7 @@ import { MeshBVH, acceleratedRaycast } from 'three-mesh-bvh';
 // BUMP THIS (and the matching BUILD_VERSION in index.html) on every deploy.
 // index.html and main.js cache independently, so they carry the same value and
 // the bootstrap flags a mismatch — that means one of the two files is cached.
-const BUILD_VERSION = '2026-07-06-smooth-field-display';
+const BUILD_VERSION = '2026-07-06-smooth-field-toggle';
 
 // Load diagnostics hook installed by the inline bootstrap in index.html.
 // No-ops when absent so main.js keeps working standalone.
@@ -115,12 +115,10 @@ const MAX_PIXEL_RATIO = IS_MOBILE_DEVICE ? 1.5 : 2;
 const MOBILE_FIELD_SIZE = 768;
 const FIELD_SIZE_OVERRIDE = Number(new URLSearchParams(window.location.search).get('field'));
 const FIELD_SIZE = FIELD_SIZE_OVERRIDE > 0 ? FIELD_SIZE_OVERRIDE : (IS_MOBILE_DEVICE ? MOBILE_FIELD_SIZE : 1536);
-// Display-only smoothing of the low-res field: the surface shader warps each
-// food read's sub-texel fraction with a quintic smoothstep before one hardware
-// bilinear tap (the render sample view is RGBA16F + LinearFilter). Same fetch
-// count and same 2x2 footprint as plain bilinear, so it is seam-halo-safe and
-// costs no extra memory or bandwidth. ?smoothfield=0 restores unwarped
-// sampling for A/B comparison.
+// Display-only smoothing of the low-res field (see sampleFoodSmooth and the
+// fused sample-view copy pass). Runtime-togglable via params.smoothFieldDisplay
+// ("Smooth field" in the parameters panel); this URL flag only sets the
+// initial default (?smoothfield=0 starts with it off).
 const SMOOTH_FIELD_DISPLAY = new URLSearchParams(window.location.search).get('smoothfield') !== '0';
 // Agents run at half the field resolution on both profiles.
 const AGENT_SIDE = Math.round(FIELD_SIZE / 2);
@@ -520,6 +518,7 @@ const params = {
   statsReadbackEnabled: false,
   debugView: 'slime',
   performanceMode: 'quality',
+  smoothFieldDisplay: SMOOTH_FIELD_DISPLAY,
 };
 let activeSimulationPresetId = DEFAULT_SIMULATION_PRESET_ID;
 let activeRenderDisplayPresetId = DEFAULT_RENDER_DISPLAY_PRESET_ID;
@@ -1676,6 +1675,25 @@ function makeSampleViewFieldRT() {
     stencilBuffer: false,
   });
 }
+// The render-side field chain (renderRT and its smoothing scratch) is a
+// display-only smoothed copy of the canonical simulation food — nothing feeds
+// it back into fieldRT. On the memory-limited mobile profile it drops to
+// RGBA16F (the sample view it feeds is already RGBA16F, so display precision
+// is unchanged), saving ~14MB at 768 toward the iOS tab budget. Desktop keeps
+// RGBA32F.
+function makeRenderFieldRT() {
+  return new THREE.WebGLRenderTarget(FIELD_SIZE, FIELD_SIZE, {
+    type: IS_MOBILE_DEVICE ? THREE.HalfFloatType : THREE.FloatType,
+    format: THREE.RGBAFormat,
+    internalFormat: IS_MOBILE_DEVICE ? 'RGBA16F' : 'RGBA32F',
+    minFilter: THREE.NearestFilter,
+    magFilter: THREE.NearestFilter,
+    wrapS: THREE.ClampToEdgeWrapping,
+    wrapT: THREE.ClampToEdgeWrapping,
+    depthBuffer: false,
+    stencilBuffer: false,
+  });
+}
 // The render sample view is display-only (the slime surface shader, OAT
 // trigger scoring, and gold-wafer max-food history read it; nothing feeds it
 // back into the canonical simulation fields, which stay RGBA32F). Half-float
@@ -1852,9 +1870,9 @@ const agentCandidateRT = makeAgentCandidateRT();
 const agentPrefixRT = new RTPair(makeAgentCandidateRT);
 const fieldRT = new RTPair(makeCanonicalFieldRT);
 const fieldSampleViewRT = makeSampleViewFieldRT();
-const renderRT = new RTPair(makeCanonicalFieldRT);
+const renderRT = new RTPair(makeRenderFieldRT);
 const renderSampleViewRT = new RTPair(makeDisplaySampleViewFieldRT);
-const renderScratchRT = makeSampleViewFieldRT();
+const renderScratchRT = makeRenderFieldRT();
 const observationTriggerScoreRT = makeObservationTriggerScoreRT();
 const observationTriggerQueryRT = makeObservationTriggerQueryRT();
 let goldWaferBodyMaxFoodRT = null;
@@ -2746,41 +2764,43 @@ void main() {
 }
 `;
 
-// Deliberately does NOT include safeSamplingGlsl: compiling the seam-resolve
-// machinery into this pass (10 samplers + the candidate loop) throttles GPU
-// occupancy for every texel even when the slow branch never runs. Instead,
-// seam-adjacent texels (mask.g == 0, ~12% of authoritative texels) pass
-// through unfiltered — a 1-texel band along seams that the surface shader's
-// quintic warp still displays smoothly.
-const displayPrefilterFragment = `#version 300 es
+// Fused copy + prefilter for the render sample view: does the same
+// clip-to-authoritative job as sampleViewCopyFragment (mask.r encodes exactly
+// isAuthoritativeSampleViewTexel) while applying the 3x3 B-spline in the same
+// pass, so smoothing adds ZERO passes to the frame. Deliberately does NOT
+// include safeSamplingGlsl: compiling the seam-resolve machinery into a pass
+// (10 samplers + the candidate loop) throttles GPU occupancy for every texel
+// even when the slow branch never runs — that alone cost 41 -> 33 fps in an
+// earlier version. Point taps (not bilinear) because the canonical source is
+// RGBA32F Nearest on iOS. Seam-adjacent texels (mask.g == 0, ~12% of
+// authoritative texels) pass through unfiltered — a 1-texel band along seams
+// that the surface shader's quintic warp still displays smoothly.
+const sampleViewCopySmoothFragment = `#version 300 es
 precision highp float;
 in vec2 v_uv;
 out vec4 outColor;
-uniform sampler2D u_food;
+uniform sampler2D u_source;
 uniform sampler2D u_interiorMask;
 uniform vec2 u_texel;
 uniform float u_foodClamp;
 void main() {
   vec2 mask = texture(u_interiorMask, v_uv).rg;
   if (mask.r < 0.5) {
-    outColor = vec4(0.0, 0.0, 0.0, 1.0);
+    outColor = vec4(0.0);
     return;
   }
   float value;
   if (mask.g > 0.5) {
-    // The 3x3 (1/6, 2/3, 1/6)^2 kernel expressed as 4 hardware bilinear taps
-    // at (+/-1/3, +/-1/3) texel: each tap blends center and neighbor 2/3:1/3
-    // per axis, and averaging the 4 symmetric taps reproduces the kernel
-    // exactly. The interior mask guarantees the 3x3 footprint is same-chart,
-    // so the taps never blend across a seam or into a zeroed gutter.
-    vec2 o = u_texel / 3.0;
-    value = 0.25 * (
-      max(texture(u_food, v_uv - o).r, 0.0) +
-      max(texture(u_food, v_uv + vec2(o.x, -o.y)).r, 0.0) +
-      max(texture(u_food, v_uv + vec2(-o.x, o.y)).r, 0.0) +
-      max(texture(u_food, v_uv + o).r, 0.0));
+    float sum = 0.0;
+    for (int dy = -1; dy <= 1; dy++) {
+      for (int dx = -1; dx <= 1; dx++) {
+        float w = (dx == 0 ? 2.0 / 3.0 : 1.0 / 6.0) * (dy == 0 ? 2.0 / 3.0 : 1.0 / 6.0);
+        sum += w * max(texture(u_source, v_uv + vec2(float(dx), float(dy)) * u_texel).r, 0.0);
+      }
+    }
+    value = sum;
   } else {
-    value = max(texture(u_food, v_uv).r, 0.0);
+    value = max(texture(u_source, v_uv).r, 0.0);
   }
   outColor = vec4(clamp(value, 0.0, u_foodClamp), 0.0, 0.0, 1.0);
 }
@@ -3849,6 +3869,7 @@ uniform vec3 u_baseColor;
 uniform int u_meshOutlineEnabled;
 uniform int u_showAgentDots;
 uniform int u_bumpDiagonalTapsEnabled;
+uniform int u_smoothFieldSampling;
 uniform int u_filmFollowsSlimeHeight;
 uniform int u_useGoldWaferFilm;
 uniform int u_useGoldWaferBodyUnderlay;
@@ -3875,17 +3896,16 @@ float filmThickness01FromFood(float food) {
 // SEAM_REDIRECT_HALO_TEXELS (1) texel of cross-chart values into gutters, so
 // any wider kernel (e.g. bicubic's 4x4) reads foreign charts at seams. Same
 // texture-fetch count as the original point sampling, so no per-fragment cost.
+// u_smoothFieldSampling mirrors params.smoothFieldDisplay (the sample view's
+// filter is flipped to Nearest alongside it, restoring the original look).
 float sampleFoodSmooth(vec2 uv) {
-${SMOOTH_FIELD_DISPLAY ? `
+  if (u_smoothFieldSampling == 0) return max(texture(u_food, uv).r, 0.0);
   vec2 texelIndex = uv / u_texel - 0.5;
   vec2 base = floor(texelIndex);
   vec2 f = texelIndex - base;
   vec2 fw = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
   vec2 smoothUv = (base + 0.5 + fw) * u_texel;
   return max(texture(u_food, smoothUv).r, 0.0);
-` : `
-  return max(texture(u_food, uv).r, 0.0);
-`}
 }
 float readFoodSafe(vec2 sampleUv, float fallback) {
   float valid = 0.0;
@@ -4367,8 +4387,8 @@ const displayPrefilterMaskMaterial = makeRawShaderMaterial(displayPrefilterMaskF
   u_texel: { value: new THREE.Vector2(1 / FIELD_SIZE, 1 / FIELD_SIZE) },
 });
 
-const displayPrefilterMaterial = makeRawShaderMaterial(displayPrefilterFragment, {
-  u_food: { value: null },
+const sampleViewCopySmoothMaterial = makeRawShaderMaterial(sampleViewCopySmoothFragment, {
+  u_source: { value: null },
   u_interiorMask: { value: null },
   u_texel: { value: new THREE.Vector2(1 / FIELD_SIZE, 1 / FIELD_SIZE) },
   u_foodClamp: { value: params.foodClamp },
@@ -5357,6 +5377,7 @@ function buildSlimeMaterial() {
       u_meshOutlineEnabled: { value: params.meshOutlineEnabled ? 1 : 0 },
       u_showAgentDots: { value: 0 },
       u_bumpDiagonalTapsEnabled: { value: getBumpDiagonalTapsEnabled(params) ? 1 : 0 },
+      u_smoothFieldSampling: { value: params.smoothFieldDisplay ? 1 : 0 },
       u_filmFollowsSlimeHeight: { value: params.filmFollowsSlimeHeight ? 1 : 0 },
       u_useGoldWaferFilm: { value: 0 },
       u_useGoldWaferBodyUnderlay: { value: 0 },
@@ -5366,9 +5387,25 @@ function buildSlimeMaterial() {
   });
 }
 
+// The sample view keeps LinearFilter while smoothing is on (the quintic warp
+// needs hardware bilinear) and drops to NearestFilter when toggled off so
+// "off" reproduces the original point-sampled look exactly.
+function applySmoothFieldDisplayFilters() {
+  const filter = params.smoothFieldDisplay ? THREE.LinearFilter : THREE.NearestFilter;
+  for (const rt of [renderSampleViewRT.read, renderSampleViewRT.write]) {
+    if (rt.texture.minFilter !== filter) {
+      rt.texture.minFilter = filter;
+      rt.texture.magFilter = filter;
+      rt.texture.needsUpdate = true;
+    }
+  }
+}
+
 function syncSlimeMaterialForCamera(renderCamera) {
   if (!slimeMaterial) return;
+  applySmoothFieldDisplayFilters();
   const u = slimeMaterial.uniforms;
+  u.u_smoothFieldSampling.value = params.smoothFieldDisplay ? 1 : 0;
   u.u_food.value = renderSampleViewRT.read.texture;
   u.u_agentDensity.value = densityRT.texture;
   u.u_agentDensityOverlay.value = agentDensityOverlayRT.texture;
@@ -16048,10 +16085,15 @@ function buildSeamData(targetMesh, uvTopology = null) {
     const texelCount = FIELD_SIZE * FIELD_SIZE;
     const candidateAtlasWidth = FIELD_SIZE * SEAM_TRANSITION_CANDIDATE_COUNT;
     const candidateAtlasTexelCount = candidateAtlasWidth * FIELD_SIZE;
-    const uvAtlas = new Float32Array(candidateAtlasTexelCount * 4);
-    const metaAtlas = new Float32Array(candidateAtlasTexelCount * 4);
-    const directionAtlas = new Float32Array(candidateAtlasTexelCount * 4);
-    const basisAtlas = new Float32Array(candidateAtlasTexelCount * 4);
+    // The live rasterizer path allocates all four atlases up front (its
+    // dedup/merge/overflow logic reads them back while packing). The bake
+    // path allocates ONE at a time — four CPU-side Float32Arrays of
+    // candidateAtlasTexelCount*4 are ~150MB at 768, a transient spike big
+    // enough to matter for the iOS Safari jetsam budget during load.
+    let uvAtlas = null;
+    let metaAtlas = null;
+    let directionAtlas = null;
+    let basisAtlas = null;
     const candidateCounts = new Uint16Array(texelCount);
     const candidateOverflow = new Uint8Array(texelCount);
     const rawCandidateCounts = new Uint16Array(texelCount);
@@ -16097,6 +16139,10 @@ function buildSeamData(targetMesh, uvTopology = null) {
       if (seamBakeData) {
         console.warn('Seam bake does not match this mesh/config; building seam transitions live.');
       }
+      uvAtlas = new Float32Array(candidateAtlasTexelCount * 4);
+      metaAtlas = new Float32Array(candidateAtlasTexelCount * 4);
+      directionAtlas = new Float32Array(candidateAtlasTexelCount * 4);
+      basisAtlas = new Float32Array(candidateAtlasTexelCount * 4);
       for (const seam of seamEdges) {
         pushTransitionCandidate(seam.A, seam.B, seamId++);
         pushTransitionCandidate(seam.B, seam.A, seamId++);
@@ -16146,18 +16192,22 @@ function buildSeamData(targetMesh, uvTopology = null) {
       };
     }
 
-    const uvTexture = makeDataTexture2D(uvAtlas, candidateAtlasWidth, FIELD_SIZE, THREE.FloatType);
-    const metaTexture = makeDataTexture2D(metaAtlas, candidateAtlasWidth, FIELD_SIZE, THREE.FloatType);
-    const directionTexture = makeDataTexture2D(directionAtlas, candidateAtlasWidth, FIELD_SIZE, THREE.FloatType);
-    const basisTexture = makeDataTexture2D(basisAtlas, candidateAtlasWidth, FIELD_SIZE, THREE.FloatType);
-    uploadDataTextureToRT(uvTexture, seamTransitionUvAtlasRT);
-    uploadDataTextureToRT(metaTexture, seamTransitionMetaAtlasRT);
-    uploadDataTextureToRT(directionTexture, seamTransitionDirectionAtlasRT);
-    uploadDataTextureToRT(basisTexture, seamTransitionBasisAtlasRT);
-    uvTexture.dispose();
-    metaTexture.dispose();
-    directionTexture.dispose();
-    basisTexture.dispose();
+    if (!bake) {
+      uploadCandidateAtlas(uvAtlas, seamTransitionUvAtlasRT);
+      uploadCandidateAtlas(metaAtlas, seamTransitionMetaAtlasRT);
+      uploadCandidateAtlas(directionAtlas, seamTransitionDirectionAtlasRT);
+      uploadCandidateAtlas(basisAtlas, seamTransitionBasisAtlasRT);
+      uvAtlas = null;
+      metaAtlas = null;
+      directionAtlas = null;
+      basisAtlas = null;
+    }
+
+    function uploadCandidateAtlas(atlas, rt) {
+      const texture = makeDataTexture2D(atlas, candidateAtlasWidth, FIELD_SIZE, THREE.FloatType);
+      uploadDataTextureToRT(texture, rt);
+      texture.dispose();
+    }
 
     const claimTexture = makeDataTexture(claimPixels, THREE.FloatType);
     uploadDataTextureToRT(claimTexture, seamTransitionClaimRT);
@@ -16167,7 +16217,32 @@ function buildSeamData(targetMesh, uvTopology = null) {
       // The bake stores only the packing decisions (which edge-side won each
       // slot); the candidate values are recomputed here with the same math the
       // live rasterizer uses, so both paths produce identical atlases.
+      //
+      // Staged one atlas at a time: the records are walked four times (cheap —
+      // they cover only seam-band texels) so that only a single ~38MB
+      // Float32Array is alive at once instead of all four, cutting the
+      // load-time CPU memory spike ~4x for the iOS tab budget. The candidate
+      // recompute is deterministic, so the four walks stay consistent.
       const frames = new Array(seamEdges.length * 2 + 1);
+      const stages = [
+        [(atlas) => { uvAtlas = atlas; }, seamTransitionUvAtlasRT],
+        [(atlas) => { metaAtlas = atlas; }, seamTransitionMetaAtlasRT],
+        [(atlas) => { directionAtlas = atlas; }, seamTransitionDirectionAtlasRT],
+        [(atlas) => { basisAtlas = atlas; }, seamTransitionBasisAtlasRT],
+      ];
+      for (const [assignAtlas, rt] of stages) {
+        const atlas = new Float32Array(candidateAtlasTexelCount * 4);
+        assignAtlas(atlas);
+        walkBakedCandidateRecords(bakeData, frames);
+        uvAtlas = null;
+        metaAtlas = null;
+        directionAtlas = null;
+        basisAtlas = null;
+        uploadCandidateAtlas(atlas, rt);
+      }
+    }
+
+    function walkBakedCandidateRecords(bakeData, frames) {
       const view = bakeData.view;
       let offset = bakeData.recordsOffset;
       for (let record = 0; record < bakeData.recordCount; record++) {
@@ -16236,25 +16311,36 @@ function buildSeamData(targetMesh, uvTopology = null) {
         depthDeltaTexels <= 5.0;
     }
 
+    // Null atlas guards: the staged bake path materializes one atlas at a
+    // time, so only the currently-staged array is non-null. The live path has
+    // all four allocated.
     function writeCandidateToSlot(slot, texel, candidate) {
       if (slotSeamIds) slotSeamIds[texel * SEAM_TRANSITION_CANDIDATE_COUNT + slot] = candidate.seamId;
       const p = candidateAtlasOffset(slot, texel);
-      uvAtlas[p] = candidate.destinationU;
-      uvAtlas[p + 1] = candidate.destinationV;
-      uvAtlas[p + 2] = 1;
-      uvAtlas[p + 3] = candidate.distanceTexels;
-      metaAtlas[p] = candidate.sourceChart;
-      metaAtlas[p + 1] = candidate.destinationChart;
-      metaAtlas[p + 2] = candidate.sinT;
-      metaAtlas[p + 3] = candidate.cosT;
-      directionAtlas[p] = candidate.outX;
-      directionAtlas[p + 1] = candidate.outY;
-      directionAtlas[p + 2] = candidate.destInX;
-      directionAtlas[p + 3] = candidate.destInY;
-      basisAtlas[p] = candidate.edgeX;
-      basisAtlas[p + 1] = candidate.edgeY;
-      basisAtlas[p + 2] = candidate.dstEdgeX;
-      basisAtlas[p + 3] = candidate.dstEdgeY;
+      if (uvAtlas) {
+        uvAtlas[p] = candidate.destinationU;
+        uvAtlas[p + 1] = candidate.destinationV;
+        uvAtlas[p + 2] = 1;
+        uvAtlas[p + 3] = candidate.distanceTexels;
+      }
+      if (metaAtlas) {
+        metaAtlas[p] = candidate.sourceChart;
+        metaAtlas[p + 1] = candidate.destinationChart;
+        metaAtlas[p + 2] = candidate.sinT;
+        metaAtlas[p + 3] = candidate.cosT;
+      }
+      if (directionAtlas) {
+        directionAtlas[p] = candidate.outX;
+        directionAtlas[p + 1] = candidate.outY;
+        directionAtlas[p + 2] = candidate.destInX;
+        directionAtlas[p + 3] = candidate.destInY;
+      }
+      if (basisAtlas) {
+        basisAtlas[p] = candidate.edgeX;
+        basisAtlas[p + 1] = candidate.edgeY;
+        basisAtlas[p + 2] = candidate.dstEdgeX;
+        basisAtlas[p + 3] = candidate.dstEdgeY;
+      }
     }
 
     function mergeCandidateIntoSlot(slot, texel, candidate) {
@@ -17246,19 +17332,21 @@ function ensureDisplayPrefilterInteriorMask() {
 }
 
 function updateRenderSampleView({ applySeamEqualization = true } = {}) {
-  copyAndClipToAuthoritativeTexels(renderRT.read, renderSampleViewRT.write);
-  renderSampleViewRT.swap();
-  if (SMOOTH_FIELD_DISPLAY) {
-    // Must run before padFieldAcrossSeamsSafe: the prefilter zeroes
-    // non-authoritative texels, so the halo has to be rebuilt after it.
+  if (params.smoothFieldDisplay) {
+    // Fused copy + 3x3 prefilter: same pass count as the plain copy. Runs
+    // before padFieldAcrossSeamsSafe, which rebuilds the gutter halo the
+    // clip step zeroes.
     ensureDisplayPrefilterInteriorMask();
-    const u = displayPrefilterMaterial.uniforms;
-    u.u_food.value = renderSampleViewRT.read.texture;
+    const u = sampleViewCopySmoothMaterial.uniforms;
+    u.u_source.value = renderRT.read.texture;
     u.u_interiorMask.value = displayPrefilterMaskRT.texture;
     u.u_foodClamp.value = params.foodClamp;
-    runFullscreenPass(displayPrefilterMaterial, renderSampleViewRT.write);
-    renderSampleViewRT.swap();
+    runFullscreenPass(sampleViewCopySmoothMaterial, renderSampleViewRT.write);
+    renderer.setRenderTarget(null);
+  } else {
+    copyAndClipToAuthoritativeTexels(renderRT.read, renderSampleViewRT.write);
   }
+  renderSampleViewRT.swap();
   padFieldAcrossSeamsSafe({
     sourceCanonicalRT: renderRT.read,
     destinationSampleViewRT: renderSampleViewRT,
@@ -17677,6 +17765,7 @@ function initControls() {
       }
     },
   });
+  bindToggle('smoothFieldDisplay', 'smoothFieldDisplay');
   bindToggle('useSeamStitching', 'useSeamStitching');
   bindToggle('useIslandMasking', 'useIslandMasking');
   bindToggle('useHeadingRotation', 'useHeadingRotation');
