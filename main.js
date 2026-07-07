@@ -7,7 +7,7 @@ import { MeshBVH, acceleratedRaycast } from 'three-mesh-bvh';
 // BUMP THIS (and the matching BUILD_VERSION in index.html) on every deploy.
 // index.html and main.js cache independently, so they carry the same value and
 // the bootstrap flags a mismatch — that means one of the two files is cached.
-const BUILD_VERSION = '2026-07-07-oat-glow-pox';
+const BUILD_VERSION = '2026-07-07-bilinear-smooth';
 
 // Load diagnostics hook installed by the inline bootstrap in index.html.
 // No-ops when absent so main.js keeps working standalone.
@@ -115,16 +115,19 @@ const MAX_PIXEL_RATIO = IS_MOBILE_DEVICE ? 1.5 : 2;
 const MOBILE_FIELD_SIZE = 768;
 const FIELD_SIZE_OVERRIDE = Number(new URLSearchParams(window.location.search).get('field'));
 const FIELD_SIZE = FIELD_SIZE_OVERRIDE > 0 ? FIELD_SIZE_OVERRIDE : (IS_MOBILE_DEVICE ? MOBILE_FIELD_SIZE : 1536);
-// Display-only smoothing of the low-res field (see sampleFoodSmooth and the
-// fused sample-view copy pass). Runtime-togglable via params.smoothFieldDisplay
-// ("Smooth field" in the parameters panel). Defaults OFF: on the already
-// spatially+temporally smoothed render field the extra reconstruction reads as
-// a busier, more cellular surface than plain point sampling. This URL flag only
-// sets the initial default (?smoothfield=1 starts with it on).
-const SMOOTH_FIELD_DISPLAY = new URLSearchParams(window.location.search).get('smoothfield') === '1';
+// Display-only smoothing of the low-res field: on = the sample view uses
+// LinearFilter (hardware bilinear) so the surface reads smooth instead of
+// faceted; off = NearestFilter, the raw point-sampled "disco ball" look.
+// Runtime-togglable via params.smoothFieldDisplay ("Smooth field" in the
+// panel). Defaults ON; ?smoothfield=0 starts with it off for A/B.
+const SMOOTH_FIELD_DISPLAY = new URLSearchParams(window.location.search).get('smoothfield') !== '0';
 // ?legacyglow restores the old Canvas2D createRadialGradient path for the oat
 // glow textures, for A/B testing the iOS "green pox" speckle on a real device.
 const LEGACY_GLOW_TEXTURE = new URLSearchParams(window.location.search).has('legacyglow');
+// ?dev: skip the start screen + intro and seed immediately on load, so a reload
+// lands straight in a running sim. Pairs with __cuttle.growFast()/frameMesh()
+// for fast headless verification. Off in production.
+const DEV_MODE = new URLSearchParams(window.location.search).has('dev');
 // Agents run at half the field resolution on both profiles.
 const AGENT_SIDE = Math.round(FIELD_SIZE / 2);
 const SEAM_BAKE_EXPORT_MODE = new URLSearchParams(window.location.search).has('bakeExport');
@@ -3890,27 +3893,17 @@ float filmThickness01FromFood(float food) {
   if (denom < 0.00001) return clamp(x / maxFood, 0.0, 1.0);
   return clamp((1.0 - exp(-curve * x)) / denom, 0.0, 1.0);
 }
-// Magnification filter for the food field. The field is far below screen
-// resolution, so point/bilinear samples read as facets: bilinear is only C0,
-// which makes the finite-difference bump gradient piecewise-constant and
-// lights each texel as a flat mirror tile. Warping the sub-texel fraction with
-// a quintic smoothstep before ONE hardware bilinear tap makes the
-// reconstruction C2 — height and gradient vary continuously across texels —
-// while reading exactly the same 2x2 texel footprint as plain bilinear. That
-// footprint bound is load-bearing: the seam halo pads only
-// SEAM_REDIRECT_HALO_TEXELS (1) texel of cross-chart values into gutters, so
-// any wider kernel (e.g. bicubic's 4x4) reads foreign charts at seams. Same
-// texture-fetch count as the original point sampling, so no per-fragment cost.
-// u_smoothFieldSampling mirrors params.smoothFieldDisplay (the sample view's
-// filter is flipped to Nearest alongside it, restoring the original look).
+// Field read. All display smoothing now lives in the sample-view texture
+// filter: LinearFilter (Smooth field on) gives hardware bilinear, whose
+// finite-difference bump normals are continuous across texels — no faceting,
+// no "disco ball" — while NearestFilter (off) restores the raw point-sampled
+// look. An earlier quintic sub-texel warp here chased C2 continuity but its
+// texel-center plateaus read as a cellular quilt under the strong surface
+// bump, so it was dropped; plain bilinear is smoother in practice. The seam
+// halo (SEAM_REDIRECT_HALO_TEXELS = 1) still bounds any wider kernel, which is
+// why bilinear — a 2x2 footprint — is the ceiling here.
 float sampleFoodSmooth(vec2 uv) {
-  if (u_smoothFieldSampling == 0) return max(texture(u_food, uv).r, 0.0);
-  vec2 texelIndex = uv / u_texel - 0.5;
-  vec2 base = floor(texelIndex);
-  vec2 f = texelIndex - base;
-  vec2 fw = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
-  vec2 smoothUv = (base + 0.5 + fw) * u_texel;
-  return max(texture(u_food, smoothUv).r, 0.0);
+  return max(texture(u_food, uv).r, 0.0);
 }
 float readFoodSafe(vec2 sampleUv, float fallback) {
   float valid = 0.0;
@@ -15541,8 +15534,59 @@ async function onLoad(gltf) {
     runOnce(passName) {
       return runNamedPass(passName);
     },
+    // Advance the simulation `steps` iterations synchronously (no rAF, no
+    // wall-clock wait), then render once. Grows a big blob in one eval call
+    // for fast headless verification.
+    growFast(steps = 3000) {
+      let t = performance.now();
+      for (let i = 0; i < steps; i++) {
+        simulate(t, 1.0);
+        t += 16.6667;
+        updateInitialAgentSeeding(t);
+      }
+      markRenderFieldChanged();
+      smoothRenderField();
+      renderSceneOnce(performance.now(), { updateAnnotations: false });
+      return { agents: agentCountEl?.textContent };
+    },
+    // Aim the camera to frame the whole cuttlefish mesh. dir is the view
+    // direction; fill<1 pulls closer.
+    frameMesh({ dir = [0.3, 0.5, -0.8], fill = 0.55 } = {}) {
+      if (!mesh) return null;
+      const box = new THREE.Box3().setFromObject(mesh);
+      const center = box.getCenter(new THREE.Vector3());
+      const size = box.getSize(new THREE.Vector3()).length();
+      const d = new THREE.Vector3(dir[0], dir[1], dir[2]).normalize();
+      controls.target.copy(center);
+      camera.position.copy(center).addScaledVector(d, size * fill);
+      camera.near = Math.max(0.01, size * 0.001);
+      camera.far = size * 12;
+      camera.updateProjectionMatrix();
+      camera.lookAt(center);
+      controls.update();
+      return { center: center.toArray(), size };
+    },
+    seedNow() {
+      skipIntroSequence();
+      replayInitialAgentSeed({ playSound: false });
+    },
+    saveState: saveDevState,
+    loadState: loadDevState,
   };
   showStartButton();
+  if (DEV_MODE) {
+    if (startScreen) {
+      startScreen.classList.add('is-complete');
+      startScreen.setAttribute('aria-hidden', 'true');
+      startScreen.style.display = 'none';
+    }
+    skipIntroSequence();
+    if (new URLSearchParams(window.location.search).has('state')) {
+      loadDevState('dev').then((r) => diagLog('devstate', JSON.stringify(r)));
+    } else {
+      replayInitialAgentSeed({ playSound: false });
+    }
+  }
   scheduleSoundPackPreload();
 }
 
@@ -17439,20 +17483,11 @@ function ensureDisplayPrefilterInteriorMask() {
 }
 
 function updateRenderSampleView({ applySeamEqualization = true } = {}) {
-  if (params.smoothFieldDisplay) {
-    // Fused copy + 3x3 prefilter: same pass count as the plain copy. Runs
-    // before padFieldAcrossSeamsSafe, which rebuilds the gutter halo the
-    // clip step zeroes.
-    ensureDisplayPrefilterInteriorMask();
-    const u = sampleViewCopySmoothMaterial.uniforms;
-    u.u_source.value = renderRT.read.texture;
-    u.u_interiorMask.value = displayPrefilterMaskRT.texture;
-    u.u_foodClamp.value = params.foodClamp;
-    runFullscreenPass(sampleViewCopySmoothMaterial, renderSampleViewRT.write);
-    renderer.setRenderTarget(null);
-  } else {
-    copyAndClipToAuthoritativeTexels(renderRT.read, renderSampleViewRT.write);
-  }
+  // Smoothing is purely the sample-view texture filter now (Linear vs Nearest,
+  // set by applySmoothFieldDisplayFilters); the sample view is always a plain
+  // authoritative-clipped copy. The old fused 3x3 prefilter is retired — plain
+  // bilinear is enough and keeps the field closest to the un-processed look.
+  copyAndClipToAuthoritativeTexels(renderRT.read, renderSampleViewRT.write);
   renderSampleViewRT.swap();
   padFieldAcrossSeamsSafe({
     sourceCanonicalRT: renderRT.read,
@@ -17502,6 +17537,64 @@ function dilateRenderSampleView(iterations) {
 // instead of generic max dilation; this mutates only the derived sample view.
 function dilateRenderField(iterations) {
   dilateRenderSampleView(iterations);
+}
+
+// === Dev save/load ===
+// Snapshot the simulation to IndexedDB so a grown state survives page reloads
+// (which shader edits require). Grow once, saveState(), then reload with
+// ?dev&state to restore it instantly instead of re-growing for a minute+.
+// Stores only the canonical field + agents; the display field is re-derived.
+const DEV_STATE_DB = 'cuttle-dev-state';
+function openDevStateDb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DEV_STATE_DB, 1);
+    req.onupgradeneeded = () => req.result.createObjectStore('states');
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function saveDevState(name = 'dev') {
+  const record = {
+    fieldSize: FIELD_SIZE,
+    agentSide: AGENT_SIDE,
+    field: readRTPixelsAsFloat(fieldRT.read, FIELD_SIZE, FIELD_SIZE).buffer,
+    agents: readRTPixelsAsFloat(agentRT.read, AGENT_SIDE, AGENT_SIDE).buffer,
+  };
+  const db = await openDevStateDb();
+  await new Promise((res, rej) => {
+    const tx = db.transaction('states', 'readwrite');
+    tx.objectStore('states').put(record, name);
+    tx.oncomplete = res;
+    tx.onerror = () => rej(tx.error);
+  });
+  db.close();
+  return { saved: name, fieldSize: FIELD_SIZE, agentSide: AGENT_SIDE };
+}
+async function loadDevState(name = 'dev') {
+  const db = await openDevStateDb();
+  const record = await new Promise((res, rej) => {
+    const tx = db.transaction('states', 'readonly');
+    const r = tx.objectStore('states').get(name);
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+  db.close();
+  if (!record) return { error: `no saved state "${name}" — run saveState() first` };
+  if (record.fieldSize !== FIELD_SIZE || record.agentSide !== AGENT_SIDE) {
+    return { error: `size mismatch: saved ${record.fieldSize}/${record.agentSide} vs current ${FIELD_SIZE}/${AGENT_SIDE}` };
+  }
+  const fieldTex = makeDataTexture2D(new Float32Array(record.field), FIELD_SIZE, FIELD_SIZE, THREE.FloatType);
+  uploadDataTextureToRT(fieldTex, fieldRT.read);
+  fieldTex.dispose();
+  const agentTex = makeDataTexture2D(new Float32Array(record.agents), AGENT_SIDE, AGENT_SIDE, THREE.FloatType);
+  uploadDataTextureToRT(agentTex, agentRT.read);
+  agentTex.dispose();
+  // Re-derive the display field from the restored canonical field.
+  updateFieldSampleView();
+  markRenderFieldChanged();
+  for (let i = 0; i < 6; i++) smoothRenderField();
+  renderSceneOnce(performance.now(), { updateAnnotations: false });
+  return { loaded: name };
 }
 
 function simulate(now, dt) {
