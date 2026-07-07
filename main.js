@@ -5899,28 +5899,51 @@ function updateStartScreenUi(now = performance.now()) {
 
 async function requestIntroStart() {
   if (introSequenceState.requested || introSequenceState.completed) return;
-  const clickedAt = performance.now();
-  const fadeOutAt = clickedAt + INTRO_START_CLICK_SOUND_PEAK_MS;
-  startScreenUiState.clickedAt = clickedAt;
-  startScreenUiState.beginFadeOutAt = fadeOutAt;
+  // Claim the sequence immediately so a stray re-click can't re-enter while we
+  // wait (below) for the intro buffer to decode. requestedAt stays 0 until we
+  // commit the timeline, so the render loop keeps holding on the start screen.
   introSequenceState.requested = true;
-  introSequenceState.requestedAt = fadeOutAt;
   introSequenceState.seedSoundPlayed = false;
   introSequenceState.envAudioStarted = false;
-  if (startButton) {
-    startButton.disabled = true;
-    setStartButtonHoverTarget(1, clickedAt, true);
-  }
-  if (startScreen) startScreen.classList.add('is-armed');
-  updateStartScreenUi(clickedAt);
+  if (startButton) startButton.disabled = true;
+
+  // Immediate click feedback + in-gesture AudioContext unlock. iOS requires the
+  // resume to fire synchronously inside the gesture, before any await, which the
+  // fire-and-forget click sound (via ensureSoundCheckAudioContext) does.
   const startClickClip = getSoundClip('slime-fuse');
   if (startClickClip) {
     playSoundCheckOneShot(startClickClip).catch((err) => {
       console.warn('Failed to play start click sound:', err);
     });
   }
+
+  // Hold the timeline until intro.wav is actually decoded. The visuals run off
+  // requestedAt (performance.now()), but the music can only start once its
+  // buffer is ready; if we committed the timeline now and the ~4.9 MB decode
+  // overran the ~2.8 s runway to contentStartAt, source.start() would clamp to
+  // "now" and the music would begin late while the visuals played on schedule
+  // (the iOS "intro plays late" bug). Warm buffers (see scheduleSoundPackPreload)
+  // make this resolve instantly; a cold buffer just holds the start screen a
+  // beat. Bounded so a stalled fetch can't hang the intro forever.
+  const introClip = getSoundClip('intro');
+  if (introClip && !soundCheckAudioState.buffers.has(introClip.path)) {
+    const INTRO_BUFFER_WAIT_MAX_MS = 4000;
+    await Promise.race([
+      loadSoundCheckBuffer(introClip.path).catch(() => {}),
+      new Promise((resolve) => window.setTimeout(resolve, INTRO_BUFFER_WAIT_MAX_MS)),
+    ]);
+    if (introSequenceState.completed) return;
+  }
+
+  const clickedAt = performance.now();
+  const fadeOutAt = clickedAt + INTRO_START_CLICK_SOUND_PEAK_MS;
+  startScreenUiState.clickedAt = clickedAt;
+  startScreenUiState.beginFadeOutAt = fadeOutAt;
+  introSequenceState.requestedAt = fadeOutAt;
+  if (startButton) setStartButtonHoverTarget(1, clickedAt, true);
+  if (startScreen) startScreen.classList.add('is-armed');
+  updateStartScreenUi(clickedAt);
   const contentStartAt = getIntroContentStartAt();
-  const introClip = SOUND_CHECK_CLIPS.find((clip) => clip.id === 'intro');
   const soundStart = introClip
     ? await playSoundCheckOneShot(introClip, { startAtPerformanceMs: contentStartAt })
     : null;
@@ -8791,6 +8814,19 @@ async function preloadSoundPack() {
 }
 
 function scheduleSoundPackPreload() {
+  // Warm the click-critical clips (start click + intro music) right away, ahead
+  // of the idle-batched full preload. The idle batch decodes the 25 MB ambience
+  // clip alongside everything else, which — under iOS memory pressure — starved
+  // and delayed the intro decode so it wasn't ready when the user hit Begin.
+  // These decodes dedupe with the batch below (loadSoundCheckBuffer caches by
+  // path), so warming here is free. resumeContext:false keeps it gesture-free.
+  for (const id of ['slime-fuse', 'intro']) {
+    const clip = getSoundClip(id);
+    if (!clip) continue;
+    loadSoundCheckBuffer(clip.path, { resumeContext: false }).catch((err) => {
+      console.warn(`Failed to warm ${getSoundFileName(clip.path)}:`, err);
+    });
+  }
   const startPreload = () => {
     void preloadSoundPack().catch((err) => {
       console.warn('Sound preload failed unexpectedly; playback will retry on demand.', err);
