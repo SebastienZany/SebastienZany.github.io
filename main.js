@@ -8,7 +8,7 @@ import { createPhysarumSim } from './webgpu/sim.js';
 // BUMP THIS (and the matching BUILD_VERSION in index.html) on every deploy.
 // index.html and main.js cache independently, so they carry the same value and
 // the bootstrap flags a mismatch — that means one of the two files is cached.
-const BUILD_VERSION = '2026-07-07-ptex-unify-field';
+const BUILD_VERSION = '2026-07-07-ptex-compiletime-gate';
 
 // Load diagnostics hook installed by the inline bootstrap in index.html.
 // No-ops when absent so main.js keeps working standalone.
@@ -150,6 +150,13 @@ const WEBGPU_SEAM = WEBGPU_SIM && new URLSearchParams(window.location.search).ge
 const PTEX_QUERY = new URLSearchParams(window.location.search);
 const PTEX_DISPLAY = PTEX_QUERY.get('ptex') === '1'; // step 2: default flips to !== '0' once verified
 const PTEX_SIM = PTEX_QUERY.get('ptexsim') === '1'; // step 3: default flips to !== '0' once verified
+// Whether the shared ptex resolver GLSL is COMPILED into the field-sampling
+// shaders. Register pressure from the resolver's extra samplers is paid at
+// compile time regardless of the runtime u_usePtex flag (see memory: baking
+// safeSamplingGlsl into a hot pass cost 41->33 fps even when the branch never
+// ran), so a page that isn't exercising ptex must compile it OUT entirely.
+// DEV_MODE compiles it in so __cuttle.setPtex can A/B live without a reload.
+const PTEX_COMPILED = PTEX_DISPLAY || PTEX_SIM || DEV_MODE;
 // Agents run at half the field resolution on both profiles.
 const AGENT_SIDE = Math.round(FIELD_SIZE / 2);
 const SEAM_BAKE_EXPORT_MODE = new URLSearchParams(window.location.search).has('bakeExport');
@@ -2236,6 +2243,21 @@ vec2 resolveSampleUvUnified(vec2 baseUv, vec2 sampleUv, out float valid) {
 }
 `;
 
+// Zero-cost stub compiled in when ptex is not being exercised (production).
+// resolveSampleUvUnified is the ONLY symbol the field-sampling shaders reference
+// from the ptex include; here it is a straight alias for the legacy resolver, so
+// no extra samplers, no seam function, no register pressure. The u_usePtex /
+// u_ptexFrame / u_ptexBoundary uniform objects may still be present on materials
+// — three.js just doesn't locate them in this build and skips the upload.
+const ptexResolverStubGlsl = `
+vec2 resolveSampleUvUnified(vec2 baseUv, vec2 sampleUv, out float valid) {
+  return resolveSampleUvSafe(baseUv, sampleUv, valid);
+}
+`;
+// Compiled form the shaders actually include: the real resolver only when ptex
+// is active (or in dev, for live A/B); otherwise the stub. See PTEX_COMPILED.
+const ptexResolverInclude = PTEX_COMPILED ? ptexResolverGlsl : ptexResolverStubGlsl;
+
 const oatFragment = `#version 300 es
 precision highp float;
 #define MAX_OATS 64
@@ -2483,7 +2505,7 @@ uniform float u_diffusion;
 uniform float u_decay;
 uniform float u_foodClamp;
 ${safeSamplingGlsl}
-${ptexResolverGlsl}
+${ptexResolverInclude}
 float readFoodSafe(vec2 baseUv, vec2 sampleUv, float fallback, out float valid) {
   vec2 r = resolveSampleUvUnified(baseUv, sampleUv, valid);
   if (valid < 0.5) return fallback;
@@ -2778,7 +2800,7 @@ uniform float u_foodClamp;
 uniform int u_applyTemporal;
 uniform int u_smoothingTapCount;
 ${safeSamplingGlsl}
-${ptexResolverGlsl}
+${ptexResolverInclude}
 float readFoodSafe(vec2 offset, float fallback) {
   float valid = 0.0;
   vec2 r = resolveSampleUvUnified(v_uv, v_uv + offset, valid);
@@ -3982,7 +4004,7 @@ uniform int u_useGoldWaferFilm;
 uniform int u_useGoldWaferBodyUnderlay;
 uniform int u_ptexDebug;
 ${safeSamplingGlsl}
-${ptexResolverGlsl}
+${ptexResolverInclude}
 float heightFromFood(float food) {
   return (1.0 - exp(-max(food, 0.0) * 4.0)) * u_heightScale;
 }
@@ -4412,7 +4434,7 @@ const sharedSafeSamplingUniforms = () => ({
   u_useZeroGutterTransitions: { value: 0 },
 });
 
-// Uniforms for the shared ptex resolver snippet (${ptexResolverGlsl}). Spread
+// Uniforms for the shared ptex resolver snippet (${ptexResolverInclude}). Spread
 // into any material that includes it. Textures start null and are wired by
 // syncPtexResolverUniforms() once buildPtexAdjacency() has built them; u_usePtex
 // stays 0 (legacy resolver) until then.
