@@ -2216,6 +2216,32 @@ bool isOwnershipUnsafe(vec2 uv) {
   return uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0 ||
     texture(u_chartUnsafe, uv).r >= 0.5;
 }
+${PTEX_COMPILED ? `
+uniform sampler2D u_ptexFrame;
+uniform highp usampler2D u_ptexBoundary;
+vec4 ptexFrameTexel(int f, int comp) {
+  int g = f * 6 + comp;
+  return texelFetch(u_ptexFrame, ivec2(g % ${PTEX_FRAME_TEX_WIDTH}, g / ${PTEX_FRAME_TEX_WIDTH}), 0);
+}
+// Map baseUv across its nearest-seam boundary to the neighbor chart via the
+// per-edge affine, returning the neighbor-chart uv and the destination chart in
+// outChart (-1 if no seam here). Restores cross-seam oat feeding (formerly the
+// transition candidate atlas) for the common adjacent-chart case.
+vec2 ptexCrossToNeighbor(vec2 baseUv, out float outChart) {
+  outChart = -1.0;
+  vec2 fs = vec2(float(${FIELD_SIZE}));
+  ivec2 bt = ivec2(clamp(floor(baseUv * fs), vec2(0.0), fs - 1.0));
+  uint fid = texelFetch(u_ptexBoundary, bt, 0).r;
+  if (fid == 0u) return baseUv;
+  int f = int(fid);
+  vec4 t0 = ptexFrameTexel(f, 0);
+  vec4 t1 = ptexFrameTexel(f, 1);
+  vec4 t2 = ptexFrameTexel(f, 2);
+  mat2 M = mat2(t1.x, t1.y, t1.z, t1.w);
+  outChart = t2.y;
+  return M * (baseUv - t0.xy) + t0.zw;
+}
+` : ''}
 void main() {
   float fragmentChart = chartIdAt(v_uv);
   if (fragmentChart < 0.5 || isOwnershipUnsafe(v_uv)) {
@@ -2229,10 +2255,19 @@ void main() {
     float radius = max(u_oatRadius[i], 0.001);
     float supportRadius = radius * u_oatSupportSigmas;
     vec2 sampleUv = v_uv;
-    // Cross-seam oat contribution (formerly via the transition candidate atlas)
-    // is dropped: an oat only feeds fragments on its own chart. Same-chart oats
-    // are unaffected.
-    if (abs(oatChart - fragmentChart) > 0.5) continue;
+    // Cross-seam oat contribution: map the fragment across its nearest seam to
+    // the oat's chart via the per-edge affine (replaces the deleted transition
+    // candidate atlas). Only the nearest-seam neighbor is reachable, so oats on
+    // a non-adjacent chart across the seam no longer contribute — the common
+    // adjacent-chart case (the bulk of cross-seam feeding) is preserved.
+    if (abs(oatChart - fragmentChart) > 0.5) {
+${PTEX_COMPILED ? `
+      float nChart = -1.0;
+      vec2 crossed = ptexCrossToNeighbor(v_uv, nChart);
+      if (abs(nChart - oatChart) > 0.5) continue;
+      sampleUv = crossed;
+` : `      continue;`}
+    }
     vec2 d = sampleUv - u_oats[i];
     if (dot(d, d) > supportRadius * supportRadius) continue;
     float peakFood = max(u_oatPower[i], 0.0);
@@ -4094,6 +4129,7 @@ const oatMaterial = makeRawShaderMaterial(oatFragment, {
   u_chartId: { value: chartIdRT.texture },
   u_chartUnsafe: { value: chartUnsafeRT.texture },
   u_useSeamStitching: { value: 1 },
+  ...(PTEX_COMPILED ? { u_ptexFrame: { value: null }, u_ptexBoundary: { value: null } } : {}),
 });
 
 const sharedSeamUniforms = () => ({
@@ -16512,6 +16548,10 @@ function renderOats() {
   if (!oatDirty && lastOatRenderSeamStitching === seamEnabled) return;
   uploadOatUniforms(oatMaterial);
   oatMaterial.uniforms.u_useSeamStitching.value = seamEnabled;
+  if (oatMaterial.uniforms.u_ptexFrame) {
+    oatMaterial.uniforms.u_ptexFrame.value = ptexFrameTex;
+    oatMaterial.uniforms.u_ptexBoundary.value = ptexBoundaryTex;
+  }
   runFullscreenPass(oatMaterial, oatRT);
   oatDirty = false;
   lastOatRenderSeamStitching = seamEnabled;
