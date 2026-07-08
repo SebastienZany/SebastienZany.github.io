@@ -8,7 +8,7 @@ import { createPhysarumSim } from './webgpu/sim.js';
 // BUMP THIS (and the matching BUILD_VERSION in index.html) on every deploy.
 // index.html and main.js cache independently, so they carry the same value and
 // the bootstrap flags a mismatch — that means one of the two files is cached.
-const BUILD_VERSION = '2026-07-07-ptex-compiletime-gate';
+const BUILD_VERSION = '2026-07-07-ptex-unify-agents';
 
 // Load diagnostics hook installed by the inline bootstrap in index.html.
 // No-ops when absent so main.js keeps working standalone.
@@ -2258,6 +2258,53 @@ vec2 resolveSampleUvUnified(vec2 baseUv, vec2 sampleUv, out float valid) {
 // is active (or in dev, for live A/B); otherwise the stub. See PTEX_COMPILED.
 const ptexResolverInclude = PTEX_COMPILED ? ptexResolverGlsl : ptexResolverStubGlsl;
 
+// Agent-movement variant of the resolver: like resolveSampleUvSeam but it also
+// returns the cross-seam heading rotation. That rotation is the frame's
+// (sinT, cosT) at t2.zw — computed from the two charts' tangent frames, the
+// SAME quantity the legacy redirect meta stores, so on the ~99% of seam texels
+// where the affine reproduces the atlas destination it also reproduces the
+// heading turn. The failure mode is conservative (valid=0 -> agent stays in its
+// chart), never a fly-off. Injected into the agent shader AFTER resolveMoveUvSafe
+// (which the stub aliases) and AFTER ptexResolverInclude (for ptexFrameTexel).
+// Compile-time gated exactly like the sampling resolver.
+const agentMoveResolverGlsl = PTEX_COMPILED ? `
+vec2 resolveMoveUvSeam(vec2 baseUv, vec2 candidateUv, out float valid, out vec2 rotation) {
+  valid = 0.0;
+  rotation = vec2(0.0, 1.0);
+  if (!isAuthoritativeChartTexel(baseUv)) return baseUv;
+  float baseChart = chartIdAt(baseUv);
+  if (chartIdAt(candidateUv) == baseChart && !isOwnershipUnsafe(candidateUv)) {
+    valid = 1.0;
+    return candidateUv;
+  }
+  vec2 fs = vec2(float(${FIELD_SIZE}));
+  ivec2 bt = ivec2(clamp(floor(baseUv * fs), vec2(0.0), fs - 1.0));
+  uint fid = texelFetch(u_ptexBoundary, bt, 0).r;
+  if (fid == 0u) return baseUv;
+  int f = int(fid);
+  vec4 t0 = ptexFrameTexel(f, 0);
+  vec4 t1 = ptexFrameTexel(f, 1);
+  vec4 t2 = ptexFrameTexel(f, 2);
+  float srcChart = t2.x; float dstChart = t2.y;
+  if (abs(baseChart - srcChart) > 0.5) return baseUv;
+  mat2 M = mat2(t1.x, t1.y, t1.z, t1.w);
+  vec2 destUv = M * (candidateUv - t0.xy) + t0.zw;
+  if (isOutsideAtlas(destUv) || isOwnershipUnsafe(destUv) || abs(chartIdAt(destUv) - dstChart) > 0.5) return baseUv;
+  valid = 1.0;
+  rotation = vec2(t2.z, t2.w); // (sinT, cosT) — same tangent-frame turn the redirect meta stored
+  return destUv;
+}
+vec2 resolveMoveUvUnified(vec2 baseUv, vec2 candidateUv, out float valid, out vec2 rotation) {
+  return (u_usePtex == 1)
+    ? resolveMoveUvSeam(baseUv, candidateUv, valid, rotation)
+    : resolveMoveUvSafe(baseUv, candidateUv, valid, rotation);
+}
+` : `
+vec2 resolveMoveUvUnified(vec2 baseUv, vec2 candidateUv, out float valid, out vec2 rotation) {
+  return resolveMoveUvSafe(baseUv, candidateUv, valid, rotation);
+}
+`;
+
 const oatFragment = `#version 300 es
 precision highp float;
 #define MAX_OATS 64
@@ -3003,6 +3050,7 @@ uniform float u_mouseRepelChart;
 uniform float u_mouseRepelRadius;
 uniform float u_mouseRepelStrength;
 ${safeSamplingGlsl}
+${ptexResolverInclude}
 float hash(float n) {
   return fract(sin(n * 127.1 + u_time * 41.7) * 43758.5453123);
 }
@@ -3011,7 +3059,7 @@ vec4 fetchAgent(int index) {
   return texelFetch(u_agents, pixel, 0);
 }
 float readFoodSafe(vec2 baseUv, vec2 sampleUv, float fallback, out float valid) {
-  vec2 r = resolveSampleUvSafe(baseUv, sampleUv, valid);
+  vec2 r = resolveSampleUvUnified(baseUv, sampleUv, valid);
   if (valid < 0.5) return fallback;
   return max(texture(u_food, r).r, 0.0);
 }
@@ -3021,13 +3069,13 @@ float readFoodSafe(vec2 baseUv, vec2 sampleUv, float fallback) {
 }
 float readOatSafe(vec2 baseUv, vec2 sampleUv, float fallback) {
   float valid = 0.0;
-  vec2 r = resolveSampleUvSafe(baseUv, sampleUv, valid);
+  vec2 r = resolveSampleUvUnified(baseUv, sampleUv, valid);
   if (valid < 0.5) return fallback;
   return max(texture(u_oat, r).r, 0.0);
 }
 float readDensitySafe(vec2 baseUv, vec2 sampleUv, float fallback) {
   float valid = 0.0;
-  vec2 r = resolveSampleUvSafe(baseUv, sampleUv, valid);
+  vec2 r = resolveSampleUvUnified(baseUv, sampleUv, valid);
   if (valid < 0.5) return fallback;
   ivec2 densitySize = textureSize(u_density, 0);
   ivec2 densityPixel = clamp(
@@ -3103,6 +3151,7 @@ vec2 resolveMoveUvSafe(vec2 baseUv, vec2 candidateUv, out float valid, out vec2 
 
   return baseUv;
 }
+${agentMoveResolverGlsl}
 float scoreAt(vec2 baseUv, vec2 sampleUv, float reserve) {
   float sampleValid = 0.0;
   float dynamicFood = readFoodSafe(baseUv, sampleUv, 0.0, sampleValid);
@@ -3164,7 +3213,7 @@ vec4 advanceAgent(vec4 agent, float seed) {
   vec2 dir = vec2(cos(angle), sin(angle));
   float moveValid = 0.0;
   vec2 moveRotation = vec2(0.0, 1.0);
-  vec2 nextPos = resolveMoveUvSafe(pos, pos + dir * u_stepSize * u_dt * moveScale, moveValid, moveRotation);
+  vec2 nextPos = resolveMoveUvUnified(pos, pos + dir * u_stepSize * u_dt * moveScale, moveValid, moveRotation);
   if (moveValid < 0.5) {
     nextPos = pos;
     angle += (hash(seed + 59.0) < 0.5 ? -1.0 : 1.0) * u_turnAngle;
@@ -3187,7 +3236,7 @@ vec4 makeChildCandidate(vec4 parentNext, int side, float seed, float childReserv
   parentNext.z += sideSign * u_reproAngle + (hash(seed + 37.0) - 0.5) * 0.18;
   vec2 childRotation = vec2(0.0, 1.0);
   vec2 childDir = vec2(cos(parentNext.z), sin(parentNext.z));
-  vec2 childPos = resolveMoveUvSafe(parentNext.xy, parentNext.xy + childDir * u_childStep, childValid, childRotation);
+  vec2 childPos = resolveMoveUvUnified(parentNext.xy, parentNext.xy + childDir * u_childStep, childValid, childRotation);
   if (childValid >= 0.5) {
     parentNext.xy = childPos;
     if (u_useHeadingRotation == 1) {
@@ -4576,6 +4625,7 @@ const agentParentUpdateMaterial = makeRawShaderMaterial(agentParentUpdateFragmen
   u_mouseRepelRadius: { value: MOUSE_REPEL_RADIUS_UV },
   u_mouseRepelStrength: { value: MOUSE_REPEL_STRENGTH },
   ...sharedSafeSamplingUniforms(),
+  ...ptexUniforms(),
 });
 
 const agentCandidateBuildMaterial = makeRawShaderMaterial(agentCandidateBuildFragment, {
@@ -4615,6 +4665,7 @@ const agentCandidateBuildMaterial = makeRawShaderMaterial(agentCandidateBuildFra
   u_mouseRepelStrength: { value: MOUSE_REPEL_STRENGTH },
   u_allocationOffset: { value: 0 },
   ...sharedSafeSamplingUniforms(),
+  ...ptexUniforms(),
 });
 
 const agentPrefixInitMaterial = makeRawShaderMaterial(agentPrefixInitFragment, {
@@ -17705,6 +17756,15 @@ function setAgentUpdateUniforms(material, now, dt) {
   u.u_mouseRepelChart.value = mouseRepelState.chartId;
   u.u_mouseRepelRadius.value = MOUSE_REPEL_RADIUS_UV;
   u.u_mouseRepelStrength.value = MOUSE_REPEL_STRENGTH;
+  // Agent sensing + movement cross seams through the affine resolver when ptex
+  // is on. Movement stays conservative (valid=0 -> agent holds its chart), and
+  // the cross-seam heading turn comes from the frame's (sinT,cosT), the same
+  // tangent-frame rotation the legacy redirect meta carried.
+  if (u.u_usePtex) {
+    u.u_usePtex.value = (ptexDisplayActive && ptexBoundaryTex && ptexFrameTex) ? 1 : 0;
+    u.u_ptexFrame.value = ptexFrameTex;
+    u.u_ptexBoundary.value = ptexBoundaryTex;
+  }
 }
 
 function updateAgents(now, dt) {
