@@ -8,7 +8,7 @@ import { createPhysarumSim } from './webgpu/sim.js';
 // BUMP THIS (and the matching BUILD_VERSION in index.html) on every deploy.
 // index.html and main.js cache independently, so they carry the same value and
 // the bootstrap flags a mismatch — that means one of the two files is cached.
-const BUILD_VERSION = '2026-07-07-ptex-unify-display';
+const BUILD_VERSION = '2026-07-07-ptex-unify-field';
 
 // Load diagnostics hook installed by the inline bootstrap in index.html.
 // No-ops when absent so main.js keeps working standalone.
@@ -2483,8 +2483,9 @@ uniform float u_diffusion;
 uniform float u_decay;
 uniform float u_foodClamp;
 ${safeSamplingGlsl}
+${ptexResolverGlsl}
 float readFoodSafe(vec2 baseUv, vec2 sampleUv, float fallback, out float valid) {
-  vec2 r = resolveSampleUvSafe(baseUv, sampleUv, valid);
+  vec2 r = resolveSampleUvUnified(baseUv, sampleUv, valid);
   if (valid < 0.5) return fallback;
   return max(texture(u_food, r).r, 0.0);
 }
@@ -4428,6 +4429,7 @@ const diffuseMaterial = makeRawShaderMaterial(diffuseFragment, {
   u_decay: { value: params.fieldDecay },
   u_foodClamp: { value: params.foodClamp },
   ...sharedSafeSamplingUniforms(),
+  ...ptexUniforms(),
   u_useZeroGutterTransitions: { value: 1 },
 });
 
@@ -17722,6 +17724,13 @@ function diffuseField() {
   u.u_foodClamp.value = params.foodClamp;
   u.u_useSeamStitching.value = params.useSeamStitching ? 1 : 0;
   u.u_useZeroGutterTransitions.value = params.useSeamStitching ? 1 : 0;
+  // Diffuse the sim field itself through the affine resolver when ptex is on, so
+  // fieldRT is C1 across seams at the source (not just re-stitched at display).
+  // The 8-neighbor box blur with no-flux fallback stays mass-conserving because
+  // the affine cross-seam map is a consistent inverse pair (A->B and B->A).
+  u.u_usePtex.value = (ptexDisplayActive && ptexBoundaryTex && ptexFrameTex) ? 1 : 0;
+  u.u_ptexFrame.value = ptexFrameTex;
+  u.u_ptexBoundary.value = ptexBoundaryTex;
   runFullscreenPass(diffuseMaterial, fieldRT.write);
   fieldRT.swap();
 }
