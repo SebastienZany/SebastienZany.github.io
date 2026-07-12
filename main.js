@@ -2,7 +2,6 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { MeshBVH, acceleratedRaycast } from 'three-mesh-bvh';
-import { createPhysarumSim } from './webgpu/sim.js';
 
 // Build stamp so a stale cached copy is obvious in the diagnostics report.
 // BUMP THIS (and the matching BUILD_VERSION in index.html) on every deploy.
@@ -129,18 +128,6 @@ const LEGACY_GLOW_TEXTURE = new URLSearchParams(window.location.search).has('leg
 // lands straight in a running sim. Pairs with __cuttle.growFast()/frameMesh()
 // for fast headless verification. Off in production.
 const DEV_MODE = new URLSearchParams(window.location.search).has('dev');
-// WebGPU sim bridge (migration step 1): ?webgpu=1 runs the whole simulation on
-// WebGPU compute and feeds its field back into the WebGL surface shader. Fully
-// gated — the normal WebGL path is untouched when the flag is absent.
-const WEBGPU_SIM = new URLSearchParams(window.location.search).get('webgpu') === '1';
-let webgpuSim = null;            // resolved createPhysarumSim() object
-let webgpuFieldData = null;      // Float32Array scratch for the field readback
-let webgpuFieldTexture = null;   // THREE.DataTexture the slime shader samples
-let webgpuBridgeFrame = 0;
-let webgpuReadbackMs = 0;        // EMA of the field readback round-trip (the bridge tax)
-// ?webgpu=1&seam=1: feed the app's real baked seam atlases into the WebGPU sim so
-// agent sensing is chart-aware (else the sim runs flat and shows seam artifacts).
-const WEBGPU_SEAM = WEBGPU_SIM && new URLSearchParams(window.location.search).get('seam') === '1';
 // Unified per-edge seam sampler (the correct-by-construction replacement for the
 // per-texel redirect/transition atlases). Staged migration; each flag defaults
 // ON once its step is verified, with the query param to force it off for A/B:
@@ -5599,7 +5586,7 @@ function syncSlimeMaterialForCamera(renderCamera) {
   u.u_ptexFrame.value = ptexFrameTex;
   u.u_ptexBoundary.value = ptexBoundaryTex;
   u.u_smoothFieldSampling.value = params.smoothFieldDisplay ? 1 : 0;
-  u.u_food.value = (WEBGPU_SIM && webgpuFieldTexture) ? webgpuFieldTexture : renderSampleViewRT.read.texture;
+  u.u_food.value = renderSampleViewRT.read.texture;
   u.u_agentDensity.value = densityRT.texture;
   u.u_agentDensityOverlay.value = agentDensityOverlayRT.texture;
   u.u_cameraPos.value.copy(renderCamera.position);
@@ -15513,7 +15500,6 @@ async function onLoad(gltf) {
   resetSimulation({ resetOats: true, spawnAgents: false });
   started = true;
   loadPhase('resetSimulation');
-  await initWebGPUSimBridge();
   lastFrameTime = performance.now();
   requestAnimationFrame(frame);
 
@@ -18643,85 +18629,6 @@ function ensureWireframeOverlay() {
 }
 
 // === frame loop ===
-// Read the app's baked seam atlases (WebGL render targets) back to the CPU and
-// upload them as WebGPU rgba32float textures the compute sim can sample. Run once
-// at init (atlases are static after the mapping phase). chartUnsafe is RGBA8; the
-// rest are RGBA32F. Keys/order must match SEAM_TEXTURE_KEYS in webgpu/seam.js.
-function buildSeamTexturesForWebGPU(device) {
-  const N = FIELD_SIZE;
-  const W = FIELD_SIZE * SEAM_TRANSITION_CANDIDATE_COUNT;   // 4-wide candidate atlases
-  const mkTex = (w, h) => device.createTexture({
-    size: [w, h], format: 'rgba32float',
-    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
-  });
-  const uploadFloat = (rt, w, h) => {
-    const buf = new Float32Array(w * h * 4);
-    renderer.readRenderTargetPixels(rt, 0, 0, w, h, buf);
-    const tex = mkTex(w, h);
-    device.queue.writeTexture({ texture: tex }, buf, { bytesPerRow: w * 16, rowsPerImage: h }, [w, h]);
-    return tex;
-  };
-  const uploadByteAsFloat = (rt, w, h) => {
-    const bytes = new Uint8Array(w * h * 4);
-    renderer.readRenderTargetPixels(rt, 0, 0, w, h, bytes);
-    const buf = new Float32Array(w * h * 4);
-    for (let i = 0; i < buf.length; i++) buf[i] = bytes[i] / 255;   // RGBA8 → normalized float
-    const tex = mkTex(w, h);
-    device.queue.writeTexture({ texture: tex }, buf, { bytesPerRow: w * 16, rowsPerImage: h }, [w, h]);
-    return tex;
-  };
-  return {
-    chartId: uploadFloat(chartIdRT, N, N),
-    chartUnsafe: uploadByteAsFloat(chartUnsafeRT, N, N),
-    redirectUv: uploadFloat(seamRedirectUvRT, N, N),
-    redirectMeta: uploadFloat(seamRedirectMetaRT, N, N),
-    redirectClaim: uploadFloat(seamRedirectClaimRT, N, N),
-    transitionUv: uploadFloat(seamTransitionUvAtlasRT, W, N),
-    transitionMeta: uploadFloat(seamTransitionMetaAtlasRT, W, N),
-    transitionDirection: uploadFloat(seamTransitionDirectionAtlasRT, W, N),
-    transitionBasis: uploadFloat(seamTransitionBasisAtlasRT, W, N),
-  };
-}
-
-async function initWebGPUSimBridge() {
-  if (!WEBGPU_SIM) return;
-  try {
-    // Create the device up front so seam atlases can be uploaded to it before the sim binds them.
-    const adapter = await navigator.gpu?.requestAdapter?.({ powerPreference: 'high-performance' });
-    const device = adapter ? await adapter.requestDevice() : null;
-    if (!device) throw new Error('no WebGPU adapter/device');
-    const seamTextures = WEBGPU_SEAM ? buildSeamTexturesForWebGPU(device) : null;
-    webgpuSim = await createPhysarumSim({
-      device,
-      fieldSize: FIELD_SIZE,
-      capacity: AGENT_CAPACITY,
-      seedCount: Math.min(60000, AGENT_CAPACITY),
-      seam: WEBGPU_SEAM,
-      seamTextures,
-    });
-    if (webgpuSim.seamSetupError) console.warn('[webgpu] seam setup:', webgpuSim.seamSetupError);
-    webgpuFieldData = new Float32Array(FIELD_SIZE * FIELD_SIZE);
-    webgpuFieldTexture = new THREE.DataTexture(
-      webgpuFieldData, FIELD_SIZE, FIELD_SIZE, THREE.RedFormat, THREE.FloatType,
-    );
-    webgpuFieldTexture.minFilter = THREE.NearestFilter;
-    webgpuFieldTexture.magFilter = THREE.NearestFilter;
-    webgpuFieldTexture.wrapS = THREE.ClampToEdgeWrapping;
-    webgpuFieldTexture.wrapT = THREE.ClampToEdgeWrapping;
-    webgpuFieldTexture.needsUpdate = true;
-    window.__webgpuBridge = {
-      sim: webgpuSim,
-      fieldSize: FIELD_SIZE,
-      get readbackMs() { return +webgpuReadbackMs.toFixed(2); },
-      get liveAgents() { return webgpuSim ? webgpuSim.getLiveEstimate() : 0; },
-    };
-    diagLog('webgpu', `WebGPU sim bridge active (?webgpu=1): field ${FIELD_SIZE}², cap ${AGENT_CAPACITY}, seam=${WEBGPU_SEAM ? 'on' : 'off'}`);
-  } catch (e) {
-    console.error('[webgpu] bridge init failed; falling back to WebGL sim:', e);
-    webgpuSim = null;
-  }
-}
-
 function frame(now) {
   const rawDt = Math.min((now - lastFrameTime) / 16.6667, FRAME_DT_CLAMP);
   lastFrameTime = now;
@@ -18733,20 +18640,7 @@ function frame(now) {
 
   if (started) {
     updateOatFoodDecay(now);
-    if (WEBGPU_SIM && webgpuSim) {
-      // Bridge: WebGPU compute runs the whole sim; pull its field back into a
-      // DataTexture for the WebGL surface shader (?webgpu=1). Readback is async
-      // (double-buffered by the sim) so it never stalls the frame.
-      if (!paused) webgpuSim.step();
-      const webgpuRbStart = performance.now();
-      webgpuSim.readFieldInto(webgpuFieldData).then((ok) => {
-        if (!ok) return;
-        const dt = performance.now() - webgpuRbStart;
-        webgpuReadbackMs = webgpuReadbackMs ? webgpuReadbackMs * 0.9 + dt * 0.1 : dt;
-        if (webgpuFieldTexture) webgpuFieldTexture.needsUpdate = true;
-      });
-      if ((webgpuBridgeFrame++ & 15) === 0) webgpuSim.liveCount();
-    } else if (!paused) {
+    if (!paused) {
       const steps = Math.max(0, Math.min(MAX_SIMULATION_STEPS, Math.round(params.simulationSteps)));
       if (steps > 0) {
         const stepDt = rawDt / steps;
@@ -18769,7 +18663,7 @@ function frame(now) {
       lastSmoothingParamsSignature = smoothingSignature;
       markRenderFieldChanged();
     }
-    if (!WEBGPU_SIM && smoothSettleFramesRemaining > 0) {
+    if (smoothSettleFramesRemaining > 0) {
       smoothSettleFramesRemaining--;
       smoothRenderField();
     }
