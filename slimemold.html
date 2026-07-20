@@ -508,7 +508,7 @@ input[type="range"] {
           <div class="display-options" aria-label="Display options">
             <label class="toggle-control">
               <span>Oat glow</span>
-              <input id="showOats" type="checkbox" checked>
+              <input id="showOats" type="checkbox">
             </label>
             <label class="toggle-control">
               <span>Agent dots</span>
@@ -580,7 +580,7 @@ let gl = canvas.getContext("webgl2", {
   alpha: false,
   antialias: false,
   depth: true,
-  preserveDrawingBuffer: true,
+  preserveDrawingBuffer: false,
   stencil: false,
 });
 
@@ -742,7 +742,7 @@ void main() {
 }
 `;
 
-const agentUpdateFragment = `#version 300 es
+const agentAdvanceFragment = `#version 300 es
 precision highp float;
 precision highp sampler2D;
 
@@ -766,13 +766,10 @@ uniform float u_uptakeRate;
 uniform float u_depositRate;
 uniform float u_burnRate;
 uniform float u_reproThreshold;
-uniform float u_reproAngle;
-uniform float u_childStep;
 uniform float u_foodWeight;
 uniform float u_crowdWeight;
 uniform float u_densityTarget;
 uniform float u_maxReserve;
-uniform float u_overflowReplacementRate;
 
 float hash(float n) {
   return fract(sin(n * 127.1 + u_time * 41.7) * 43758.5453123);
@@ -844,6 +841,37 @@ vec4 advanceAgent(vec4 agent, float seed) {
   return vec4(pos, angle, min(reserve, u_maxReserve));
 }
 
+void main() {
+  int index = int(gl_FragCoord.y) * u_agentSide + int(gl_FragCoord.x);
+  outColor = advanceAgent(fetchAgent(index), float(index));
+}
+`;
+
+const agentReproFragment = `#version 300 es
+precision highp float;
+precision highp sampler2D;
+
+in vec2 v_uv;
+out vec4 outColor;
+
+uniform sampler2D u_advanced;
+uniform int u_agentSide;
+uniform float u_time;
+uniform float u_dt;
+uniform float u_reproThreshold;
+uniform float u_reproAngle;
+uniform float u_childStep;
+uniform float u_overflowReplacementRate;
+
+float hash(float n) {
+  return fract(sin(n * 127.1 + u_time * 41.7) * 43758.5453123);
+}
+
+vec4 fetchAdvanced(int index) {
+  ivec2 pixel = ivec2(index % u_agentSide, index / u_agentSide);
+  return texelFetch(u_advanced, pixel, 0);
+}
+
 vec4 makeChild(vec4 parentNext, int side, float seed) {
   float sideSign = side == 0 ? 1.0 : -1.0;
   parentNext.z += sideSign * u_reproAngle + (hash(seed + 37.0) - 0.5) * 0.18;
@@ -862,7 +890,7 @@ int overflowBirthSerialForSlot(int index) {
 void main() {
   int index = int(gl_FragCoord.y) * u_agentSide + int(gl_FragCoord.x);
   int capacity = u_agentSide * u_agentSide;
-  vec4 selfNext = advanceAgent(fetchAgent(index), float(index));
+  vec4 selfNext = fetchAdvanced(index);
 
   if (selfNext.w > u_reproThreshold) {
     selfNext.w *= 0.5;
@@ -873,7 +901,7 @@ void main() {
   if (index > 0) {
     int parentIndex = (index - 1) / 2;
     int side = index - 1 - parentIndex * 2;
-    vec4 parentNext = advanceAgent(fetchAgent(parentIndex), float(parentIndex));
+    vec4 parentNext = fetchAdvanced(parentIndex);
 
     if (parentNext.w > u_reproThreshold) {
       result = makeChild(parentNext, side, float(index));
@@ -895,7 +923,7 @@ void main() {
       overflowSeed = float(capacity + overflowSerial);
     }
 
-    vec4 overflowParentNext = advanceAgent(fetchAgent(overflowParent), float(overflowParent));
+    vec4 overflowParentNext = fetchAdvanced(overflowParent);
     if (
       overflowParentNext.w > u_reproThreshold &&
       hash(float(index) + u_time * 19.0) < replacementChance
@@ -905,7 +933,7 @@ void main() {
 
     if (overflowSerial == 0) {
       int lastParent = capacity - 1;
-      vec4 lastParentNext = advanceAgent(fetchAgent(lastParent), float(lastParent));
+      vec4 lastParentNext = fetchAdvanced(lastParent);
 
       if (
         lastParentNext.w > u_reproThreshold &&
@@ -1204,7 +1232,8 @@ const programs = {
   diffuse: createProgram(fullScreenVertex, diffuseFragment),
   clamp: createProgram(fullScreenVertex, clampFragment),
   smooth: createProgram(fullScreenVertex, smoothFragment),
-  updateAgents: createProgram(fullScreenVertex, agentUpdateFragment),
+  advanceAgents: createProgram(fullScreenVertex, agentAdvanceFragment),
+  reproAgents: createProgram(fullScreenVertex, agentReproFragment),
   density: createProgram(particleVertex, densityFragment),
   depositDensity: createProgram(particleVertex, densityFragment),
   displayAgents: createProgram(agentSurfaceVertex, agentDisplayFragment),
@@ -1223,26 +1252,42 @@ const agentTextures = [
   createTexture(AGENT_SIDE, AGENT_SIDE, gl.RGBA32F, gl.RGBA, gl.FLOAT, gl.NEAREST, gl.CLAMP_TO_EDGE),
   createTexture(AGENT_SIDE, AGENT_SIDE, gl.RGBA32F, gl.RGBA, gl.FLOAT, gl.NEAREST, gl.CLAMP_TO_EDGE),
 ];
+// The field/oat/density passes only ever read and write the red channel, so
+// single-channel formats quarter the texture memory and bandwidth of every
+// simulation pass (R32F is renderable via EXT_color_buffer_float, which is
+// already a hard requirement above).
 const fieldTextures = [
-  createTexture(FIELD_SIZE, FIELD_SIZE, gl.RGBA32F, gl.RGBA, gl.FLOAT, fieldFilter, gl.REPEAT),
-  createTexture(FIELD_SIZE, FIELD_SIZE, gl.RGBA32F, gl.RGBA, gl.FLOAT, fieldFilter, gl.REPEAT),
+  createTexture(FIELD_SIZE, FIELD_SIZE, gl.R32F, gl.RED, gl.FLOAT, fieldFilter, gl.REPEAT),
+  createTexture(FIELD_SIZE, FIELD_SIZE, gl.R32F, gl.RED, gl.FLOAT, fieldFilter, gl.REPEAT),
 ];
 const renderTextures = [
-  createTexture(FIELD_SIZE, FIELD_SIZE, gl.RGBA32F, gl.RGBA, gl.FLOAT, fieldFilter, gl.REPEAT),
-  createTexture(FIELD_SIZE, FIELD_SIZE, gl.RGBA32F, gl.RGBA, gl.FLOAT, fieldFilter, gl.REPEAT),
+  createTexture(FIELD_SIZE, FIELD_SIZE, gl.R32F, gl.RED, gl.FLOAT, fieldFilter, gl.REPEAT),
+  createTexture(FIELD_SIZE, FIELD_SIZE, gl.R32F, gl.RED, gl.FLOAT, fieldFilter, gl.REPEAT),
 ];
-const renderScratchTexture = createTexture(FIELD_SIZE, FIELD_SIZE, gl.RGBA32F, gl.RGBA, gl.FLOAT, fieldFilter, gl.REPEAT);
-const oatTexture = createTexture(FIELD_SIZE, FIELD_SIZE, gl.RGBA32F, gl.RGBA, gl.FLOAT, fieldFilter, gl.REPEAT);
-const densityTexture = createTexture(FIELD_SIZE, FIELD_SIZE, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, gl.LINEAR, gl.REPEAT);
-const depositDensityTexture = createTexture(FIELD_SIZE, FIELD_SIZE, gl.RGBA32F, gl.RGBA, gl.FLOAT, fieldFilter, gl.REPEAT);
+const renderScratchTexture = createTexture(FIELD_SIZE, FIELD_SIZE, gl.R32F, gl.RED, gl.FLOAT, fieldFilter, gl.REPEAT);
+const oatTexture = createTexture(FIELD_SIZE, FIELD_SIZE, gl.R32F, gl.RED, gl.FLOAT, fieldFilter, gl.REPEAT);
+const densityTexture = createTexture(FIELD_SIZE, FIELD_SIZE, gl.R8, gl.RED, gl.UNSIGNED_BYTE, gl.LINEAR, gl.REPEAT);
+const depositDensityTexture = createTexture(FIELD_SIZE, FIELD_SIZE, gl.R32F, gl.RED, gl.FLOAT, fieldFilter, gl.REPEAT);
+
+const advancedAgentTexture = createTexture(AGENT_SIDE, AGENT_SIDE, gl.RGBA32F, gl.RGBA, gl.FLOAT, gl.NEAREST, gl.CLAMP_TO_EDGE);
 
 const agentFbos = agentTextures.map(createFramebuffer);
+const advancedAgentFbo = createFramebuffer(advancedAgentTexture);
 const fieldFbos = fieldTextures.map(createFramebuffer);
 const renderFbos = renderTextures.map(createFramebuffer);
 const renderScratchFbo = createFramebuffer(renderScratchTexture);
 const oatFbo = createFramebuffer(oatTexture);
 const densityFbo = createFramebuffer(densityTexture);
 const depositDensityFbo = createFramebuffer(depositDensityTexture);
+
+// Pixel-pack buffer + fence so the periodic agent readback no longer stalls
+// the GPU pipeline: readPixels targets the PBO, and the data is copied out on
+// a later frame once the fence signals.
+const statsBuffer = gl.createBuffer();
+gl.bindBuffer(gl.PIXEL_PACK_BUFFER, statsBuffer);
+gl.bufferData(gl.PIXEL_PACK_BUFFER, AGENT_CAPACITY * 16, gl.STREAM_READ);
+gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+let statsSync = null;
 
 let agentRead = 0;
 let agentWrite = 1;
@@ -1458,8 +1503,24 @@ function bindTexture(unit, texture) {
   gl.bindTexture(gl.TEXTURE_2D, texture);
 }
 
+const uniformLocationCache = new Map();
+
 function uniform(program, name) {
-  return gl.getUniformLocation(program, name);
+  let programCache = uniformLocationCache.get(program);
+
+  if (!programCache) {
+    programCache = new Map();
+    uniformLocationCache.set(program, programCache);
+  }
+
+  let location = programCache.get(name);
+
+  if (location === undefined) {
+    location = gl.getUniformLocation(program, name);
+    programCache.set(name, location);
+  }
+
+  return location;
 }
 
 function drawQuad() {
@@ -1529,6 +1590,11 @@ function resetSimulation({ resetOats = false } = {}) {
   overflowReplacementRate = 0;
   oatDirty = true;
   smoothInitialized = false;
+
+  if (statsSync) {
+    gl.deleteSync(statsSync);
+    statsSync = null;
+  }
 }
 
 function makeAgentData() {
@@ -1648,40 +1714,58 @@ function renderDepositDensity() {
 }
 
 function updateAgents(now, dt) {
-  gl.bindFramebuffer(gl.FRAMEBUFFER, agentFbos[agentWrite]);
+  // Pass 1: advance every agent exactly once. The old single-pass shader
+  // re-ran the full steering/metabolism logic (~16 texture samples) for the
+  // parent of every slot as well, doubling the cost; now the repro pass just
+  // re-reads the already-advanced parent with a cheap texelFetch.
   gl.viewport(0, 0, AGENT_SIDE, AGENT_SIDE);
   gl.disable(gl.BLEND);
-  gl.useProgram(programs.updateAgents);
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, advancedAgentFbo);
+  gl.useProgram(programs.advanceAgents);
 
   bindTexture(0, agentTextures[agentRead]);
   bindTexture(1, fieldTextures[fieldRead]);
   bindTexture(2, oatTexture);
   bindTexture(3, densityTexture);
 
-  gl.uniform1i(uniform(programs.updateAgents, "u_agents"), 0);
-  gl.uniform1i(uniform(programs.updateAgents, "u_food"), 1);
-  gl.uniform1i(uniform(programs.updateAgents, "u_oat"), 2);
-  gl.uniform1i(uniform(programs.updateAgents, "u_density"), 3);
-  gl.uniform1i(uniform(programs.updateAgents, "u_agentSide"), AGENT_SIDE);
-  gl.uniform1f(uniform(programs.updateAgents, "u_time"), now * 0.001);
-  gl.uniform1f(uniform(programs.updateAgents, "u_dt"), dt);
-  gl.uniform1f(uniform(programs.updateAgents, "u_stepSize"), params.stepSize);
-  gl.uniform1f(uniform(programs.updateAgents, "u_minMoveScale"), params.minMoveScale);
-  gl.uniform1f(uniform(programs.updateAgents, "u_sensorDistance"), params.sensorDistance);
-  gl.uniform1f(uniform(programs.updateAgents, "u_sensorAngle"), params.sensorAngle);
-  gl.uniform1f(uniform(programs.updateAgents, "u_turnAngle"), params.turnAngle);
-  gl.uniform1f(uniform(programs.updateAgents, "u_wander"), params.wander);
-  gl.uniform1f(uniform(programs.updateAgents, "u_uptakeRate"), params.uptakeRate);
-  gl.uniform1f(uniform(programs.updateAgents, "u_depositRate"), params.depositRate);
-  gl.uniform1f(uniform(programs.updateAgents, "u_burnRate"), params.burnRate);
-  gl.uniform1f(uniform(programs.updateAgents, "u_reproThreshold"), params.reproThreshold);
-  gl.uniform1f(uniform(programs.updateAgents, "u_reproAngle"), params.reproAngle);
-  gl.uniform1f(uniform(programs.updateAgents, "u_childStep"), params.childStep);
-  gl.uniform1f(uniform(programs.updateAgents, "u_foodWeight"), params.foodWeight);
-  gl.uniform1f(uniform(programs.updateAgents, "u_crowdWeight"), params.crowdWeight);
-  gl.uniform1f(uniform(programs.updateAgents, "u_densityTarget"), params.densityTarget);
-  gl.uniform1f(uniform(programs.updateAgents, "u_maxReserve"), params.maxReserve);
-  gl.uniform1f(uniform(programs.updateAgents, "u_overflowReplacementRate"), overflowReplacementRate);
+  gl.uniform1i(uniform(programs.advanceAgents, "u_agents"), 0);
+  gl.uniform1i(uniform(programs.advanceAgents, "u_food"), 1);
+  gl.uniform1i(uniform(programs.advanceAgents, "u_oat"), 2);
+  gl.uniform1i(uniform(programs.advanceAgents, "u_density"), 3);
+  gl.uniform1i(uniform(programs.advanceAgents, "u_agentSide"), AGENT_SIDE);
+  gl.uniform1f(uniform(programs.advanceAgents, "u_time"), now * 0.001);
+  gl.uniform1f(uniform(programs.advanceAgents, "u_dt"), dt);
+  gl.uniform1f(uniform(programs.advanceAgents, "u_stepSize"), params.stepSize);
+  gl.uniform1f(uniform(programs.advanceAgents, "u_minMoveScale"), params.minMoveScale);
+  gl.uniform1f(uniform(programs.advanceAgents, "u_sensorDistance"), params.sensorDistance);
+  gl.uniform1f(uniform(programs.advanceAgents, "u_sensorAngle"), params.sensorAngle);
+  gl.uniform1f(uniform(programs.advanceAgents, "u_turnAngle"), params.turnAngle);
+  gl.uniform1f(uniform(programs.advanceAgents, "u_wander"), params.wander);
+  gl.uniform1f(uniform(programs.advanceAgents, "u_uptakeRate"), params.uptakeRate);
+  gl.uniform1f(uniform(programs.advanceAgents, "u_depositRate"), params.depositRate);
+  gl.uniform1f(uniform(programs.advanceAgents, "u_burnRate"), params.burnRate);
+  gl.uniform1f(uniform(programs.advanceAgents, "u_reproThreshold"), params.reproThreshold);
+  gl.uniform1f(uniform(programs.advanceAgents, "u_foodWeight"), params.foodWeight);
+  gl.uniform1f(uniform(programs.advanceAgents, "u_crowdWeight"), params.crowdWeight);
+  gl.uniform1f(uniform(programs.advanceAgents, "u_densityTarget"), params.densityTarget);
+  gl.uniform1f(uniform(programs.advanceAgents, "u_maxReserve"), params.maxReserve);
+  drawQuad();
+
+  // Pass 2: reproduction/overflow bookkeeping over the advanced state.
+  gl.bindFramebuffer(gl.FRAMEBUFFER, agentFbos[agentWrite]);
+  gl.useProgram(programs.reproAgents);
+
+  bindTexture(0, advancedAgentTexture);
+
+  gl.uniform1i(uniform(programs.reproAgents, "u_advanced"), 0);
+  gl.uniform1i(uniform(programs.reproAgents, "u_agentSide"), AGENT_SIDE);
+  gl.uniform1f(uniform(programs.reproAgents, "u_time"), now * 0.001);
+  gl.uniform1f(uniform(programs.reproAgents, "u_dt"), dt);
+  gl.uniform1f(uniform(programs.reproAgents, "u_reproThreshold"), params.reproThreshold);
+  gl.uniform1f(uniform(programs.reproAgents, "u_reproAngle"), params.reproAngle);
+  gl.uniform1f(uniform(programs.reproAgents, "u_childStep"), params.childStep);
+  gl.uniform1f(uniform(programs.reproAgents, "u_overflowReplacementRate"), overflowReplacementRate);
   drawQuad();
 
   [agentRead, agentWrite] = [agentWrite, agentRead];
@@ -1859,9 +1943,6 @@ function frame(now) {
     for (let step = 0; step < steps; step++) {
       simulate(now + step * stepDt * 16.6667, stepDt);
     }
-  } else {
-    renderOats();
-    renderDensity();
   }
 
   renderDisplay();
@@ -1873,7 +1954,25 @@ function updateStats(now, dt) {
   const instantFps = 60 / Math.max(dt, 0.001);
   fpsSmoothed = fpsSmoothed * 0.92 + instantFps * 0.08;
   fpsEl.textContent = String(Math.round(fpsSmoothed));
-  oatCountEl.textContent = String(oats.length);
+
+  if (statsSync) {
+    const status = gl.clientWaitSync(statsSync, 0, 0);
+    const signaled = status === gl.ALREADY_SIGNALED || status === gl.CONDITION_SATISFIED;
+
+    // Fallback: some drivers never signal fences. After a grace period, read
+    // anyway - getBufferSubData then blocks like the old synchronous path did,
+    // so worst case matches the previous behavior instead of stalling stats.
+    if (signaled || now - lastStatsRead > 500) {
+      gl.deleteSync(statsSync);
+      statsSync = null;
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, statsBuffer);
+      gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, readback);
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+      processStats();
+    }
+
+    return;
+  }
 
   if (now - lastStatsRead < 650) {
     return;
@@ -1881,8 +1980,14 @@ function updateStats(now, dt) {
 
   lastStatsRead = now;
   gl.bindFramebuffer(gl.FRAMEBUFFER, agentFbos[agentRead]);
-  gl.readPixels(0, 0, AGENT_SIDE, AGENT_SIDE, gl.RGBA, gl.FLOAT, readback);
+  gl.bindBuffer(gl.PIXEL_PACK_BUFFER, statsBuffer);
+  gl.readPixels(0, 0, AGENT_SIDE, AGENT_SIDE, gl.RGBA, gl.FLOAT, 0);
+  gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+  statsSync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+  gl.flush();
+}
 
+function processStats() {
   let alive = 0;
   let distanceSum = 0;
   let maxDistance = 0;
