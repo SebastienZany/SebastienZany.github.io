@@ -261,11 +261,18 @@ its nearest seam via the affine, contributes if that neighbor is the oat's chart
 Residual gap = still-dropped cross-seam **density** splat (`particleVertex` splat
 mode 1, currently culled) + oats on non-nearest neighbors.
 
-**Why it is not merged:** `main.js` feeds seam atlases to the WebGPU port via
-`buildSeamTexturesForWebGPU()` (~18650), keyed to `SEAM_TEXTURE_KEYS` in
-`webgpu/seam.js`. The deletion removes the four transition feeds, which would
-break `?webgpu=1&seam=1` unless `seam.js` changes in lockstep. Also the growth
-regression is unresolved.
+**Why it is not merged:** ~~`main.js` feeds seam atlases to the WebGPU port via
+`buildSeamTexturesForWebGPU()`~~ — **this blocker is GONE as of `cd7dd1d`**
+("Remove WebGPU bridge from main.js; keep WebGPU work confined to dev.html +
+webgpu/"). `buildSeamTexturesForWebGPU`, `WEBGPU_SIM`, and `WEBGPU_SEAM` no
+longer exist in `main.js`, so the deletion can no longer break `?webgpu=1&seam=1`.
+
+**The one remaining blocker is the growth regression** (§8 table above:
+~70% of baseline after the oat restore, with the cross-seam density splat still
+dropped). Resolve that — restore cross-seam density splatting via the affine,
+and validate on *real* frame-driven growth, not `growFast` — and the branch is
+mergeable for a ~126MB win. Note the branch predates `cd7dd1d`/`9c38913` and
+will need a rebase onto current `main`.
 
 ---
 
@@ -306,28 +313,32 @@ regression is unresolved.
 
 ---
 
-## 10. Key code anchors (approx line numbers @ `c49385b`)
+## 10. Key code anchors (verified @ `3a74674`, main.js = 20,110 lines)
 
 | Line | Symbol |
 |---|---|
-| ~150–159 | `PTEX_*` flags, `PTEX_COMPILED` |
-| ~1803 | `chartIdRT` / `chartUnsafeRT` (both **Nearest**) |
-| ~2198 | `ptexResolverGlsl` |
-| ~2265 | `agentMoveResolverGlsl` |
-| ~2358 | `safeSamplingGlsl` (legacy resolver block) |
-| ~2432 | `resolveSampleUvSafe` |
-| ~13758 | `rasterizeUvOwnershipMaps` |
-| ~14160 | `buildRenderUvFallbackAttribute` (`a_renderUv`) |
-| ~15930 | `buildSeamData` |
-| ~16530 | `buildAndUploadTransitionCandidateMaps` |
-| ~16861 | `makeTransitionCandidateFrame` — shared by legacy AND ptex, **keep** |
-| ~16906 | `candidateAtTexel` — shared by legacy AND ptex, **keep** |
-| ~16935 | `buildPtexAdjacency` (+ `triJacobian`, `computeSeamAffine`, `packFrame`, `claimFrame`) |
-| ~17719 | `diffuseField` |
-| ~17770 | `padFieldAcrossSeamsSafe` |
-| ~17830 | `updateRenderSampleView` |
-| ~17873 | `smoothRenderField` |
-| ~18650 | `buildSeamTexturesForWebGPU` — **WebGPU bridge, collision point** |
+| 138 | `PTEX_DISPLAY` / `PTEX_SIM` / `PTEX_COMPILED` flags |
+| ~1800 | `chartIdRT` / `chartUnsafeRT` (both **Nearest**) |
+| 2192 | `ptexResolverGlsl` |
+| 2257 | `agentMoveResolverGlsl` |
+| 2345 | `safeSamplingGlsl` (legacy resolver block) |
+| 2488 | `resolveSampleUvSafe` |
+| 13976 | `rasterizeUvOwnershipMaps` |
+| 14378 | `buildRenderUvFallbackAttribute` (`a_renderUv`) |
+| 15916 | `buildSeamData` |
+| 16516 | `buildAndUploadTransitionCandidateMaps` |
+| 16847 | `makeTransitionCandidateFrame` — shared by legacy AND ptex, **keep** |
+| 16892 | `candidateAtTexel` — shared by legacy AND ptex, **keep** |
+| 16921 | `buildPtexAdjacency` (+ `triJacobian`, `computeSeamAffine`, `packFrame`, `claimFrame`) |
+| 17787 | `diffuseField` |
+| 17874 | `padFieldAcrossSeamsSafe` |
+| 17934 | `updateRenderSampleView` |
+| 17950 | `smoothRenderField` |
+| — | `buildSeamTexturesForWebGPU` — **REMOVED in `cd7dd1d`**; WebGPU is now confined to `dev.html` + `webgpu/` and no longer couples to main.js seam data |
+
+> History note: `cd7dd1d` (WebGPU bridge removal) shifted these by ~106 lines
+> from the `c49385b` numbering. It removed **zero** ptex/seam-resolver lines —
+> only the `WEBGPU_SIM`/`WEBGPU_SEAM` bridge that *consumed* seam atlases.
 
 ---
 
@@ -390,7 +401,17 @@ surface. Synthetic fields will **not** reveal this class of bug.
 
 ### Strategic note
 
-A parallel agent is porting the whole renderer to WebGPU. If that port replaces
-the WebGL surface path, fixing artifact #3 in WebGL is likely wasted work —
-field-edge continuity should be designed once, correctly, in the new path.
-**Decide before investing.**
+A parallel effort is porting the renderer to WebGPU. As of `cd7dd1d` that work
+is **deliberately confined to `dev.html` + `webgpu/`** and no longer touches
+`main.js` — the two paths are decoupled.
+
+So the question to settle before investing in artifact #3: **will the WebGPU path
+replace the WebGL surface renderer?**
+
+- If **yes** — fixing artifact #3 in WebGL is largely throwaway. Design field-edge
+  continuity once, correctly, in the WebGPU path (it gets the affine map for free;
+  see §5–6, and note WebGPU compute can do a proper multi-texel gutter fill far
+  more cheaply than a WebGL fullscreen pass).
+- If **no / coexist** — fix it in WebGL via the §12 gutter approach.
+
+Either way the §5 affine math and the §2 artifact taxonomy carry over unchanged.
