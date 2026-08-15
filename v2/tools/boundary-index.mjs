@@ -12,7 +12,10 @@ export function buildBoundaryFrameIndex(splitMesh, repack, frameTable, authorita
   const sensingRangeTexels = DEFAULT_PARAMETER_VALUES.sensorDistance * repack.target.densityScale * fieldSize;
 
   const frameGroups = connectedFrameGroups(splitMesh, frameTable.frames);
-  for (const group of frameGroups) {
+  const frameGroupIds = new Uint32Array(frameTable.frameCount + 1);
+  for (let frameGroupId = 0; frameGroupId < frameGroups.length; frameGroupId += 1) {
+    const group = frameGroups[frameGroupId];
+    for (const frame of group) frameGroupIds[frame.id] = frameGroupId;
     const touched = new Map();
     for (const frame of group) rasterFrameBand(
       splitMesh,
@@ -34,6 +37,7 @@ export function buildBoundaryFrameIndex(splitMesh, repack, frameTable, authorita
   }
 
   const nearestFrame = new Uint32Array(texelCount);
+  const nearestDistanceTexels = new Float32Array(texelCount).fill(Infinity);
   const frameListCounts = new Uint8Array(texelCount);
   const overflow = [];
   let coveredTexelCount = 0;
@@ -41,11 +45,13 @@ export function buildBoundaryFrameIndex(splitMesh, repack, frameTable, authorita
     const count = candidateCounts[texelIndex];
     frameListCounts[texelIndex] = Math.min(count, MAX_FRAME_LIST_LENGTH);
     nearestFrame[texelIndex] = frameLists[texelIndex * MAX_FRAME_LIST_LENGTH];
+    nearestDistanceTexels[texelIndex] = Math.sqrt(distances[texelIndex * MAX_FRAME_LIST_LENGTH]);
     if (count) coveredTexelCount += 1;
     if (count > MAX_FRAME_LIST_LENGTH) overflow.push(texelIndex);
   }
   return {
     nearestFrame,
+    nearestDistanceTexels,
     frameLists,
     frameListCounts,
     candidateCounts,
@@ -54,6 +60,7 @@ export function buildBoundaryFrameIndex(splitMesh, repack, frameTable, authorita
     coveredTexelCount,
     sensingRangeTexels,
     frameGroupCount: frameGroups.length,
+    frameGroupIds,
   };
 }
 

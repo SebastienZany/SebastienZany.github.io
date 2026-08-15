@@ -7,6 +7,8 @@ import { DEFAULT_ATLAS_TARGETS, MAX_SECTION_BYTES } from './atlas-constants.mjs'
 import { buildBlockGraph } from './block-graph.mjs';
 import { buildBoundaryFrameIndex } from './boundary-index.mjs';
 import { verifyC1Reconstruction } from './c1-verification.mjs';
+import { measureCornerContinuity } from './corner-verification.mjs';
+import { verifyDiffusionMass } from './diffusion-verification.mjs';
 import { fixtureBakeMesh } from './fixture-pipeline.mjs';
 import { buildFixtureSet } from './fixtures.mjs';
 import { rasterizeAtlas } from './rasterize.mjs';
@@ -104,9 +106,11 @@ function verifyOneTarget(mesh, target, seed) {
   const sharp = measureWalkReconstruction(mesh, repack, raster, sharpWorldField);
   const affine = measureAffineWalkBands(mesh, repack, frames, raster.surfaceTopology);
   const c1 = verifyC1Reconstruction(mesh, repack, raster, frames);
+  const corners = measureCornerContinuity(mesh, repack, raster);
+  const diffusion = target.role === 'fixture' ? null : verifyDiffusionMass(repack, raster, boundary, 100);
   const transport = measureRandomTransport(repack, raster, boundary, frames, TRANSPORT_SAMPLES, seed ^ 0xa63_17e5);
   const corruption = verifyCorruptedDonorIsDetected(mesh, repack, raster);
-  return { repack, raster, frames, boundary, graph, coverage, stencils, transpose, smooth, sharp, affine, c1, transport, corruption };
+  return { repack, raster, frames, boundary, graph, coverage, stencils, transpose, smooth, sharp, affine, c1, corners, diffusion, transport, corruption };
 }
 
 function applyCoreGates(metrics, label, failures, fixture) {
@@ -122,6 +126,14 @@ function applyCoreGates(metrics, label, failures, fixture) {
   if (metrics.smooth.disabledMaxValueError <= smoothFilledMaximum) failures.push(`${label}: smooth no-fill negative control did not fail`);
   if (metrics.sharp.disabledMaxValueError <= sharpFilledMaximum) failures.push(`${label}: sharp no-fill negative control did not fail`);
   if (!metrics.corruption.rejected) failures.push(`${label}: corrupted donor injection passed`);
+  if (metrics.corners.uncoveredCornerCount) failures.push(`${label}: ${metrics.corners.uncoveredCornerCount} multi-chart corners lack gutter samples`);
+  if (metrics.diffusion && !metrics.diffusion.massBoundPassed) {
+    failures.push(`${label}: 100-step mass drift reaches ${metrics.diffusion.maximumRelativeMassDrift}`);
+  }
+  if (metrics.diffusion && !metrics.diffusion.bandBoundPassed) {
+    failures.push(`${label}: per-seam-band signed flux reaches ${metrics.diffusion.maximumRelativeBandFlux}`);
+  }
+  if (metrics.diffusion && !metrics.diffusion.wrongTapDetected) failures.push(`${label}: wrong diffusion tap did not fail the flux detector`);
   if (metrics.c1.smooth.interiorValueViolations || metrics.c1.smooth.interiorGradientViolations) {
     failures.push(
       `${label}: seam-interior C1 smooth gate has ${metrics.c1.smooth.interiorValueViolations} value and `
@@ -152,6 +164,8 @@ function compactMetrics(metrics) {
     sharp: metrics.sharp,
     affine: metrics.affine,
     c1: metrics.c1,
+    corners: metrics.corners,
+    diffusion: metrics.diffusion,
     transport: { ...metrics.transport, failureTexels: undefined },
     frameOverflow: metrics.boundary.overflowCount,
     maximumFrameCandidates: maximum(metrics.boundary.candidateCounts),
@@ -213,6 +227,11 @@ function realTargetReport(row) {
 | Smooth corner-zone value / gradient violations | ${formatInteger(row.c1.smooth.cornerValueViolations)} / ${formatInteger(row.c1.smooth.cornerGradientViolations)} |
 | Sharp interior / corner-zone pointwise violations | ${formatInteger(row.c1.sharp.interiorValueViolations)} / ${formatInteger(row.c1.sharp.cornerValueViolations)} |
 | C1 disabled-fill value/gradient trips | ${formatInteger(row.c1.smooth.negativeControlValueViolations + row.c1.sharp.negativeControlValueViolations)} / ${formatInteger(row.c1.smooth.negativeControlGradientViolations)} |
+| ≥3-chart corners / uncovered / sampled records | ${formatInteger(row.corners.cornerCount)} / ${formatInteger(row.corners.uncoveredCornerCount)} / ${formatInteger(row.corners.sampledRecordCount)} |
+| Corner cross-bisector excess / donor error max | ${scientific(row.corners.maxCrossBisectorExcess)} / ${scientific(row.corners.maxDonorValueError)} |
+| Measured corner value-error radius / C1 gradient-violation radius | ${row.corners.maxErrorRadiusTexels.toFixed(4)} / ${row.c1.smooth.maxCornerGradientViolationRadiusTexels.toFixed(4)} texels |
+| 100-step mass drift / worst local seam-band flux | ${scientific(row.diffusion.maximumRelativeMassDrift)} / ${scientific(row.diffusion.maximumRelativeBandFlux)} |
+| Ledger residual / wrong-tap max band delta / detected | ${scientific(row.diffusion.maximumLedgerResidual)} / ${scientific(row.diffusion.wrongTapMaximumRelativeBandDelta)} / ${row.diffusion.wrongTapDetected ? 'yes' : 'NO'} |
 | Random transport samples / seam resolves / failures | ${formatInteger(row.transport.sampleCount)} / ${formatInteger(row.transport.seamCount)} / ${formatInteger(row.transport.conservativeFailureCount)} |
 | Cross-backs >¼ / worst | ${formatInteger(row.transport.crossBackOverQuarterTexel)} / ${row.transport.maxCrossBackErrorTexels.toFixed(5)} texels |
 | Frame cap overflow / maximum candidates | ${formatInteger(row.frameOverflow)} / ${row.maximumFrameCandidates} |
@@ -220,14 +239,18 @@ function realTargetReport(row) {
 | Block graph nodes / directed edges | ${formatInteger(row.blockNodes)} / ${formatInteger(row.blockEdges)} |
 
 Every conservative-failure texel from this run is listed in \`${row.failureFile}\`.
+
+Worst cone corners:
+
+| Charts | Defect | Cross-bisector excess | Donor error | Error radius | World position |
+|---:|---:|---:|---:|---:|---|
+${row.corners.worst.slice(0, 10).map((corner) => `| ${corner.chartCount} | ${corner.defectRadians.toFixed(5)} | ${scientific(corner.maxCrossBisectorExcess)} | ${scientific(corner.maxDonorValueError)} | ${corner.maxErrorRadiusTexels.toFixed(3)} | ${corner.worldPos.map((value) => value.toFixed(6)).join(', ')} |`).join('\n')}
 `;
 }
 
 function pendingInvariantList() {
   return [
     'Transport sampling conditioned on true geometric seam crossings, including world-heading continuity and resolver cross-back (the current random endpoint probe is diagnostic only).',
-    'Per-edge-local cone-corner cross-bisector jump and gradient-error-radius distribution on every real ≥3-chart corner.',
-    '100-step real-atlas per-seam-band signed diffusion flux bounds and real-table wrong-diffusion-tap sensitivity.',
     'Impulse-spread second-moment comparison against seamless controls, banded by chart scale.',
     'Block-graph distance error against exact mesh geodesics and interpolated block-boundary continuity.',
     'Exact multi-hop sensing incidence along sensor-disc chords (nearby-frame multiplicity is reported only as a proxy).',

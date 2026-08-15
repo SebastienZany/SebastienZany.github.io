@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { verifyC1Reconstruction } from '../../tools/c1-verification.mjs';
+import { measureCornerContinuity } from '../../tools/corner-verification.mjs';
 import { fixtureBakeMesh } from '../../tools/fixture-pipeline.mjs';
 import { buildFixtureSet } from '../../tools/fixtures.mjs';
 import { rasterizeAtlas } from '../../tools/rasterize.mjs';
@@ -47,6 +48,9 @@ test('fixture seam tables prove coverage, transpose, exact hinge walks, and faul
     assert.ok(c1.smooth.negativeControlValueViolations > 0, name);
     assert.ok(c1.smooth.negativeControlGradientViolations > 0, name);
     assert.ok(c1.sharp.negativeControlValueViolations > 0, name);
+    const corners = measureCornerContinuity(mesh, repack, raster);
+    assert.equal(corners.uncoveredCornerCount, 0, name);
+    if (name === 'three-chart-corner') assert.ok(corners.cornerCount >= 4, name);
     if (name === 'folded-quad-45' || name === 'folded-quad-80') {
       assert.ok(Math.max(...affine.map((row) => row.maxLegacyErrorTexels)) > 1, name);
     }

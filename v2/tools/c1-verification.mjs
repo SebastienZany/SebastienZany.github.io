@@ -68,13 +68,16 @@ export function verifyC1Reconstruction(mesh, repack, raster, frameTable) {
         if (field.sharp) {
           const localGradient = Math.max(Math.abs(truthGradient[0]), Math.abs(truthGradient[1]));
           const tolerance = SHARP_ABSOLUTE_EPSILON + SHARP_GRADIENT_FACTOR * localGradient;
-          if (Math.abs(center.atlas - center.seamless) > tolerance) addViolation(row, 'value', inCornerZone);
+          if (Math.abs(center.atlas - center.seamless) > tolerance) addViolation(
+            row, 'value', inCornerZone, Math.min(fraction, 1 - fraction) * frame.sourceLengthTexels,
+          );
           if (Math.abs(center.disabled - center.seamless) > tolerance) row.negativeControlValueViolations += 1;
         } else {
           const valueTolerance = seamlessValueError * (1 + C1_RELATIVE_EPSILON) + C1_VALUE_F32_FLOOR;
           const gradientTolerance = seamlessGradientError * (1 + C1_RELATIVE_EPSILON) + C1_GRADIENT_F32_FLOOR;
-          if (atlasValueError > valueTolerance) addViolation(row, 'value', inCornerZone);
-          if (atlasGradientError > gradientTolerance) addViolation(row, 'gradient', inCornerZone);
+          const endpointDistanceTexels = Math.min(fraction, 1 - fraction) * frame.sourceLengthTexels;
+          if (atlasValueError > valueTolerance) addViolation(row, 'value', inCornerZone, endpointDistanceTexels);
+          if (atlasGradientError > gradientTolerance) addViolation(row, 'gradient', inCornerZone, endpointDistanceTexels);
           if (disabledValueError > valueTolerance) row.negativeControlValueViolations += 1;
           if (disabledGradientError > gradientTolerance) row.negativeControlGradientViolations += 1;
         }
@@ -168,6 +171,8 @@ function metricRow() {
     cornerValueViolations: 0,
     interiorGradientViolations: 0,
     cornerGradientViolations: 0,
+    maxCornerValueViolationRadiusTexels: 0,
+    maxCornerGradientViolationRadiusTexels: 0,
     negativeControlValueViolations: 0,
     negativeControlGradientViolations: 0,
     maxAtlasValueError: 0,
@@ -177,9 +182,13 @@ function metricRow() {
   };
 }
 
-function addViolation(row, kind, inCornerZone) {
+function addViolation(row, kind, inCornerZone, endpointDistanceTexels) {
   row[`${kind}Violations`] += 1;
   row[`${inCornerZone ? 'corner' : 'interior'}${kind[0].toUpperCase()}${kind.slice(1)}Violations`] += 1;
+  if (inCornerZone) {
+    const radiusName = `maxCorner${kind[0].toUpperCase()}${kind.slice(1)}ViolationRadiusTexels`;
+    row[radiusName] = Math.max(row[radiusName], endpointDistanceTexels);
+  }
 }
 
 function finiteDifference(samples, fieldIndex, property) {
