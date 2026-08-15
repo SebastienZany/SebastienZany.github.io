@@ -7,6 +7,9 @@ const BYTES_PER_TEXEL = Object.freeze({
   rg32float: 8,
   rgba8unorm: 4,
   'rgba8unorm-srgb': 4,
+  // Preferred canvas formats on macOS (first registered by F2's swapchain-format target).
+  bgra8unorm: 4,
+  'bgra8unorm-srgb': 4,
   rgba16float: 8,
   rgba32float: 16,
   depth24plus: 4,
