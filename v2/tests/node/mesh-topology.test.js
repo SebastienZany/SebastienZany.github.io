@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { promisify } from 'node:util';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { parseMeshAsset } from '../../src/atlas/asset.js';
 import { readGlb } from '../../tools/glb.mjs';
 import {
   buildChartSegmentation,
@@ -9,6 +16,8 @@ import {
 } from '../../tools/mesh.mjs';
 
 const meshPath = fileURLToPath(new URL('../../../luyvwj-fwgyww.glb', import.meta.url));
+const bakeToolPath = fileURLToPath(new URL('../../tools/bake-mesh.mjs', import.meta.url));
+const runFile = promisify(execFile);
 
 test('mesh topology reproduces the independently audited chart and seam ground truth', async () => {
   const mesh = await readGlb(meshPath);
@@ -71,3 +80,44 @@ test('mesh topology reproduces the independently audited chart and seam ground t
     14,
   );
 });
+
+test('two standalone mesh bakes are byte-identical', async (context) => {
+  const tempDirectory = await mkdtemp(join(tmpdir(), 'bestiary-mesh-bake-'));
+  context.after(() => rm(tempDirectory, { recursive: true, force: true }));
+  const firstAsset = join(tempDirectory, 'first.bin');
+  const secondAsset = join(tempDirectory, 'second.bin');
+  const firstReport = join(tempDirectory, 'first.md');
+  const secondReport = join(tempDirectory, 'second.md');
+  await runBake(firstAsset, firstReport);
+  await runBake(secondAsset, secondReport);
+
+  const [first, second, report0, report1] = await Promise.all([
+    readFile(firstAsset),
+    readFile(secondAsset),
+    readFile(firstReport, 'utf8'),
+    readFile(secondReport, 'utf8'),
+  ]);
+  assert.equal(sha256(first), sha256(second));
+  assert.deepEqual(first, second);
+  assert.equal(report0, report1);
+  const loaded = parseMeshAsset(first);
+  assert.equal(loaded.vertexCount, 281_981);
+  assert.equal(loaded.triangleCount, 501_428);
+  assert.equal(loaded.chartCount, 1_233);
+  assert.equal(loaded.seamPairCount, 30_034);
+  assert.equal(loaded.slitComponentCount, 630);
+});
+
+async function runBake(assetPath, reportPath) {
+  await runFile(process.execPath, [
+    bakeToolPath,
+    '--input', meshPath,
+    '--asset', assetPath,
+    '--report', reportPath,
+    '--quiet',
+  ]);
+}
+
+function sha256(bytes) {
+  return createHash('sha256').update(bytes).digest('hex');
+}
