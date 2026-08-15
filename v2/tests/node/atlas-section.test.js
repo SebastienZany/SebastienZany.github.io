@@ -5,6 +5,7 @@ import {
   loadAtlasManifest,
   loadAtlasSections,
   parseAtlasSection,
+  readAtlasShellBinding,
 } from '../../src/atlas/asset.js';
 import { buildAtlasBundle } from '../../tools/asset-bundle.mjs';
 import { packAtlasSection } from '../../tools/section-pack.mjs';
@@ -20,6 +21,19 @@ test('ASEC2 round-trips named aligned typed arrays', () => {
   assert.deepEqual([...parsed.arrays.uv1], [0.25, 0.75]);
   assert.deepEqual([...parsed.arrays.owner], [0, 7, 65_536]);
   assert.ok(parsed.descriptors.every(({ byteOffset }) => byteOffset % 8 === 0));
+});
+
+test('the shell binding refuses an unbaked or stale manifest identity', () => {
+  const fakeDocument = (root, schema = '2') => ({
+    querySelector(selector) {
+      return { content: selector.includes('root') ? root : schema };
+    },
+  });
+  assert.throws(() => readAtlasShellBinding(fakeDocument('unbaked')), /not bound to this build/);
+  assert.deepEqual(readAtlasShellBinding(fakeDocument('a'.repeat(64))), {
+    expectedRootHash: 'a'.repeat(64),
+    expectedSchemaVersion: 2,
+  });
 });
 
 test('manifest root and each uncompressed content hash are independently enforced', async () => {

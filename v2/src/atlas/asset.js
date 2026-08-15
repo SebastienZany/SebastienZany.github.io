@@ -294,6 +294,21 @@ export async function loadAtlasSections(manifestUrl, options = {}) {
   return { manifest, sections };
 }
 
+export function readAtlasShellBinding(documentImpl = document) {
+  const rootHash = documentImpl.querySelector('meta[name="atlas-manifest-root"]')?.content;
+  const schemaText = documentImpl.querySelector('meta[name="atlas-schema-version"]')?.content;
+  const schemaVersion = Number(schemaText);
+  if (!rootHash || rootHash === 'unbaked' || !Number.isInteger(schemaVersion)) {
+    throw new Error('Atlas assets are not bound to this build; run the matching M2 bake');
+  }
+  return { expectedRootHash: rootHash, expectedSchemaVersion: schemaVersion };
+}
+
+export function loadAtlasSectionsFromShell(manifestUrl, options = {}) {
+  const binding = readAtlasShellBinding(options.documentImpl);
+  return loadAtlasSections(manifestUrl, { ...options, ...binding });
+}
+
 export function stableStringify(value) {
   if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
   if (value && typeof value === 'object') {
