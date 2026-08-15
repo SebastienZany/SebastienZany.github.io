@@ -1,35 +1,70 @@
 // A player whose job is to make the STORY CALLOUTS appear.
 //
 // A text box is not scripted — it is earned. updateObservationSlimeTriggers
-// polls a GPU readback of the slime score over each oat and fires
-// triggerOatObservation only once it clears
-// params.observationSlimeTriggerThreshold (0.05). So a callout appears only when
-// the colony has actually grown over that oat.
+// scores each oat from renderSampleViewRT and fires triggerOatObservation only
+// once that score clears params.observationSlimeTriggerThreshold (0.05). So a
+// callout appears only when the colony has actually grown over that oat.
 //
-// A geometric ring does not work: the colony does not spread symmetrically
-// across the mesh, so most ring positions never get any slime at all. Measured
-// on a ring of 7: two triggered (scores 0.058, 0.059) and five sat at exactly
-// 0.0 for the whole session.
+// Getting this reliable took three corrections, each measured:
 //
-// So place food where the slime already is — which is also what a player does.
-// Each placement reads the field around the colony and picks the strongest texel
-// that is far enough from every existing oat to survive isOatTooClose, which
-// requires BOTH:
+//  1. A geometric ring does not work. The colony does not spread symmetrically
+//     across the mesh, so most ring positions never get slime at all: on a ring
+//     of 7, two triggered and five sat at exactly 0.0 for the whole session.
+//     Place food where the slime already is instead — which is what a player
+//     does anyway.
+//
+//  2. fieldRT is the wrong thing to rank by. The trigger scores from
+//     renderSampleViewRT, the SMOOTHED DISPLAY field (main.js:7366), which
+//     carries a temporal blend and its own scaling. Ranking raw-field brightness
+//     gave 4/6, then 3/6, then 2/6 callouts from identical inputs.
+//
+//  3. renderSampleViewRT is HalfFloatType (main.js:1729), so
+//     readRenderTargetPixels into a Float32Array THROWS — the same defect that
+//     makes slimeCoveragePercent permanently 0. Read Uint16Array and decode.
+//     Swallowing that error silently placed zero oats.
+//
+// Placement must also survive isOatTooClose, which requires BOTH
 //     uv distance    >= max(OAT_MIN_PLACEMENT_UV_DISTANCE, r + r) = 0.05
 //     world distance >= OAT_MIN_PLACEMENT_WORLD_DISTANCE = 0.48
-// (DEFAULT_OAT_RADIUS = 0.08 / WORLD_LINEAR_SCALE = 0.02.)
+// (DEFAULT_OAT_RADIUS = 0.08 / WORLD_LINEAR_SCALE = 0.02), so candidates are
+// tried strongest-first and a rejection costs a retry, not a missing callout.
 //
-// Candidates are tried strongest-first until one is accepted, so a world-space
-// rejection costs a retry rather than a missing callout.
-//
-// The initial oat is {initial: true, suppressObservation: true} and is skipped by
-// collectObservationTriggerCheckIndices, so it can never produce a callout.
-// Every box in the footage comes from these.
+// The initial oat is {initial: true, suppressObservation: true} and can never
+// produce a callout. Every box in the footage comes from these.
 
-const WINDOW_TEXELS = 320;      // field window sampled around the colony
-const STRIDE = 3;               // texel stride when scanning candidates
-const MIN_UV_GAP = 0.062;       // > the 0.05 floor, with margin
-const CANDIDATES = 24;          // strongest-first retries per placement
+// Wide enough to see past the colony core. At 320 (0.21 uv of a 1536 field)
+// the searchable area was exhausted after three oats and every later placement
+// found nothing.
+const WINDOW_TEXELS = 640;
+const STRIDE = 3;            // texel stride when scanning candidates
+// Just above the 0.05 floor rather than comfortably above it: the colony is
+// compact, and a generous gap spends the available surface on three oats.
+// Candidates are tried strongest-first, so a world-distance rejection at this
+// spacing costs a retry rather than a lost callout.
+const MIN_UV_GAP = 0.053;
+// Deliberately just "any real slime", NOT the trigger threshold.
+//
+// Requiring a candidate to already clear 0.05 finds nothing: the display field
+// peaks at 0.09-0.11 but only within ~0.06 uv of the initial oat, which is
+// exactly where MIN_UV_GAP forbids placing. Every above-threshold texel is
+// unreachable, so a 0.055 cut placed zero oats across seven attempts while
+// reporting windowMax 0.09-0.11.
+//
+// Placing on the frontier instead works with the mechanism rather than against
+// it: the oat draws agents to itself, the slime thickens over it, and the score
+// crosses 0.05 shortly after. That is also what a player does.
+const MIN_SCORE = 0.004;
+const CANDIDATES = 32;       // strongest-first retries per placement
+
+/** IEEE 754 half -> Number. renderSampleViewRT is RGBA16F. */
+function halfToFloat(h) {
+  const sign = (h & 0x8000) ? -1 : 1;
+  const exp = (h & 0x7c00) >> 10;
+  const frac = h & 0x03ff;
+  if (exp === 0) return sign * 6.103515625e-5 * (frac / 1024);
+  if (exp === 0x1f) return frac ? NaN : sign * Infinity;
+  return sign * 2 ** (exp - 15) * (1 + frac / 1024);
+}
 
 export default function story(api, { W = 1280, H = 720 } = {}) {
   const c = api();
@@ -48,23 +83,42 @@ export default function story(api, { W = 1280, H = 720 } = {}) {
     return base;
   };
 
-  let buf = null;
+  let halfBuf = null;
+  let floatBuf = null;
+  const diag = [];
+
   function candidatesOnSlime(a) {
-    const size = a.fieldRT.read.width;
+    const rt = a.renderSampleViewRT?.read ?? a.renderSampleViewRT ?? a.fieldRT.read;
+    const size = rt.width;
     const win = Math.min(WINDOW_TEXELS, size);
     const b = anchor(a);
     const x0 = Math.max(0, Math.min(size - win, Math.round(b.x * size) - win / 2));
     const y0 = Math.max(0, Math.min(size - win, Math.round(b.y * size) - win / 2));
-    if (!buf || buf.length !== win * win * 4) buf = new Float32Array(win * win * 4);
+
+    let read = null;
+    if (!halfBuf || halfBuf.length !== win * win * 4) halfBuf = new Uint16Array(win * win * 4);
     try {
-      a.renderer.readRenderTargetPixels(a.fieldRT.read, x0, y0, win, win, buf);
-    } catch { return []; }
+      a.renderer.readRenderTargetPixels(rt, x0, y0, win, win, halfBuf);
+      read = (k) => halfToFloat(halfBuf[k]);
+    } catch {
+      // Not half-float after all (or the driver refused): fall back to float.
+      if (!floatBuf || floatBuf.length !== win * win * 4) floatBuf = new Float32Array(win * win * 4);
+      try {
+        a.renderer.readRenderTargetPixels(rt, x0, y0, win, win, floatBuf);
+        read = (k) => floatBuf[k];
+      } catch (e2) {
+        diag.push({ err: String(e2).slice(0, 140) });
+        return [];
+      }
+    }
 
     const out = [];
+    let windowMax = 0;
     for (let j = 0; j < win; j += STRIDE) {
       for (let i = 0; i < win; i += STRIDE) {
-        const val = buf[(j * win + i) * 4];
-        if (!(val > 0)) continue;
+        const val = read((j * win + i) * 4);
+        if (val > windowMax) windowMax = val;
+        if (!(val >= MIN_SCORE)) continue;
         const u = (x0 + i) / size;
         const v = (y0 + j) / size;
         let ok = true;
@@ -78,19 +132,21 @@ export default function story(api, { W = 1280, H = 720 } = {}) {
       }
     }
     out.sort((p, q) => q.val - p.val);
+    diag.push({ found: out.length, best: out[0] ? +out[0].val.toFixed(4) : null, windowMax: +windowMax.toFixed(4) });
     return out.slice(0, CANDIDATES);
   }
 
   // The intro runs ~10s and the initial seeding ~3.46s, so the colony does not
-  // exist before ~tick 850. Placements are spread out so the callouts arrive one
-  // at a time and each has room to reveal and be read before the next.
-  const PLACE_AT = [1100, 1400, 1700, 2000, 2300, 2600];
+  // exist before ~tick 850. Spread the placements so callouts arrive one at a
+  // time, each with room to reveal and be read before the next, and so the last
+  // still has ~17s of session left to be observed in.
+  const PLACE_AT = [1200, 1450, 1700, 1950, 2200, 2450, 2700];
   const placed = [];
 
-  return function tick(t, a) {
-    // Slow drift, not the full orbit of wide.js: callouts are DOM elements
-    // projected to screen space, and a fast orbit whips them across frame faster
-    // than their own reveal animation. This is a legibility test.
+  const fn = function tick(t, a) {
+    // Slow drift, not a full orbit: callouts are DOM elements projected to
+    // screen space, and a fast orbit whips them across frame faster than their
+    // own reveal animation. This is a legibility test.
     const p = Math.min(1, t / 3600);
     const az = az0 + Math.PI * 0.5 * p;
     const radius = r0 * (1 + 0.16 * Math.sin(p * Math.PI));
@@ -110,10 +166,14 @@ export default function story(api, { W = 1280, H = 720 } = {}) {
       const before = a.oats.length;
       a.addOat(cand.u, cand.v);
       if (a.oats.length > before) {
-        placed.push({ t, u: +cand.u.toFixed(4), v: +cand.v.toFixed(4), field: +cand.val.toFixed(4) });
+        placed.push({ t, u: +cand.u.toFixed(4), v: +cand.v.toFixed(4), score: +cand.val.toFixed(4) });
         return;
       }
     }
     placed.push({ t, failed: true });
   };
+  fn.placed = placed;
+  fn.diag = diag;
+  window.__storyPlayer = fn;
+  return fn;
 }

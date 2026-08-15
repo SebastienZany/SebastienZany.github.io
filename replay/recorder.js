@@ -67,6 +67,11 @@ export function createRecorder({ api, clock, buildStamp = null }) {
       },
       // simulation identity
       rngSeed: state.seed,
+      // How the world was opened. false means the session began at the Begin
+      // click with no agents, and the colony was seeded by the intro — so a
+      // replay must open the same way or it starts mid-life and skips the whole
+      // starting sequence.
+      spawnAgents: state.spawnAgents !== false,
       allocFrame: a.getAgentAllocationFrame ? a.getAgentAllocationFrame() : null,
       params: JSON.parse(JSON.stringify(p)),
       initialOats: (a.oats ?? []).map((o) => ({
@@ -198,6 +203,7 @@ export function createRecorder({ api, clock, buildStamp = null }) {
       state.wallStart = clock.realNow();
       const a = c();
       state.seed = seed >>> 0;
+      state.spawnAgents = spawnAgents;
       a.seedSimRng(state.seed);
       a.resetSimulation({ resetOats: true, spawnAgents });
 
@@ -295,13 +301,16 @@ export function createPlayer({ api, recording }) {
     /** The dt (in 60Hz-frame units) that the live session's frame `tick` used. */
     dtAt(tick) { return dtOf[Math.min(Math.max(0, tick), dtOf.length - 1)] ?? 1; },
     get hasDtStream() { return !!recording.dtStream?.length; },
+    get fromBegin() { return recording.spawnAgents === false; },
 
     /** Restore the world to the recording's opening state. */
     begin() {
       const a = c();
       a.seedSimRng(recording.rngSeed);
       if (recording.params) Object.assign(a.params, recording.params);
-      a.resetSimulation({ resetOats: true, spawnAgents: true });
+      // Mirror how the recording opened. Older files have no flag and were
+      // always recorded with agents spawned, so they default to true.
+      a.resetSimulation({ resetOats: true, spawnAgents: recording.spawnAgents !== false });
       if (recording.allocFrame != null && a.setAgentAllocationFrame) {
         a.setAgentAllocationFrame(recording.allocFrame);
       }

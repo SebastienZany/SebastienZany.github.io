@@ -106,6 +106,11 @@ const genesis = await page.evaluate(() => {
     rayMissed: /Viewport-center ray missed mesh/.test(document.body.innerText),
     visibility: document.visibilityState,
     canvas: (() => { const e = document.getElementById('sim'); return e ? [e.width, e.height, e.clientWidth, e.clientHeight] : null; })(),
+    // Player-side diagnostics, when the active player exposes them.
+    intro: window.__cuttle?.getIntroSequenceState?.() ?? null,
+    seedState: window.__cuttle?.getInitialAgentSeedState?.() ?? null,
+    storyDiag: window.__storyPlayer?.diag?.slice(0, 12) ?? null,
+    storyPlaced: window.__storyPlayer?.placed ?? null,
   };
 }).catch(() => null);
 

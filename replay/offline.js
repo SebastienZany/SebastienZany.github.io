@@ -68,7 +68,7 @@ const api = () => window.__cuttle;
  * size and pixelRatio to 1, so resizeIfNeeded independently arrives at the size
  * we want. Also pins the DOM overlay layer, which lays out in CSS pixels.
  */
-function setRenderSize(width, height) {
+function setRenderSize(width, height, ss = 1) {
   const c = document.getElementById('sim');
   const renderer = api().renderer;
   const camera = api().camera;
@@ -80,11 +80,24 @@ function setRenderSize(width, height) {
     el.style.maxWidth = 'none';
     el.style.maxHeight = 'none';
   }
-  renderer.setPixelRatio(1);
+  // ss decouples the LAYOUT size from the OUTPUT size, and that distinction is
+  // what makes the story text sharp.
+  //
+  // The callout is a fixed 230x126 CSS-pixel box, and the overlay compositor
+  // paints at scale = outputHeight / canvas.clientHeight. Pinning the CSS box
+  // equal to the output size forces that scale to 1, so the text is rasterised
+  // at 1x CSS pixels — roughly 13px glyphs — while a Retina display shows the
+  // live game at devicePixelRatio 2. The render looked soft next to the real
+  // thing for that reason alone, before any encoder involvement.
+  //
+  // Keeping the layout at width x height while rendering width*ss x height*ss
+  // holds the callout at the same fraction of frame and paints it at ss x the
+  // resolution. MAX_PIXEL_RATIO is 2 on desktop, which caps useful ss at 2.
+  renderer.setPixelRatio(ss);
   renderer.setSize(width, height, false);
   if (camera) { camera.aspect = width / height; camera.updateProjectionMatrix(); }
 
-  return { w: c.width, h: c.height, cw: c.clientWidth, ch: c.clientHeight };
+  return { w: c.width, h: c.height, cw: c.clientWidth, ch: c.clientHeight, ss };
 }
 
 /**
@@ -98,10 +111,10 @@ function setRenderSize(width, height) {
  * mid-render resize changes canvas.width and the encoder rejects the frame with
  * "Video sample size must remain constant". Cheap to check, so check every frame.
  */
-function assertRenderSize(width, height) {
+function assertRenderSize(width, height, ss = 1) {
   const c = document.getElementById('sim');
-  if (c.width === width && c.height === height) return false;
-  setRenderSize(width, height);
+  if (c.width === Math.round(width * ss) && c.height === Math.round(height * ss)) return false;
+  setRenderSize(width, height, ss);
   return true;
 }
 
@@ -793,6 +806,9 @@ function describeObservations() {
 async function replayToVideo({
   file = 'session.cvr', width = 1280, height = 720, fps = 30, speed = 1,
   name = 'replay.mp4', bpp = 0.12, onProgress = null,
+  // Layout stays width x height; the frame is rendered ss times larger. See
+  // setRenderSize — this is what keeps the story text from looking soft.
+  ss = 2,
 } = {}) {
   const recording = await fetch(`/replay/out/${file}`).then((r) => r.json());
   const player = createPlayer({ api, recording });
@@ -825,15 +841,27 @@ async function replayToVideo({
   );
 
   const canvas = document.getElementById('sim');
-  setRenderSize(width, height);
-  if (canvas.width !== width || canvas.height !== height) {
-    throw new Error(`canvas is ${canvas.width}x${canvas.height}, expected ${width}x${height}`);
+  const outW = Math.round(width * ss);
+  const outH = Math.round(height * ss);
+  setRenderSize(width, height, ss);
+  if (canvas.width !== outW || canvas.height !== outH) {
+    throw new Error(`canvas is ${canvas.width}x${canvas.height}, expected ${outW}x${outH}`);
   }
+  log(`layout ${width}x${height} css, output ${outW}x${outH} (ss=${ss})`);
 
   // Arm before begin() for the same reason recordSession does: begin() resets
   // the simulation, which stamps oat food decay off performance.now().
   await armOffline();
   player.begin();
+  // A session recorded from the Begin click opened with NO agents and let the
+  // intro seed the colony. The replay has to open the same way, or it starts
+  // mid-life with the colony already present and the whole starting sequence —
+  // the descending oat sprite, the progressive reveal — is simply absent from
+  // the render even though the recording captured it.
+  if (player.fromBegin) {
+    const begun = await pressBegin();
+    log('replay pressed Begin', begun);
+  }
 
   // The audio track must be DECLARED before output.start() — Mediabunny refuses
   // to add a track afterwards — even though its samples arrive last.
@@ -844,7 +872,7 @@ async function replayToVideo({
   // entirely — and for this piece the story text is the work.
   const withOverlays = qs.get('overlays') !== '0';
   const overlays = withOverlays
-    ? await createOverlayCompositor({ api, width, height })
+    ? await createOverlayCompositor({ api, width: outW, height: outH })
     : null;
 
   const enc = await createMp4Encoder({
@@ -872,7 +900,7 @@ async function replayToVideo({
         step(player.dtAt(cursor) * TICK_MS);
         cursor++;
       }
-      if (assertRenderSize(width, height)) {
+      if (assertRenderSize(width, height, ss)) {
         resizeCorrections++;
         // Redraw at the corrected size WITHOUT advancing the field. A plain
         // extra step would run another simulate(), and diffuseField() applies
@@ -932,7 +960,7 @@ async function replayToVideo({
 
   const warm = timings.slice(20);
   return {
-    source: file, frames, width, height, fps, speed,
+    source: file, frames, width: outW, height: outH, cssWidth: width, cssHeight: height, ss, fps, speed,
     recordedTicks: total, simulatedTicks: cursor,
     // What the session actually simulated, vs what a flat-1.0 replay would have.
     simulatedSeconds: +(simDurationMs / 1000).toFixed(2),
@@ -1025,6 +1053,7 @@ if (qs.get('auto') === '1') {
         fps: num('fps', 30),
         speed: num('speed', 1),
         bpp: num('bpp', 0.12),
+        ss: num('ss', 2),
         name: qs.get('name') || 'replay.mp4',
         onProgress: (frame, total) => postStatus({ phase: 'replaying', frame, total }),
       });

@@ -993,9 +993,26 @@ export async function createOverlayCompositor({
     const elapsedMs = Number.isFinite(startTime) ? virtualMs - startTime : null;
 
     let shiftY = 0;
+    let ourYDbg = null;
+    let domYDbg = null;
     if (elapsedMs != null) {
       const ourY = scrollTranslateY(observation, timing, elapsedMs, body, bodyStyle);
-      if (ourY != null) shiftY = ourY - parseMatrix(getComputedStyle(roll).transform).f;
+      domYDbg = parseMatrix(getComputedStyle(roll).transform).f;
+      ourYDbg = ourY;
+      if (ourY != null) shiftY = ourY - domYDbg;
+    }
+    // Motion trace: the reveal and the scroll are both recomputed from virtual
+    // time every frame, so if either is uneven the series shows it directly.
+    // Sampling one callout keeps this cheap enough to leave on.
+    if (trace && trace.length < TRACE_MAX) {
+      trace.push({
+        f: paintedFrames,
+        vms: Math.round(virtualMs),
+        el: elapsedMs == null ? null : Math.round(elapsedMs),
+        ourY: ourYDbg == null ? null : +ourYDbg.toFixed(2),
+        domY: domYDbg == null ? null : +domYDbg.toFixed(2),
+        shiftY: +shiftY.toFixed(2),
+      });
     }
 
     // Align the text box to whole output pixels: every copy from here on is 1:1,
@@ -1227,6 +1244,9 @@ export async function createOverlayCompositor({
   let failures = 0;
   let lastError = null;
   let paintedFrames = 0;
+  const TRACE_MAX = 4000;
+  let trace = [];
+
   function noteFailure(err) {
     failures++;
     lastError = String((err && err.stack) || err);
@@ -1255,7 +1275,7 @@ export async function createOverlayCompositor({
 
     /** Health of the overlay pass, for status.json. */
     stats() {
-      return { paintedFrames, failures, lastError, enabled };
+      return { paintedFrames, failures, lastError, enabled, trace };
     },
 
     /**
