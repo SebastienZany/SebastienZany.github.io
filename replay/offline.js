@@ -12,11 +12,16 @@
 import { installClock, enterOffline, armOffline, exitOffline, step, clock } from './clock.js';
 import { createMp4Encoder, bitrateFor, pickAvcCodec } from './encode.js';
 import { createRecorder, createPlayer } from './recorder.js';
-
-installClock();
+import { createAudioRecorder, renderSessionAudio, installAudioProbe, describeAudioEvents } from './audio.js';
+import { createOverlayCompositor } from './overlays.js';
 
 const qs = new URLSearchParams(location.search);
 const log = (...a) => { console.log('[replay]', ...a); };
+
+installClock();
+// Must precede main.js: the probe tags decoded buffers, and
+// scheduleSoundPackPreload decodes the whole pack during boot.
+if (qs.get('audio') !== '0') installAudioProbe();
 
 // Boot the game with the shim already in place.
 await import('../main.js');
@@ -72,6 +77,24 @@ function setRenderSize(width, height) {
 }
 
 /**
+ * Re-assert the render size if anything has moved it, and report whether it had
+ * to act. Called before every capture.
+ *
+ * resizeIfNeeded() recomputes the backing store from clientWidth * min(dpr, 2)
+ * whenever canvasResizeDirty is set, and the ResizeObserver sets that flag for
+ * reasons outside our control — a window resize, a tab being closed, a devtools
+ * pane opening. Pinning the size once at the start is therefore not enough: a
+ * mid-render resize changes canvas.width and the encoder rejects the frame with
+ * "Video sample size must remain constant". Cheap to check, so check every frame.
+ */
+function assertRenderSize(width, height) {
+  const c = document.getElementById('sim');
+  if (c.width === width && c.height === height) return false;
+  setRenderSize(width, height);
+  return true;
+}
+
+/**
  * Render `frames` output frames, stepping `ticksPerFrame` fixed ticks between
  * captures, and mux to MP4.
  *
@@ -108,6 +131,7 @@ async function renderVideo({
 
   const timings = [];
   let scripted = 0;
+  let resizeCorrections = 0;
   try {
     for (let i = 0; i < frames; i++) {
       const t0 = clock.realNow();
@@ -117,6 +141,10 @@ async function renderVideo({
         step(dtMs);
       }
       // Capture in the SAME task as the draw that just happened inside step().
+      if (assertRenderSize(width, height)) {
+        resizeCorrections++;
+        step(dtMs);   // redraw at the corrected size before capturing
+      }
       await enc.addFrame(i);
       timings.push(clock.realNow() - t0);
       if (onProgress && i % 10 === 0) onProgress(i, frames, timings);
@@ -429,11 +457,30 @@ async function replayToVideo({
 
   player.begin();
 
-  const enc = await createMp4Encoder({ canvas, fps, bpp });
+  // The audio track must be DECLARED before output.start() — Mediabunny refuses
+  // to add a track afterwards — even though its samples arrive last.
+  const withAudio = qs.get('audio') !== '0';
+
+  // Composite the DOM overlays (story callouts, ending fade, countdown) into
+  // each frame. They live in the DOM, so a raw canvas capture omits them
+  // entirely — and for this piece the story text is the work.
+  const withOverlays = qs.get('overlays') !== '0';
+  const overlays = withOverlays
+    ? await createOverlayCompositor({ api, width, height })
+    : null;
+
+  const enc = await createMp4Encoder({
+    canvas: overlays ? overlays.canvas : canvas,
+    fps, bpp, withAudio,
+  });
   await enc.start();
   await armOffline({ startMs: 100000 });
 
+  const arec = withAudio ? createAudioRecorder({ api, simHz: recording.simHz }) : null;
+  arec?.hook();
+
   const timings = [];
+  let resizeCorrections = 0;
   let cursor = 0;   // ticks already simulated
   try {
     for (let f = 0; f < frames; f++) {
@@ -443,14 +490,51 @@ async function replayToVideo({
       const target = Math.min(total, targetTick(f + 1));
       while (cursor < target) {
         player.applyTick(cursor);
+        arec?.sample(cursor);      // absolute tick, not an index within the frame
         step(1000 / 60);
         cursor++;
       }
+      if (assertRenderSize(width, height)) {
+        resizeCorrections++;
+        step(1000 / 60);   // redraw at the corrected size before capturing
+      }
+      // Same JS task as the draw, for the reason encode.js documents.
+      overlays?.composite(canvas, clock.virtualMs);
       await enc.addFrame(f);
       timings.push(clock.realNow() - t0);
       if (onProgress && f % 10 === 0) await onProgress(f, frames);
     }
-  } finally { exitOffline(); }
+  } finally { exitOffline(); arec?.unhook(); }
+
+  const overlayStats = overlays?.stats() ?? null;
+  overlays?.dispose();
+
+  let audio = null;
+  if (arec) {
+    try {
+      const audioBuffer = await renderSessionAudio({
+        api,
+        events: arec.events,
+        totalTicks: cursor,
+        simHz: recording.simHz,
+        speed,                            // cues must follow the same schedule as frames
+        sampleRate: 48000,
+        durationSeconds: frames / fps,   // match the video exactly
+      });
+      await enc.addAudio(audioBuffer);
+      audio = {
+        ...arec.stats(),
+        // counts of what actually made it into the mix, incl. which env file
+        // resolved and whether any clip was dropped
+        ...(audioBuffer.replayReport ?? {}),
+        summary: describeAudioEvents(arec.events, recording.simHz),
+      };
+    } catch (e) {
+      // A silent track is better than a failed render; report it loudly.
+      audio = { error: String(e), ...(arec.stats?.() ?? {}) };
+      console.error('[replay] audio reconstruction failed', e);
+    }
+  }
 
   const buf = await enc.finalize();
   const save = await fetch(`/__save?name=${encodeURIComponent(name)}`, { method: 'POST', body: buf })
@@ -467,6 +551,9 @@ async function replayToVideo({
     // Non-empty means the replay's world drifted enough to change an outcome —
     // the loud-failure signal the plan asked for.
     mismatches: player.mismatches,
+    resizeCorrections,
+    overlays: overlayStats,
+    audio,
     save,
   };
 }
@@ -638,5 +725,16 @@ if (qs.get('auto') === '1') {
   } catch (e) {
     console.error('[replay] auto job failed', e);
     await postStatus({ phase: 'error', error: String((e && e.stack) || e) });
+  } finally {
+    // Park the simulation.
+    //
+    // exitOffline() hands the frame callback back to the live loop, which then
+    // keeps simulating forever — in a hidden tab the MessageChannel pump runs
+    // at ~90fps, so a finished render leaves the machine grinding through a
+    // 1536^2 float simulation indefinitely. Entering offline mode and never
+    // stepping parks it: rAF callbacks are captured instead of scheduled, so
+    // nothing advances until something explicitly calls step().
+    enterOffline();
+    log('parked — simulation idle');
   }
 }
