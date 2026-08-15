@@ -36,6 +36,7 @@ test('material shaders preserve F2 sampling and layering contracts statically', 
   const gold = await expandedShader('gold.wgsl');
   const maximum = await expandedShader('max-food-history.wgsl');
   assert.match(slime, /upperLeft[\s\S]+upperRight[\s\S]+lowerLeft[\s\S]+lowerRight/);
+  assert.match(slime, /surface\.lightRig\.z > 0\.5/);
   assert.match(slime, /microfacetSpecular/);
   assert.match(slime, /outputAlpha/);
   assert.equal((gold.match(/textureSample\(goldResponseLut/g) || []).length, 1);

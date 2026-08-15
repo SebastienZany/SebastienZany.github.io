@@ -18,7 +18,7 @@ struct SurfaceUniforms {
   modes: vec4<f32>,
   // x minimum nm, y span nm, z minimum cosine, w cosine span.
   lutMapping: vec4<f32>,
-  // x active count, y per-light radiance scale.
+  // x active count, y per-light radiance scale, z diagonal bump-tap flag.
   lightRig: vec4<f32>,
 }
 

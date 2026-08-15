@@ -46,7 +46,12 @@ export function createMaterialUniformWriter({ device, registry, fieldSize, lut }
     ], 24);
     values.set([lut.minThicknessNm, lut.thicknessSpanNm, lut.cosMin, lut.cosSpan], 28);
     const lightVariant = selectIcosaLightVariant(params.useIcosaFaceLights);
-    values.set([lightVariant.activeCount, lightVariant.radianceScale, 0, 0], 32);
+    values.set([
+      lightVariant.activeCount,
+      lightVariant.radianceScale,
+      Number(params.performanceMode === 'quality'), // main.js:301-314
+      0,
+    ], 32);
     device.queue.writeBuffer(buffer, 0, values);
   }
 

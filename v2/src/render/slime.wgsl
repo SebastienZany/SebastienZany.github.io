@@ -57,14 +57,16 @@ fn slimeFragment(input: MaterialVertexOutput, @builtin(front_facing) frontFacing
   let rightHeight = slimeHeight(displayFoodAt(input.uvPos + vec2<f32>(texelOffset.x, 0.0)));
   let downHeight = slimeHeight(displayFoodAt(input.uvPos - vec2<f32>(0.0, texelOffset.y)));
   let upHeight = slimeHeight(displayFoodAt(input.uvPos + vec2<f32>(0.0, texelOffset.y)));
-  let upperLeft = slimeHeight(displayFoodAt(input.uvPos + vec2<f32>(-texelOffset.x, texelOffset.y)));
-  let upperRight = slimeHeight(displayFoodAt(input.uvPos + texelOffset));
-  let lowerLeft = slimeHeight(displayFoodAt(input.uvPos - texelOffset));
-  let lowerRight = slimeHeight(displayFoodAt(input.uvPos + vec2<f32>(texelOffset.x, -texelOffset.y)));
-  let gradientX = (rightHeight - leftHeight) * 0.5
-    + (upperRight + lowerRight - upperLeft - lowerLeft) * 0.25;
-  let gradientY = (upHeight - downHeight) * 0.5
-    + (upperLeft + upperRight - lowerLeft - lowerRight) * 0.25;
+  var gradientX = (rightHeight - leftHeight) * 0.5;
+  var gradientY = (upHeight - downHeight) * 0.5;
+  if (surface.lightRig.z > 0.5) {
+    let upperLeft = slimeHeight(displayFoodAt(input.uvPos + vec2<f32>(-texelOffset.x, texelOffset.y)));
+    let upperRight = slimeHeight(displayFoodAt(input.uvPos + texelOffset));
+    let lowerLeft = slimeHeight(displayFoodAt(input.uvPos - texelOffset));
+    let lowerRight = slimeHeight(displayFoodAt(input.uvPos + vec2<f32>(texelOffset.x, -texelOffset.y)));
+    gradientX += (upperRight + lowerRight - upperLeft - lowerLeft) * 0.25;
+    gradientY += (upperLeft + upperRight - lowerLeft - lowerRight) * 0.25;
+  }
   let normal = normalize(geometricNormal - tangent * gradientX * bumpScale - bitangent * gradientY * bumpScale);
 
   let viewDirection = normalize(camera.worldPosition.xyz - input.worldPosition);
