@@ -515,6 +515,7 @@ async function replayToVideo({
       const audioBuffer = await renderSessionAudio({
         api,
         events: arec.events,
+        spatial: arec.spatial,   // per-tick camera-derived pan/tone automation
         totalTicks: cursor,
         simHz: recording.simHz,
         speed,                            // cues must follow the same schedule as frames

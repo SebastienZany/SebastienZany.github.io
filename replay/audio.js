@@ -406,6 +406,9 @@ export function uninstallAudioProbe() {
 /** A rising edge on a loop's `running` flag with no start() seen is suspicious. */
 const LOOP_START_GRACE_TICKS = 45;
 
+// ~15Hz at 60Hz sim, matching main.js's SLIME_TUMBLE_SPATIAL_SYNC_INTERVAL_MS (66ms)
+const SPATIAL_SAMPLE_EVERY = 4;
+
 /**
  * Capture sound-trigger intents through the single AudioBufferSourceNode.start
  * seam, stamped with the tick they belong to and the lead they were scheduled
@@ -440,16 +443,15 @@ const LOOP_START_GRACE_TICKS = 45;
  *      triggers (slime-fuse start click at 6097, slime-appear-stretch at
  *      17601) depend on (a).
  */
-const MAX_PLAUSIBLE_LEAD_MS = 3500;
-
 export function createAudioRecorder({ api, simHz = 60 } = {}) {
-  let clampedLeads = 0;
+  let ignoredPumpCopies = 0;
   const state = {
     tick: 0,
     events: [],
     hooked: false,
     // loop run tracking
     envRunning: false,
+    spatial: [],   // [tick, pan, distanceGain, lowpassHz, reverbWet]
     envStartRecorded: false,
     envRunningSinceTick: -1,
     tumbleRunning: false,
@@ -495,27 +497,45 @@ export function createAudioRecorder({ api, simHz = 60 } = {}) {
     // against, so the getOutputTimestamp shim makes this the virtual lead.
     let leadMs = Math.max(0, (when - ctxNow) * 1000);
 
-    // Clamp implausible leads.
+    const argc = args.length;
+    const isCopy = argc >= 2;                 // 2 = env copy, 3 = tumble copy
+    const isTumble = argc >= 3;
+    const runOpen = isTumble ? state.tumbleRunning : state.envRunning;
+
+    // A COPY for a run that is ALREADY OPEN is the wall-clock pump scheduling
+    // ahead, not a cue.
     //
-    // The lead is measured on the AudioContext clock, which advances in REAL
-    // time, while the sim advances on the virtual clock. During an offline
-    // render those two drift apart, so a schedule that was "0.1s from now" in
-    // the game reads as several seconds of lead here and the cue lands far too
-    // late in the movie. Observed: the slime-tumble loop picking up 11.8s of
-    // lead on a 15s render.
+    // main.js keeps each bed alive with window.setInterval (9207 tumble, 9319
+    // env) that schedules copies up to ~12s into the future. Those are real-time
+    // timers the clock shim does not touch, so during a render they fire several
+    // times and each copy arrives carrying ~12s of lead. Measured on a 15s
+    // render: copies at ticks 291/567/789 with leads of 11808/11710/11612 ms,
+    // every one with the run already open.
     //
-    // The largest lead the game legitimately uses is the intro's
-    // INTRO_START_CLICK_SOUND_PEAK_MS-derived ~2.83s, so anything past 3.5s is
-    // a clock-domain artefact rather than intent. Clamp it and count it, so a
-    // wrong mix shows up in status.json instead of just sounding odd.
-    if (leadMs > MAX_PLAUSIBLE_LEAD_MS) {
-      clampedLeads++;
-      leadMs = 0;
+    // Interpreting those as cues put the bed 12s into a 15s movie. They are not
+    // cues: the offline renderer regenerates every loop copy from the loop's own
+    // crossfade schedule, so all that matters is when a run STARTS and STOPS.
+    // Drop them structurally.
+    //
+    // This replaces an earlier magic-number lead clamp (>3.5s -> 0), which was a
+    // hack — it could not distinguish a corrupted lead from a long legitimate
+    // one, and it treated the symptom rather than what the event actually is.
+    if (isCopy && runOpen) {
+      ignoredPumpCopies++;
+      return;
     }
+
+    // Every remaining lead is trustworthy. Cues carrying an explicit
+    // startAtPerformanceMs (intro 6130, camouflage 6522, reveal 7127, tumble
+    // start 17544) go through performanceMsToAudioContextTime, and the
+    // getOutputTimestamp shim makes `when - ctxNow` the true VIRTUAL lead —
+    // confirmed by the reveal one-shot measuring exactly 0. Cues scheduled as
+    // `currentTime + K` (env start delay 0.05s, tumble start delay) yield K
+    // directly, which is small and correct in either domain.
+
     const info = clipInfo(node.buffer);
 
     // arg count classifies the stream; see the header.
-    const argc = args.length;
     if (argc >= 3) return onTumbleCopy(info, leadMs, args);
     if (argc === 2) return onEnvCopy(info, leadMs);
     return onOneShot(info, leadMs, node);
@@ -610,7 +630,56 @@ export function createAudioRecorder({ api, simHz = 60 } = {}) {
     const env = call(() => api()?.audio?.getEnvAudioState?.(), null);
     if (env) trackLoop('env', Boolean(env.running));
     const tumble = call(() => api()?.audio?.getSlimeTumbleLoopState?.(), null);
-    if (tumble) trackLoop('tumble', Boolean(tumble.running));
+    if (tumble) {
+      trackLoop('tumble', Boolean(tumble.running));
+      sampleSpatial(tumble);
+    }
+  }
+
+  // --- spatial automation ---------------------------------------------------
+  //
+  // The live tumble bed is positioned in 3D: syncSlimeTumbleSpatialAudio
+  // re-targets a PannerNode from the camera about every 66ms, so as the camera
+  // orbits the sound swings across the stereo field, muffles with distance
+  // (lowpass 18kHz -> 900Hz) and gets wetter (reverb 0 -> 0.58).
+  //
+  // Sampling those values once at loop start (the old L1.5 behaviour) left the
+  // bed dead centre with a fixed tone while the camera moved — audibly wrong on
+  // any orbiting shot.
+  //
+  // getSlimeTumbleLoopState() already exposes everything needed, recomputed live
+  // from the current camera: sourcePosition (the anchor), pannerDistanceGain,
+  // lowpassHz and reverbWet. Stereo azimuth is derived here by transforming the
+  // anchor into camera space.
+  //
+  // Decimated to SPATIAL_SAMPLE_EVERY ticks (~15Hz at 60Hz) to match the live
+  // 66ms throttle: sampling every tick would be 4x denser than what the player
+  // actually heard, and denser automation is not more faithful.
+  function sampleSpatial(tumble) {
+    if (!tumble.running) return;
+    if (state.tick % SPATIAL_SAMPLE_EVERY !== 0) return;
+
+    const cam = call(() => api()?.camera, null);
+    const src = tumble.sourcePosition;
+    let pan = 0;
+    if (cam && src && Number.isFinite(src.x)) {
+      // Anchor in camera space. matrixWorldInverse is kept current by the
+      // renderer each frame, so no extra matrix work is needed here.
+      const m = cam.matrixWorldInverse.elements;
+      const x = m[0] * src.x + m[4] * src.y + m[8] * src.z + m[12];
+      const z = m[2] * src.x + m[6] * src.y + m[10] * src.z + m[14];
+      // Camera looks down -Z. Azimuth off the view axis, mapped to [-1, 1].
+      const azimuth = Math.atan2(x, -z);
+      pan = Math.max(-1, Math.min(1, azimuth / (Math.PI / 2)));
+    }
+
+    state.spatial.push([
+      state.tick,
+      +pan.toFixed(4),
+      +(Number.isFinite(tumble.pannerDistanceGain) ? tumble.pannerDistanceGain : 1).toFixed(4),
+      Math.round(Number.isFinite(tumble.lowpassHz) ? tumble.lowpassHz : SLIME_TUMBLE_LOWPASS_NEAR_HZ),
+      +(Number.isFinite(tumble.reverbWet) ? tumble.reverbWet : 0).toFixed(4),
+    ]);
   }
 
   function trackLoop(kind, running) {
@@ -658,6 +727,7 @@ export function createAudioRecorder({ api, simHz = 60 } = {}) {
   const recorder = {
     onSourceStart,
     get events() { return state.events; },
+    get spatial() { return state.spatial; },
     get tick() { return state.tick; },
     get hooked() { return state.hooked; },
 
@@ -729,7 +799,16 @@ export function createAudioRecorder({ api, simHz = 60 } = {}) {
         // time advancing in real time while the sim runs on the virtual clock)
         // and were pulled back to their tick. Non-zero is a correctness smell,
         // not a crash — the mix is still usable, just less precisely placed.
-        clampedLeads,
+        // Expected, not an error: loop copies the live wall-clock pump
+        // scheduled ahead while a run was already open. Regenerated offline.
+        ignoredPumpCopies,
+        spatialSamples: state.spatial.length,
+        panRange: state.spatial.length
+          ? [Math.min(...state.spatial.map((r) => r[1])), Math.max(...state.spatial.map((r) => r[1]))]
+          : null,
+        lowpassRange: state.spatial.length
+          ? [Math.min(...state.spatial.map((r) => r[3])), Math.max(...state.spatial.map((r) => r[3]))]
+          : null,
         // A run with zero events usually means the seam never fired, i.e. the
         // AudioContext never came up. Worth surfacing loudly.
         looksEmpty: state.events.length === 0,
@@ -799,6 +878,53 @@ function makeTumbleReverbImpulse(ctx, seed = 0x5EED1E) {
 }
 
 /** Pair each `-start` with the next `-stop`, so restarts are handled. */
+/**
+ * Drive the tumble bed's pan / distance gain / lowpass / reverb-wet from the
+ * recorded spatial track.
+ *
+ * Uses linearRampToValueAtTime between control points rather than
+ * setValueAtTime steps: the live path glides these with setTargetAtTime
+ * (tau 0.045), so ramps are much closer to what was heard than a 15Hz
+ * stair-step, and they avoid zipper artefacts. Every param is anchored with an
+ * explicit setValueAtTime at the run's start so the first ramp has a defined
+ * origin.
+ *
+ * Samples outside [startSec, stopSec] are skipped — a control point scheduled
+ * before a source starts would otherwise ramp from the wrong origin.
+ */
+function applySpatialAutomation({
+  spatial, simHz, speed, T, startSec, stopSec, pan, distance, lowpass, wet,
+}) {
+  if (!Array.isArray(spatial) || spatial.length === 0) return 0;
+
+  const toSec = (tick) => tick / (simHz * speed);
+  let applied = 0;
+  let anchored = false;
+
+  for (const row of spatial) {
+    const [tick, panV, gainV, lowV, wetV] = row;
+    const sec = toSec(tick);
+    if (sec < startSec || sec > stopSec) continue;
+
+    if (!anchored) {
+      // origin for the first ramp
+      pan.setValueAtTime(panV, T(startSec));
+      distance.setValueAtTime(gainV, T(startSec));
+      lowpass.setValueAtTime(lowV, T(startSec));
+      wet.setValueAtTime(wetV, T(startSec));
+      anchored = true;
+    }
+
+    const at = T(Math.max(sec, startSec));
+    pan.linearRampToValueAtTime(panV, at);
+    distance.linearRampToValueAtTime(gainV, at);
+    lowpass.linearRampToValueAtTime(lowV, at);
+    wet.linearRampToValueAtTime(wetV, at);
+    applied++;
+  }
+  return applied;
+}
+
 function pairRuns(events, startType, stopType, endSec) {
   const runs = [];
   let open = null;
@@ -844,6 +970,7 @@ export async function renderSessionAudio({
   reverbSeed = 0x5EED1E,
   onWarning = null,
   speed = 1,
+  spatial = [],
 } = {}) {
   const warn = (msg, extra) => {
     if (onWarning) onWarning(msg, extra);
@@ -1077,10 +1204,18 @@ export async function renderSessionAudio({
       const fadeIn = Math.max(0, Number(ev.fadeInSeconds) || 0);
       const volume = Number.isFinite(ev.gain) ? ev.gain : tumbleSettings.volume;
 
-      // STATIC stand-in for the PannerNode's inverse-distance gain. The panner
-      // itself (HRTF, moving anchor) is out of scope for L1.5.
+      // Distance gain + stereo position, AUTOMATED from the recorded spatial
+      // track when there is one (see applySpatialAutomation below), otherwise
+      // held at the value sampled at loop start.
       const distanceGain = ctx.createGain();
       distanceGain.gain.value = Number.isFinite(ev.pannerDistanceGain) ? ev.pannerDistanceGain : 1;
+
+      // StereoPannerNode rather than a PannerNode+HRTF. The azimuth is computed
+      // in camera space from the recorded anchor, which reproduces the movement
+      // that matters without depending on AudioListener orientation automation —
+      // the least reliable corner of Web Audio across browsers. What is lost
+      // versus HRTF is elevation cueing and a slightly wider image.
+      const panner = ctx.createStereoPanner();
 
       const fadeGain = ctx.createGain();
       const distanceFilter = ctx.createBiquadFilter();
@@ -1099,8 +1234,10 @@ export async function renderSessionAudio({
       reverbSendGain.gain.value = 1;
       reverbWetGain.gain.value = Number.isFinite(ev.reverbWet) ? ev.reverbWet : 0;
 
-      // main.js:9103-9111, with distanceGain where the panner was.
-      distanceGain.connect(fadeGain);
+      // main.js:9103-9111, with distanceGain + StereoPanner where the
+      // HRTF PannerNode was.
+      distanceGain.connect(panner);
+      panner.connect(fadeGain);
       fadeGain.connect(distanceFilter);
       distanceFilter.connect(volumeGain);
       volumeGain.connect(dryGain);
@@ -1114,6 +1251,16 @@ export async function renderSessionAudio({
       fadeGain.gain.setValueAtTime(0.0001, T(startAt));
       if (fadeIn > 0) fadeGain.gain.linearRampToValueAtTime(1, T(startAt + fadeIn));
       else fadeGain.gain.setValueAtTime(1, T(startAt));
+
+      report.spatialPoints = (report.spatialPoints || 0) + applySpatialAutomation({
+        spatial, simHz, speed, T,
+        startSec: startAt,
+        stopSec: Number.isFinite(ev.stopSec) ? ev.stopSec : mediaDuration,
+        pan: panner.pan,
+        distance: distanceGain.gain,
+        lowpass: distanceFilter.frequency,
+        wet: reverbWetGain.gain,
+      });
 
       if (Number.isFinite(stopAt)) {
         // main.js:9238-9245 — ramp from the fade's current value.
