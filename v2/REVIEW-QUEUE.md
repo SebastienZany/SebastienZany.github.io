@@ -7,9 +7,11 @@
 ## Open
 
 - **[M0] iPhone + Mac-Safari probe runs** — when M0 lands and is pushed, open
-  `https://bestiaryofvanishings.com/v2/probe.html` on the phone (and Safari on the Mac), run the
-  workload rehearsal at 1024, tap "copy JSON", paste back to Claude (or into
-  `v2/reference/probe-results.md`). *Provisional:* pipeline proceeds on conservative
+  `https://bestiaryofvanishings.com/v2/probe.html` on the phone and run the 60-second rehearsal
+  at 1024; on Mac Safari, open the local page and run it at 1536. Tap "copy JSON" and paste both
+  reports back to Claude (or into `v2/reference/probe-results.md`). Also run `npm run test:gpu`
+  from an ordinary local shell so system Chrome can access its Crashpad directory; this managed
+  session could not launch Chrome. *Provisional:* pipeline proceeds on conservative
   assumptions (staging-fallback fill, no tier1, rgba16float display). Phone data can only
   upgrade these. ~5 minutes, no deadline.
 

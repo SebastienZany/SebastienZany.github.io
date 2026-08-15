@@ -2,7 +2,8 @@
 
 ## M0 — mandated Node test directory command
 
-Observed 2026-08-15 on the acceptance machine with Node v24.13.0:
+Observed 2026-08-15 on the acceptance machine with Node v24.13.0 and again through npm with
+Node v26.5.0:
 
 ```text
 $ node --test tests/node/
@@ -22,3 +23,24 @@ green with the exact required script on this machine.
 Resolution needed: authorize the explicit `tests/node/*.test.js` glob (or change the brief to
 plain `node --test`, whose recursive discovery scope would need separate review).
 
+## M0 — system Chrome cannot launch inside the managed session
+
+The required system Chrome 151 process aborts before Playwright can create a page. Headless exits
+with `SIGABRT`. The brief-directed headed fallback exposes the filesystem cause:
+
+```text
+bootstrap_check_in org.chromium.crashpad.child_port_handshake... Permission denied (1100)
+open ~/Library/Application Support/Google/Chrome/Crashpad/settings.dat: Operation not permitted
+```
+
+The managed task sandbox allows writes only in the worktree and temporary directories. A third
+headless attempt added `--disable-crashpad`, `--disable-crash-reporter`, and a `/private/tmp`
+crash-dump directory; Chrome still aborted. Those ineffective flags were removed from the config.
+No adapter was created, so this is a browser-process launch blocker rather than a WebGPU failure.
+
+Impact: neither `probe.spec.js` nor `dev.spec.js` can run in this session, the Mac probe JSON
+cannot be honestly recorded, and `npm test` cannot reach its GPU half. The test configuration and
+specs remain ready for an ordinary local shell where Chrome can access its own support directory.
+
+Resolution needed: run `npm run test:gpu` outside the managed filesystem sandbox, or provide a
+browser execution environment that can launch the system Chrome binary with hardware WebGPU.
