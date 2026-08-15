@@ -6,11 +6,20 @@
     <meta name="color-scheme" content="dark">
     <title>v2 development harness</title>
     <style>
-      :root { color-scheme: dark; background: rgb(1, 2, 1); color: #dce7e4; font: 14px/1.4 ui-monospace, monospace; }
+      :root { color-scheme: dark; background: rgb(1, 2, 1); color: #dce7e4; font: 13px/1.35 ui-monospace, monospace; }
       body { margin: 0; overflow: hidden; }
       canvas { width: 100vw; height: 100vh; display: block; }
-      aside { position: fixed; top: 12px; left: 12px; padding: 10px 12px; border: 1px solid #35443f; border-radius: 7px; background: #07100ed9; }
+      aside { position: fixed; top: 12px; left: 12px; width: min(340px, calc(100vw - 48px)); max-height: calc(100vh - 48px); overflow: auto; padding: 10px 12px; border: 1px solid #35443f; border-radius: 7px; background: #07100ee8; backdrop-filter: blur(8px); }
       p { margin: 0; }
+      #summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; margin: 6px 0 10px; color: #9fb8b0; }
+      #summary strong { display: block; color: #eef9f4; }
+      #actions { display: flex; gap: 6px; margin-bottom: 9px; }
+      button { border: 1px solid #49635a; border-radius: 4px; background: #10251f; color: inherit; padding: 4px 9px; font: inherit; }
+      button:hover { background: #18352c; }
+      #controls { display: grid; gap: 5px; }
+      label { display: grid; grid-template-columns: 105px 1fr 52px; gap: 6px; align-items: center; }
+      input[type="range"] { width: 100%; }
+      output { text-align: right; color: #afcfc4; }
       #errors { margin-top: 8px; max-width: min(700px, 80vw); color: #ff9b8e; }
     </style>
   </head>
@@ -18,9 +27,19 @@
     <canvas id="surface" aria-label="v2 WebGPU development surface"></canvas>
     <aside>
       <p id="status">Starting WebGPU…</p>
-      <p>FPS <span id="fps">—</span></p>
+      <div id="summary">
+        <span>FPS<strong id="fps">—</strong></span>
+        <span>Agents<strong id="agents">—</strong></span>
+        <span>Step<strong id="steps">0</strong></span>
+      </div>
+      <div id="actions">
+        <button id="pause" type="button">Pause</button>
+        <button id="step" type="button">Step</button>
+        <button id="seed" type="button">Reseed</button>
+      </div>
+      <section id="controls" aria-label="Simulation controls"></section>
       <section id="errors" hidden><strong>GPU errors</strong><ul></ul></section>
     </aside>
-    <script type="module" src="src/gpu/dev.js"></script>
+    <script type="module" src="src/dev.js"></script>
   </body>
 </html>

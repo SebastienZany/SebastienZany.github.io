@@ -3,7 +3,7 @@
 // and prints a structured final report. Resumable via thread id.
 //
 // Usage:
-//   node dispatch-codex.mjs --brief ../../briefs/M0-scaffold.md --label M0 [--effort xhigh]
+//   node dispatch-codex.mjs --brief v2/briefs/M0-scaffold.md --label M0 [--effort xhigh] [--worktree /path]
 //   node dispatch-codex.mjs --resume <threadId> --label M0-fix --prompt "tests X fail: ..."
 //
 // Contract: Codex works in the repo worktree (workspace-write sandbox, never-ask approvals),
@@ -16,13 +16,12 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const WORKTREE = args.worktree ? resolve(args.worktree) : resolve(here, '../../..'); // repo worktree root (override with --worktree for parallel streams)
-const LOG_DIR = resolve(here, 'dispatch-logs');
-mkdirSync(LOG_DIR, { recursive: true });
-
 const args = Object.fromEntries(
   process.argv.slice(2).map((a, i, arr) => (a.startsWith('--') ? [a.slice(2), arr[i + 1] ?? true] : null)).filter(Boolean),
 );
+const WORKTREE = args.worktree ? resolve(args.worktree) : resolve(here, '../../..'); // repo worktree root (override with --worktree for parallel streams)
+const LOG_DIR = resolve(here, 'dispatch-logs');
+mkdirSync(LOG_DIR, { recursive: true });
 const label = args.label ?? 'run';
 const stamp = new Date().toISOString().replace(/[:.]/g, '-');
 const logPath = `${LOG_DIR}/${label}-${stamp}.jsonl`;
@@ -38,6 +37,9 @@ Working directory is the repo worktree root. Standing rules (non-negotiable):
 - Commit on the current branch in small steps with clear messages.
 - If reality contradicts the brief, STOP that thread of work and write v2/BLOCKERS.md with the
   specifics; finish what is unaffected.
+- WGSL you write cannot be compile-checked in your sandbox. Known trap: WGSL REJECTS
+  unparenthesized mixing of bitwise and arithmetic operators (a ^ b * c is a compile error) —
+  parenthesize, and grep your WGSL for such mixes before finishing.
 - Run the node test suite yourself; the browser/GPU suite CANNOT launch Chrome inside your
   sandbox — do not retry it; mark those acceptance items 'skipped (gate-run by Claude)' and move on.
 - Finish by running the runnable acceptance commands yourself and reporting honestly.`;
@@ -86,7 +88,9 @@ async function main() {
   if (args.resume && args.prompt) {
     prompt = args.prompt;
   } else {
-    const briefPath = resolve(here, args.brief);
+    // Briefs resolve against the TARGET worktree so parallel streams always read their own
+    // (possibly gate-amended) copy — resolving against `here` once embedded a stale brief.
+    const briefPath = resolve(WORKTREE, args.brief);
     const brief = readFileSync(briefPath, 'utf8');
     prompt = `${PREAMBLE}\n\n=== THE BRIEF (${args.brief}) ===\n\n${brief}\n\nExecute it now.`;
   }
