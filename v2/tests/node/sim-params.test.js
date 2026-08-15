@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createParams } from '../../src/shared/params.js';
-import { ATOMIC_FIXED_POINT_SCALE, DENSITY_MASS, MAX_CAPACITY } from '../../src/sim/constants.js';
+import {
+  CROWD_FIXED_POINT_SCALE,
+  DENSITY_MASS,
+  EXPOSURE_FIXED_POINT_SCALE,
+  MAX_CAPACITY,
+  MAX_DENSITY_RESERVE_MASS,
+} from '../../src/sim/constants.js';
 import {
   PARAM_BUFFER_BYTES,
   PARAM_PACKING_TABLE,
@@ -27,7 +33,8 @@ test('simulation parameter packing round-trips mixed float and u32 slots', () =>
   assert.deepEqual(decoded.frame, { fieldSize: 1536, capacity: 262144, stepIndex: 0xf1234567, flags: 5 });
   assert.equal(decoded.oat.oatSupplyRate, Math.fround(params.oatSupplyRate));
   assert.equal(decoded.oat.densityMass, Math.fround(DENSITY_MASS));
-  assert.equal(decoded.oat.fixedPointScale, ATOMIC_FIXED_POINT_SCALE);
+  assert.equal(decoded.fixedPoint.crowdScale, CROWD_FIXED_POINT_SCALE);
+  assert.equal(decoded.fixedPoint.exposureScale, EXPOSURE_FIXED_POINT_SCALE);
   assert.equal(decoded.oatMeta.oatCount, 64);
 });
 
@@ -43,5 +50,11 @@ test('crowd kernel uses snap mode at the low end and iterated 3x3 across the mov
 test('fixed-point crowd scatter cannot wrap at the declared capacity and largest slider radius', () => {
   const kernel = crowdKernelSettings(64, 1536);
   const maxPerAgent = 7 * DENSITY_MASS * kernel.kernelMass;
-  assert.ok(maxPerAgent * MAX_CAPACITY * ATOMIC_FIXED_POINT_SCALE < 0x1_0000_0000);
+  assert.ok(maxPerAgent * MAX_CAPACITY * CROWD_FIXED_POINT_SCALE < 0x1_0000_0000);
+});
+
+test('fixed-point food exposure keeps 1/4096 precision without wrapping', () => {
+  const maximum = MAX_DENSITY_RESERVE_MASS * DENSITY_MASS
+    * MAX_CAPACITY * EXPOSURE_FIXED_POINT_SCALE;
+  assert.ok(maximum < 0x1_0000_0000);
 });

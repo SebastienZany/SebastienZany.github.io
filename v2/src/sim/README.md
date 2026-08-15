@@ -22,9 +22,10 @@ binomial 3×3 pass has per-axis variance `0.5`, so the realized kernel uses
 `n × 0.5α = 0.15r²`; at the desktop default `r=3.75`, `σ≈1.452` and `n=5`. The final pass clamps to
 `[0,1]` and rounds to 1/255 unless `?crowdfloat=1` selects the Delta Ledger variant.
 
-Fixed-point scale 256 is derived in `constants.js`: even 500,000 max-reserve agents co-located at
-the largest slider radius stay below u32 overflow, while the step is slightly finer than legacy
-RGBA8 density.
+The two fixed-point scales are derived in `constants.js`. Crowd uses 256: even 500,000
+max-reserve agents co-located at the largest slider radius stay below u32 overflow, while its step
+is slightly finer than legacy RGBA8 density. Point-like food exposure has no radius-squared mass
+multiplier, so it keeps 4096 precision and remains below u32 overflow at the exposure cap.
 
 ## Determinism and snapshots
 

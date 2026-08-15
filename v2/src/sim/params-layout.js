@@ -1,6 +1,7 @@
 import {
-  ATOMIC_FIXED_POINT_SCALE,
+  CROWD_FIXED_POINT_SCALE,
   DENSITY_MASS,
+  EXPOSURE_FIXED_POINT_SCALE,
   MAX_DENSITY_RESERVE_MASS,
   SPLAT_REFERENCE_FIELD_SIZE,
   WORLD_LINEAR_SCALE,
@@ -18,6 +19,7 @@ export const PARAM_SLOT = Object.freeze({
   crowdKernel: 8,
   repel: 9,
   oatMeta: 10,
+  fixedPoint: 11,
 });
 export const PARAM_SLOT_COUNT = Object.keys(PARAM_SLOT).length;
 export const PARAM_BUFFER_BYTES = PARAM_SLOT_COUNT * 16;
@@ -38,10 +40,11 @@ export const PARAM_PACKING_TABLE = Object.freeze([
   ['economy', ['uptakeRate', 'depositRate', 'burnRate', 'foodWeight']],
   ['crowd', ['crowdWeight', 'crowdExponent', 'densityTarget', 'densityBlur']],
   ['field', ['fieldDiffusion', 'fieldDecay', 'deltaScale', 'foodClamp']],
-  ['oat', ['oatSupplyRate', 'densityMass', 'exposureCap', 'fixedPointScale']],
+  ['oat', ['oatSupplyRate', 'densityMass', 'exposureCap', 'reserved']],
   ['crowdKernel', ['pointSizeTexels', 'radiusTexels', 'kernelMass', 'blurAlpha']],
   ['repel', ['repelUvX', 'repelUvY', 'repelRadius', 'repelStrength']],
   ['oatMeta', ['oatCount:u32', 'blurIterations:u32', 'reserved:u32', 'reserved:u32']],
+  ['fixedPoint', ['crowdScale', 'exposureScale', 'reserved', 'reserved']],
 ]);
 
 export function crowdKernelSettings(densityBlur, fieldSize) {
@@ -79,10 +82,11 @@ export function packSimulationParams(params, runtime) {
   writeF32(floats, 'economy', [params.uptakeRate, params.depositRate, params.burnRate, params.foodWeight]);
   writeF32(floats, 'crowd', [params.crowdWeight, params.crowdExponent, params.densityTarget, params.densityBlur]);
   writeF32(floats, 'field', [params.fieldDiffusion, params.fieldDecay, params.deltaScale, params.foodClamp]);
-  writeF32(floats, 'oat', [params.oatSupplyRate, DENSITY_MASS, MAX_DENSITY_RESERVE_MASS, ATOMIC_FIXED_POINT_SCALE]);
+  writeF32(floats, 'oat', [params.oatSupplyRate, DENSITY_MASS, MAX_DENSITY_RESERVE_MASS, 0]);
   writeF32(floats, 'crowdKernel', [kernel.pointSizeTexels, kernel.radiusTexels, kernel.kernelMass, kernel.blurAlpha]);
   writeF32(floats, 'repel', [runtime.repel?.uvX ?? 0, runtime.repel?.uvY ?? 0, runtime.repel?.radius ?? 0, runtime.repel?.strength ?? 0]);
   writeU32(uints, 'oatMeta', [runtime.oatCount, kernel.blurIterations, 0, 0]);
+  writeF32(floats, 'fixedPoint', [CROWD_FIXED_POINT_SCALE, EXPOSURE_FIXED_POINT_SCALE, 0, 0]);
   return { buffer, kernel, flags };
 }
 
@@ -114,6 +118,7 @@ export const PARAM_WGSL_CONSTANTS = Object.freeze({
   PARAM_SLOT_CROWD_KERNEL: PARAM_SLOT.crowdKernel,
   PARAM_SLOT_REPEL: PARAM_SLOT.repel,
   PARAM_SLOT_OAT_META: PARAM_SLOT.oatMeta,
+  PARAM_SLOT_FIXED_POINT: PARAM_SLOT.fixedPoint,
   PARAM_FLAG_OAT_RATIONING: PARAM_FLAGS.oatRationing,
   PARAM_FLAG_CROWD_FLOAT: PARAM_FLAGS.crowdFloat,
   PARAM_FLAG_REPEL_ACTIVE: PARAM_FLAGS.repelActive,

@@ -20,5 +20,6 @@ fn scatterExposure(@builtin(global_invocation_id) invocation: vec3<u32>) {
   let amount = clamp(agent.reserve, 0.0, reserveCap) * densityMass;
   let texelPos = texelFromUv(agent.uvPos);
   let index = u32(texelPos.y) * fieldSize() + u32(texelPos.x);
-  atomicAdd(&exposureAtomic[index], roundedFixedPoint(amount));
+  let scale = parameterFloat(${PARAM_SLOT_FIXED_POINT}u, 1u);
+  atomicAdd(&exposureAtomic[index], roundedFixedPoint(amount, scale));
 }

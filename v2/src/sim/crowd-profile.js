@@ -1,5 +1,5 @@
 import {
-  ATOMIC_FIXED_POINT_SCALE,
+  CROWD_FIXED_POINT_SCALE,
   DENSITY_MASS,
   MAX_DENSITY_RESERVE_MASS,
   SPLAT_REFERENCE_FIELD_SIZE,
@@ -57,7 +57,7 @@ export function realizedCrowdProfile({ size, agents, densityBlur, fieldSize = SP
     addFixed(atomic, size, cornerX + 1, cornerY + 1, mass * fractionX * fractionY);
   }
 
-  let input = Float64Array.from(atomic, (value) => value / ATOMIC_FIXED_POINT_SCALE);
+  let input = Float64Array.from(atomic, (value) => value / CROWD_FIXED_POINT_SCALE);
   for (let iteration = 0; iteration < settings.blurIterations; iteration += 1) {
     const output = new Float64Array(input.length);
     for (let y = 0; y < size; y += 1) {
@@ -134,7 +134,7 @@ function binomial3x3(field, size, x, y) {
 
 function addFixed(target, size, x, y, amount) {
   const index = wrapIndex(y, size) * size + wrapIndex(x, size);
-  target[index] = (target[index] + Math.round(Math.max(amount, 0) * ATOMIC_FIXED_POINT_SCALE)) >>> 0;
+  target[index] = (target[index] + Math.round(Math.max(amount, 0) * CROWD_FIXED_POINT_SCALE)) >>> 0;
 }
 
 function reversedSmoothstep(normalizedRadiusSq) {

@@ -14,7 +14,8 @@
 fn addCrowd(texelPos: vec2<i32>, amount: f32) {
   let wrapped = wrapTexel(texelPos);
   let index = u32(wrapped.y) * fieldSize() + u32(wrapped.x);
-  atomicAdd(&crowdAtomic[index], roundedFixedPoint(amount));
+  let scale = parameterFloat(${PARAM_SLOT_FIXED_POINT}u, 0u);
+  atomicAdd(&crowdAtomic[index], roundedFixedPoint(amount, scale));
 }
 
 @compute @workgroup_size(${AGENT_WORKGROUP_SIZE})

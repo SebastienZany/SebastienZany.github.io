@@ -14,7 +14,7 @@ fn resolveCrowd(@builtin(global_invocation_id) invocation: vec3<u32>) {
   let size = fieldSize();
   if (invocation.x >= size || invocation.y >= size) { return; }
   let index = invocation.y * size + invocation.x;
-  let scale = parameterFloat(${PARAM_SLOT_OAT}u, 3u);
+  let scale = parameterFloat(${PARAM_SLOT_FIXED_POINT}u, 0u);
   let density = f32(atomicLoad(&crowdAtomic[index])) / scale;
   textureStore(crowdOut, vec2<i32>(invocation.xy), vec4<f32>(density, 0.0, 0.0, 1.0));
 }

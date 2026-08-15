@@ -12,7 +12,12 @@ export const MAX_CAPACITY = 500_000;
 // scatters at most 7 * 0.032 * (pi * 8^2 / 2) = 22.52. Co-locating 500k agents
 // therefore stays below 2^32 at scale 256: 2.88e9. Resolution 1/256 is also
 // slightly finer than the legacy density target's 8-bit quantization.
-export const ATOMIC_FIXED_POINT_SCALE = 256;
+export const CROWD_FIXED_POINT_SCALE = 256;
+
+// Exposure has no radius-squared mass multiplier, so the prototype's finer
+// 1/4096 scale remains u32-safe even for 500k agents at the legacy cap:
+// 64 * 0.032 * 500000 * 4096 = 4.194304e9 < 2^32.
+export const EXPOSURE_FIXED_POINT_SCALE = 4096;
 
 export const {
   worldLinearScale: WORLD_LINEAR_SCALE,
@@ -22,6 +27,7 @@ export const {
   densityMass: DENSITY_MASS,
   maxDensityReserveMass: MAX_DENSITY_RESERVE_MASS,
   defaultOatRadius: DEFAULT_OAT_RADIUS,
+  oatSupportSigmas: OAT_SUPPORT_SIGMAS,
   maxOats: MAX_OATS,
   splatReferenceFieldSize: SPLAT_REFERENCE_FIELD_SIZE,
 } = SIMULATION_CONSTANTS;

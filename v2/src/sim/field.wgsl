@@ -44,7 +44,7 @@ fn applyExposureDelta(@builtin(global_invocation_id) invocation: vec3<u32>) {
   let texelPos = vec2<i32>(invocation.xy);
   let index = invocation.y * size + invocation.x;
   let food = foodAt(texelPos);
-  let scale = parameterFloat(${PARAM_SLOT_OAT}u, 3u);
+  let scale = parameterFloat(${PARAM_SLOT_FIXED_POINT}u, 1u);
   let density = f32(atomicLoad(&exposureAtomic[index])) / scale;
   let densityMass = parameterFloat(${PARAM_SLOT_OAT}u, 1u);
   let exposureCap = parameterFloat(${PARAM_SLOT_OAT}u, 2u);

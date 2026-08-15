@@ -16,16 +16,18 @@ struct Agent {
 
 struct AtomicCount { value: atomic<u32> }
 struct PlainCount { value: u32 }
-struct SimulationParams { slots: array<vec4<f32>, ${PARAM_SLOT_COUNT}> }
+// u32 lanes preserve every host bit pattern; float parameters are explicitly
+// reinterpreted. This avoids routing a large stepIndex through a NaN f32 value.
+struct SimulationParams { slots: array<vec4<u32>, ${PARAM_SLOT_COUNT}> }
 
 @group(0) @binding(0) var<uniform> parameters: SimulationParams;
 
 fn parameterFloat(slot: u32, lane: u32) -> f32 {
-  return parameters.slots[slot][lane];
+  return bitcast<f32>(parameters.slots[slot][lane]);
 }
 
 fn parameterUint(slot: u32, lane: u32) -> u32 {
-  return bitcast<u32>(parameters.slots[slot][lane]);
+  return parameters.slots[slot][lane];
 }
 
 fn fieldSize() -> u32 { return parameterUint(${PARAM_SLOT_FRAME}u, 0u); }
@@ -58,10 +60,12 @@ fn pcgHash32(input: u32) -> u32 {
 }
 
 fn counterRandom(idLo: u32, idHi: u32, streamId: u32) -> f32 {
-  let idMix = idLo ^ rotateLeft32(idHi, 16u);
-  let stepMix = stepIndex() * 0x9e3779b9u;
-  let streamMix = streamId * 0x85ebca6bu;
-  return f32(pcgHash32(idMix ^ stepMix ^ streamMix)) * (1.0 / 4294967296.0);
+  // Keep the 64-bit identity in two lanes until the final output mix. Folding
+  // idLo/idHi first would give colliding identities the same entire RNG stream.
+  let loLane = pcgHash32(idLo ^ stepIndex() * 0x9e3779b9u ^ streamId * 0x85ebca6bu);
+  let hiLane = pcgHash32(idHi ^ stepIndex() * 0x7f4a7c15u ^ streamId * 0xc2b2ae35u);
+  let randomBits = pcgHash32(loLane ^ rotateLeft32(hiLane, 16u));
+  return f32(randomBits >> 8u) * (1.0 / 16777216.0);
 }
 
 fn childIdentity(parent: Agent, childIndex: u32) -> vec2<u32> {
@@ -73,7 +77,6 @@ fn childIdentity(parent: Agent, childIndex: u32) -> vec2<u32> {
   return vec2<u32>(lo, hi);
 }
 
-fn roundedFixedPoint(amount: f32) -> u32 {
-  let scale = parameterFloat(${PARAM_SLOT_OAT}u, 3u);
+fn roundedFixedPoint(amount: f32, scale: f32) -> u32 {
   return u32(floor(max(amount, 0.0) * scale + 0.5));
 }

@@ -15,14 +15,17 @@ export function rotateLeft32(value, shift) {
 
 /** Counter RNG keyed by persistent id, step, and a named stream number. */
 export function counterRandomU32(idLo, idHi, stepIndex, streamId) {
-  const idMix = (idLo ^ rotateLeft32(idHi, 16)) >>> 0;
-  const stepMix = Math.imul(stepIndex >>> 0, 0x9e37_79b9) >>> 0;
-  const streamMix = Math.imul(streamId >>> 0, 0x85eb_ca6b) >>> 0;
-  return pcgHash32((idMix ^ stepMix ^ streamMix) >>> 0);
+  const loLane = pcgHash32((idLo
+    ^ Math.imul(stepIndex >>> 0, 0x9e37_79b9)
+    ^ Math.imul(streamId >>> 0, 0x85eb_ca6b)) >>> 0);
+  const hiLane = pcgHash32((idHi
+    ^ Math.imul(stepIndex >>> 0, 0x7f4a_7c15)
+    ^ Math.imul(streamId >>> 0, 0xc2b2_ae35)) >>> 0);
+  return pcgHash32((loLane ^ rotateLeft32(hiLane, 16)) >>> 0);
 }
 
 export function counterRandomFloat(idLo, idHi, stepIndex, streamId) {
-  return counterRandomU32(idLo, idHi, stepIndex, streamId) / UINT32_RANGE;
+  return (counterRandomU32(idLo, idHi, stepIndex, streamId) >>> 8) / 0x1_000000;
 }
 
 /** Child identity is independent of append order and storage slots. */

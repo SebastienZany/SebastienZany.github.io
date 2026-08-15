@@ -48,7 +48,11 @@ fn scoreAt(uvPos: vec2<f32>, sampleUvPos: vec2<f32>, reserve: f32) -> f32 {
 
   var repelPenalty = 0.0;
   if (flagEnabled(${PARAM_FLAG_REPEL_ACTIVE}u)) {
-    var repelDelta = wrapUv(sampleUvPos) - parameters.slots[${PARAM_SLOT_REPEL}u].xy;
+    let repelUv = vec2<f32>(
+      parameterFloat(${PARAM_SLOT_REPEL}u, 0u),
+      parameterFloat(${PARAM_SLOT_REPEL}u, 1u)
+    );
+    var repelDelta = wrapUv(sampleUvPos) - repelUv;
     repelDelta -= round(repelDelta);
     let radius = parameterFloat(${PARAM_SLOT_REPEL}u, 2u);
     let strength = parameterFloat(${PARAM_SLOT_REPEL}u, 3u);
