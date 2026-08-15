@@ -62,8 +62,8 @@ fn pcgHash32(input: u32) -> u32 {
 fn counterRandom(idLo: u32, idHi: u32, streamId: u32) -> f32 {
   // Keep the 64-bit identity in two lanes until the final output mix. Folding
   // idLo/idHi first would give colliding identities the same entire RNG stream.
-  let loLane = pcgHash32(idLo ^ stepIndex() * 0x9e3779b9u ^ streamId * 0x85ebca6bu);
-  let hiLane = pcgHash32(idHi ^ stepIndex() * 0x7f4a7c15u ^ streamId * 0xc2b2ae35u);
+  let loLane = pcgHash32(idLo ^ (stepIndex() * 0x9e3779b9u) ^ (streamId * 0x85ebca6bu));
+  let hiLane = pcgHash32(idHi ^ (stepIndex() * 0x7f4a7c15u) ^ (streamId * 0xc2b2ae35u));
   let randomBits = pcgHash32(loLane ^ rotateLeft32(hiLane, 16u));
   return f32(randomBits >> 8u) * (1.0 / 16777216.0);
 }
@@ -71,9 +71,9 @@ fn counterRandom(idLo: u32, idHi: u32, streamId: u32) -> f32 {
 fn childIdentity(parent: Agent, childIndex: u32) -> vec2<u32> {
   let childKey = (childIndex + 1u) * 0xd1b54a35u;
   let lo = pcgHash32(parent.idLo ^ rotateLeft32(parent.idHi, 13u)
-    ^ stepIndex() * 0x9e3779b9u ^ childKey);
+    ^ (stepIndex() * 0x9e3779b9u) ^ childKey);
   let hi = pcgHash32(parent.idHi ^ rotateLeft32(parent.idLo, 7u)
-    ^ stepIndex() * 0x7f4a7c15u ^ rotateLeft32(childKey, 11u));
+    ^ (stepIndex() * 0x7f4a7c15u) ^ rotateLeft32(childKey, 11u));
   return vec2<u32>(lo, hi);
 }
 
