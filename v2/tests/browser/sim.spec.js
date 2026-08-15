@@ -66,6 +66,25 @@ test('indirect and capacity dispatch have the same below-capacity state set', as
   expect(capacity).toBe(indirect);
 });
 
+test('legacy wall-clock and fixed-tick variants are deterministic when elapsed time is pinned', async ({ page }) => {
+  const elapsed = [8.3, 8.4, 16.6667, 25, 4.2, 29.1];
+  for (const fixedTick of [false, true]) {
+    const query = `field=64&cap=512&seed=64&rng=19&paused=1${fixedTick ? '&fixedtick=1' : ''}`;
+    const hashes = [];
+    for (let run = 0; run < 2; run += 1) {
+      await openSim(page, query);
+      await noBirthParams(page);
+      hashes.push(await page.evaluate(async (durations) => {
+        for (let frame = 0; frame < 240; frame += 1) {
+          window.__v2.sim.advance(durations[frame % durations.length]);
+        }
+        return window.__v2.sim.hashState();
+      }, elapsed));
+    }
+    expect(hashes[1]).toBe(hashes[0]);
+  }
+});
+
 test('two-phase saturation preserves every parent and finalizes an exact count', async ({ page }) => {
   await openSim(page, 'field=64&cap=64&seed=64&rng=12&paused=1');
   const result = await page.evaluate(async () => {
@@ -370,14 +389,18 @@ test('population target step follows the ported timing, EMA, log-supply, and sec
     await setCount(1100);
     const second = await sim.samplePopulation(2400);
     const third = await sim.samplePopulation(3600);
-    return { skipped, first, second, third, supply: sim.params.oatSupplyRate };
+    await setCount(808);
+    const insideTolerance = await sim.samplePopulation(4800);
+    return { skipped, first, second, third, insideTolerance, supplyBeforeTolerance: third.lastOatSupplyRate };
   });
   expect(primary.skipped.lastSampleTime).toBe(0);
   expect(primary.first.commandedGrowthRate).toBeCloseTo(-0.006694306539426292, 10);
   expect(primary.first.lastOatSupplyRate).toBeCloseTo(0.1395788932853929, 10);
   expect(primary.second.growthRate).toBeCloseTo(0.019856287459234328, 10);
   expect(primary.third.growthRate).toBeCloseTo(0.014892215594425745, 10);
-  expect(primary.supply).toBeCloseTo(0.13623684896842575, 10);
+  expect(primary.supplyBeforeTolerance).toBeCloseTo(0.13623684896842575, 10);
+  expect(Math.abs(primary.insideTolerance.commandedGrowthRate)).toBe(0);
+  expect(primary.insideTolerance.target).toBe(800);
 
   await openSim(page, 'field=64&cap=2000&seed=0&paused=1');
   const secondary = await page.evaluate(async () => {
