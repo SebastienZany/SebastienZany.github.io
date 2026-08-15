@@ -455,6 +455,89 @@ async function liveRun({ seconds = 90, sampleEvery = 10, skipIntro = true, offli
 }
 
 /**
+ * Hold the LIVE game on a visible story callout, so Chrome's own rendering of it
+ * can be screenshotted as the reference the Canvas2D compositor must match.
+ *
+ * Deliberately never enters offline mode and never constructs the overlay
+ * compositor. The compositor pauses every animation in the annotation layer so
+ * it can recompute them from virtual time, which means a screenshot taken during
+ * a render shows a frozen, half-built callout — useless as a reference. Live, the
+ * DOM animations run normally and the callout is the genuine article: real
+ * backdrop-filter, real mask-composite, real font metrics.
+ */
+async function liveCallout({ growTicks = 2600, seed = 48879, timeoutMs = 180000 } = {}) {
+  const c = api();
+  c.params.statsReadbackEnabled = true;
+  c.seedSimRng(seed);
+  c.resetSimulation({ resetOats: true, spawnAgents: true });
+  c.skipIntroSequence();
+
+  // Build a colony fast. growFast skips updateOatFoodDecay, which is wrong for
+  // measuring population but fine for producing slime to look at.
+  c.growFast(growTicks);
+
+  const placed = [];
+  const half = 160;
+  const buf = new Uint16Array(2 * half * 2 * half * 4);
+  const h2f = (h) => {
+    const s2 = (h & 0x8000) ? -1 : 1;
+    const e = (h & 0x7c00) >> 10;
+    const f = h & 0x03ff;
+    if (e === 0) return s2 * 6.103515625e-5 * (f / 1024);
+    if (e === 0x1f) return NaN;
+    return s2 * 2 ** (e - 15) * (1 + f / 1024);
+  };
+  const rt = c.renderSampleViewRT?.read ?? c.fieldRT.read;
+  const size = rt.width;
+  const win = 2 * half;
+  const b = c.oats[0].uv;
+  const x0 = Math.max(0, Math.min(size - win, Math.round(b.x * size) - half));
+  const y0 = Math.max(0, Math.min(size - win, Math.round(b.y * size) - half));
+  for (let k = 0; k < 4; k++) {
+    let best = null;
+    try { c.renderer.readRenderTargetPixels(rt, x0, y0, win, win, buf); } catch { break; }
+    for (let j = 0; j < win; j += 3) {
+      for (let i = 0; i < win; i += 3) {
+        const val = h2f(buf[(j * win + i) * 4]);
+        if (!(val > 0.004)) continue;
+        const u = (x0 + i) / size;
+        const v = (y0 + j) / size;
+        let ok = true;
+        for (const o of c.oats) {
+          if (!o.uv) continue;
+          const du = u - o.uv.x; const dv = v - o.uv.y;
+          if (du * du + dv * dv < 0.053 * 0.053) { ok = false; break; }
+        }
+        if (ok && (!best || val > best.val)) best = { u, v, val };
+      }
+    }
+    if (!best) break;
+    const before = c.oats.length;
+    c.addOat(best.u, best.v);
+    placed.push({ ...best, accepted: c.oats.length > before });
+  }
+
+  // Wait for a callout to trigger AND actually become visible in the DOM.
+  const t0 = clock.realNow();
+  while (clock.realNow() - t0 < timeoutMs) {
+    await new Promise((r) => setTimeout(r, 200));
+    const el = [...document.querySelectorAll('.observation-callout')]
+      .find((n) => Number(getComputedStyle(n).opacity) > 0.6);
+    if (el) {
+      const r = el.getBoundingClientRect();
+      return {
+        placed,
+        visible: true,
+        rect: [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)],
+        triggered: c.oats.filter((o) => o.observation?.triggered).length,
+        waitedMs: Math.round(clock.realNow() - t0),
+      };
+    }
+  }
+  return { placed, visible: false, triggered: c.oats.filter((o) => o.observation?.triggered).length };
+}
+
+/**
  * Cold start vs charged field.
  *
  * Real boot is resetSimulation({resetOats:true, spawnAgents:FALSE}) — the world
@@ -788,6 +871,160 @@ function describeObservations() {
   };
 }
 
+/**
+ * Page-render mode: let CHROME draw the overlays, and capture its output.
+ *
+ * replay/overlays.js repaints the story callout by hand in Canvas2D — emulating
+ * backdrop-filter blur+saturate, two crossed gradient masks with
+ * mask-composite:intersect, the feather outset, the stroke, the tail, EB Garamond
+ * metrics, and the per-line reveal (after pausing every WAAPI animation so it can
+ * recompute them from virtual time). Every one of those is an approximation of
+ * something the browser already does exactly, and they went wrong repeatedly:
+ * most visibly, the emulated backdrop blur smeared across the whole frame, so the
+ * entire creature went soft the instant a callout appeared.
+ *
+ * Driving through Playwright makes the painter unnecessary. Chrome renders the
+ * real DOM over the real canvas, with real backdrop-filter and real fonts, and
+ * its animations already run on performance.now() — which IS the virtual clock
+ * during an offline render, so nothing needs pausing or recomputing. Node steps
+ * the simulation one frame at a time and screenshots the composited page.
+ *
+ * This function only prepares and exposes the controls; Node owns the loop.
+ */
+async function preparePageRender({
+  file = 'session.cvr', width = 1280, height = 720, fps = 60, speed = 1, ss = 2,
+} = {}) {
+  const recording = await fetch(`/replay/out/${file}`).then((r) => r.json());
+  const player = createPlayer({ api, recording });
+  const total = recording.totalTicks;
+
+  const TICK_MS = 1000 / 60;
+  const MILLI = 1000;
+  const cumT = new Float64Array(total + 1);
+  for (let i = 0; i < total; i++) cumT[i + 1] = cumT[i] + Math.round(player.dtAt(i) * MILLI);
+  const totalMilliTicks = cumT[total];
+  const simDurationMs = (totalMilliTicks / MILLI) * TICK_MS;
+  const frames = Math.max(1, Math.round((simDurationMs / speed / 1000) * fps));
+  const perFrameMilliTicks = (60 * MILLI * speed) / fps;
+  const targetT = (i) => Math.min(totalMilliTicks, i * perFrameMilliTicks + 0.5);
+
+  const sized = setRenderSize(width, height, ss);
+  log('page-render', { width, height, ss, fps, frames, sized });
+
+  await armOffline();
+  player.begin();
+
+  const arec = createAudioRecorder({ api, simHz: recording.simHz });
+  arec.hook();
+  if (player.fromBegin) log('page-render pressed Begin', await pressBegin());
+
+  // The story callout's per-line reveal and vertical scroll are Web Animations
+  // (main.js:6851, 6920) running on document.timeline — WALL CLOCK. Offline that
+  // is disastrous in a way that reads as "the text never appears": the render
+  // advances a few output frames per real second, so an animation created at
+  // virtual 33s lives out its whole ~20s lifetime in 20 REAL seconds — under two
+  // seconds of finished video, then gone.
+  //
+  // The old compositor solved this by pausing them and re-deriving the mask and
+  // scroll arithmetically, which is how it ended up reimplementing the whole
+  // callout. Pin them to the virtual clock instead and let Chrome render the
+  // result natively: pause on first sight, then drive currentTime directly. An
+  // animation is first seen within one tick of its creation, so treating that
+  // moment as its origin is exact to a frame.
+  const animOrigin = new WeakMap();
+  function syncDomAnimations(virtualMs) {
+    let docAnims;
+    try { docAnims = document.getAnimations(); } catch { return 0; }
+    let n = 0;
+    for (const anim of docAnims) {
+      if (!animOrigin.has(anim)) {
+        animOrigin.set(anim, virtualMs);
+        try { anim.pause(); } catch { /* a finished animation rejects pause */ }
+      }
+      try {
+        anim.currentTime = Math.max(0, virtualMs - animOrigin.get(anim));
+        n++;
+      } catch { /* read-only once finished */ }
+    }
+    return n;
+  }
+
+  let cursor = 0;
+  let lastAnimCount = 0;
+  const ctl = {
+    frames,
+    total,
+    fps,
+    simDurationMs,
+    /** Advance the simulation to output frame f and leave it drawn. */
+    advance(f) {
+      const cutoff = targetT(f + 1);
+      while (cursor < total && cumT[cursor + 1] <= cutoff) {
+        player.applyTick(cursor);
+        arec.sample(cursor);
+        step(player.dtAt(cursor) * TICK_MS);
+        cursor++;
+      }
+      // After the draw, so animations created during this tick are caught and
+      // pinned before the page is photographed.
+      lastAnimCount = syncDomAnimations(clock.virtualMs);
+      return cursor;
+    },
+    get domAnimations() { return lastAnimCount; },
+    /** Render the soundtrack and save it as a WAV for ffmpeg to mux. */
+    async finishAudio(name = 'audio.wav') {
+      exitOffline();
+      arec.unhook();
+      const buffer = await renderSessionAudio({
+        api,
+        events: arec.events,
+        spatial: arec.spatial,
+        totalTicks: cursor,
+        simHz: recording.simHz,
+        speed,
+        tickToSec: (tick) => (cumT[Math.min(Math.max(0, tick), total)] / MILLI) * TICK_MS / 1000,
+        sampleRate: 48000,
+        durationSeconds: frames / fps,
+      });
+      const wav = audioBufferToWav(buffer);
+      const save = await fetch(`/__save?name=${encodeURIComponent(name)}`, { method: 'POST', body: wav })
+        .then((r) => r.json());
+      return { save, seconds: +buffer.duration.toFixed(3), ...arec.stats(), ...(buffer.replayReport ?? {}) };
+    },
+    stats: () => ({ frames, simulatedTicks: cursor, recordedTicks: total, domAnimations: lastAnimCount, mismatches: player.mismatches }),
+  };
+  window.__pr = ctl;
+  return { frames, total, simDurationMs: +simDurationMs.toFixed(1) };
+}
+
+/** Minimal PCM16 WAV writer — ffmpeg muxes this alongside the frame stream. */
+function audioBufferToWav(buffer) {
+  const numCh = buffer.numberOfChannels;
+  const len = buffer.length;
+  const rate = buffer.sampleRate;
+  const bytes = 44 + len * numCh * 2;
+  const ab = new ArrayBuffer(bytes);
+  const view = new DataView(ab);
+  const str = (off, s2) => { for (let i = 0; i < s2.length; i++) view.setUint8(off + i, s2.charCodeAt(i)); };
+  str(0, 'RIFF'); view.setUint32(4, bytes - 8, true); str(8, 'WAVE');
+  str(12, 'fmt '); view.setUint32(16, 16, true); view.setUint16(20, 1, true);
+  view.setUint16(22, numCh, true); view.setUint32(24, rate, true);
+  view.setUint32(28, rate * numCh * 2, true); view.setUint16(32, numCh * 2, true);
+  view.setUint16(34, 16, true);
+  str(36, 'data'); view.setUint32(40, len * numCh * 2, true);
+  const chans = [];
+  for (let c = 0; c < numCh; c++) chans.push(buffer.getChannelData(c));
+  let off = 44;
+  for (let i = 0; i < len; i++) {
+    for (let c = 0; c < numCh; c++) {
+      const v = Math.max(-1, Math.min(1, chans[c][i]));
+      view.setInt16(off, v < 0 ? v * 0x8000 : v * 0x7fff, true);
+      off += 2;
+    }
+  }
+  return ab;
+}
+
 /** Load a recording and render it to MP4. */
 /**
  * Replay a recording to MP4.
@@ -1031,7 +1268,7 @@ async function snapshot(name = 'snapshot.png', { width = 640, height = 360 } = {
   return save;
 }
 
-window.__replay = { renderVideo, benchmarkTick, setRenderSize, growColony, snapshot, probeGrowth, dtSweep, chargeSweep, liveRun, determinismTest, gpuDeterminismTest, recordSession, replayToVideo, sampleStats, clock, waitFor, api };
+window.__replay = { renderVideo, preparePageRender, benchmarkTick, setRenderSize, growColony, snapshot, probeGrowth, dtSweep, chargeSweep, liveRun, determinismTest, gpuDeterminismTest, recordSession, replayToVideo, sampleStats, clock, waitFor, api };
 log('offline harness ready; waiting for __cuttle');
 
 const postStatus = (status) => {
@@ -1072,6 +1309,17 @@ if (qs.get('auto') === '1') {
       });
       await postStatus({ phase: 'done', result });
 
+    } else if (qs.get('pagerender') === '1') {
+      // MUST be tested before `replay`: a page-render URL also carries
+      // replay=<file>, so the in-page branch would otherwise swallow it and
+      // silently render through the old hand-painted overlay path.
+
+      // Prepare only; Node drives the loop through window.__pr.
+      const info = await preparePageRender({
+        file: qs.get('replay') || 'session.cvr',
+        width: W, height: H, fps: num('fps', 60), speed: num('speed', 1), ss: num('ss', 2),
+      });
+      await postStatus({ phase: 'ready-to-drive', ...info });
     } else if (qs.get('replay')) {
       const result = await replayToVideo({
         file: qs.get('replay'),
@@ -1115,6 +1363,10 @@ if (qs.get('auto') === '1') {
           body: JSON.stringify({ tag, seed: num('seed', 12345), ticks: num('ticks', 400), hash: result.results[0] }, null, 2),
         });
       }
+      await postStatus({ phase: 'done', result });
+
+    } else if (qs.get('livecallout') === '1') {
+      const result = await liveCallout({ growTicks: num('grow', 2600), seed: num('seed', 48879) });
       await postStatus({ phase: 'done', result });
 
     } else if (qs.get('live') === '1') {

@@ -106,6 +106,14 @@ for (;;) {
   await page.waitForTimeout(shotAtFrame != null ? 150 : 2000);
 }
 
+// Jobs that hold a live state to be photographed (liveCallout) never report a
+// frame number, so fall back to shooting once the job reports done.
+if (shotPath && !shotTaken && process.env.SHOT_ON_DONE === '1') {
+  shotTaken = true;
+  await page.screenshot({ path: shotPath }).catch((e) => console.log('  ! shot failed', String(e)));
+  console.log(`[run] screenshot on done -> ${shotPath}`);
+}
+
 // Confirm the initial oat came from the raycast, not the fallback. A run where
 // it missed is measuring a different world and its numbers must not be compared
 // against one where it hit.
