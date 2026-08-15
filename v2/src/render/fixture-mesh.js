@@ -40,10 +40,29 @@ export async function loadTwoChartSphereFixture({ device, registry, fetchImpl = 
 
   return Object.freeze({
     name: fixture.name,
-    vertexBuffer,
-    indexBuffer,
+    vertexCount,
+    triangleCount: indices.length / 3,
+    vertexLayouts: Object.freeze([Object.freeze({
+      arrayStride: 8 * 4,
+      stepMode: 'vertex',
+      attributes: Object.freeze([
+        Object.freeze({ shaderLocation: 0, offset: 0, format: 'float32x3' }),
+        Object.freeze({ shaderLocation: 1, offset: 3 * 4, format: 'float32x3' }),
+        Object.freeze({ shaderLocation: 2, offset: 6 * 4, format: 'float32x2' }),
+      ]),
+    })]),
+    vertexBindings: Object.freeze([Object.freeze({
+      buffer: vertexBuffer,
+      byteOffset: 0,
+      byteLength: interleaved.byteLength,
+    })]),
+    indexBinding: Object.freeze({
+      buffer: indexBuffer,
+      byteOffset: 0,
+      byteLength: indices.byteLength,
+      format: indices instanceof Uint16Array ? 'uint16' : 'uint32',
+    }),
     indexCount: indices.length,
-    indexFormat: indices instanceof Uint16Array ? 'uint16' : 'uint32',
   });
 }
 

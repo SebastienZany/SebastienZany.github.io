@@ -5,7 +5,7 @@ import { createSyntheticDisplayChain } from './render/display-chain.js';
 import { loadTwoChartSphereFixture } from './render/fixture-mesh.js';
 import { loadGoldLutTexture } from './render/gold-lut-texture.js';
 import { createMaterialUniformWriter } from './render/material-uniforms.js';
-import { createFixtureMeshRenderer } from './render/renderer.js';
+import { createSurfaceRenderer } from './render/renderer.js';
 import { SURFACE_PARAM_CONTROLS } from './render/surface-params.js';
 import { createSyntheticFieldProvider } from './shared/field-provider.js';
 import { createParams } from './shared/params.js';
@@ -66,7 +66,7 @@ async function initialize() {
     lut: goldLut,
   });
   materialUniforms.write(look.params);
-  const renderer = await createFixtureMeshRenderer({
+  const renderer = await createSurfaceRenderer({
     device: look.device,
     registry: look.registry,
     canvas,

@@ -4,7 +4,7 @@ import { makeIcosaLightUniformData } from './light-rig.js';
 const CLEAR_COLOUR = Object.freeze({ r: 0.004, g: 0.006, b: 0.005, a: 1 });
 const TEST_TARGET_SIZE = 256;
 
-export async function createFixtureMeshRenderer({
+export async function createSurfaceRenderer({
   device,
   registry,
   canvas,
@@ -104,15 +104,6 @@ export async function createFixtureMeshRenderer({
   ]);
   const slimeModule = await checkedModule(device, 'look-slime', slimeSource, dev, onCompilationMessage);
   const goldModule = await checkedModule(device, 'look-gold', goldSource, dev, onCompilationMessage);
-  const vertexBuffers = [{
-    arrayStride: 8 * 4,
-    stepMode: 'vertex',
-    attributes: [
-      { shaderLocation: 0, offset: 0, format: 'float32x3' },
-      { shaderLocation: 1, offset: 3 * 4, format: 'float32x3' },
-      { shaderLocation: 2, offset: 6 * 4, format: 'float32x2' },
-    ],
-  }];
   const depthStencil = {
     format: 'depth24plus',
     depthWriteEnabled: true,
@@ -121,7 +112,7 @@ export async function createFixtureMeshRenderer({
   const goldPipeline = await device.createRenderPipelineAsync({
     label: 'look-gold-pipeline',
     layout: pipelineLayout,
-    vertex: { module: goldModule, entryPoint: 'goldVertex', buffers: vertexBuffers },
+    vertex: { module: goldModule, entryPoint: 'goldVertex', buffers: mesh.vertexLayouts },
     fragment: { module: goldModule, entryPoint: 'goldFragment', targets: [{ format: colourFormat }] },
     primitive: { topology: 'triangle-list', cullMode: 'none' },
     depthStencil,
@@ -129,7 +120,7 @@ export async function createFixtureMeshRenderer({
   const slimePipeline = await device.createRenderPipelineAsync({
     label: 'look-slime-pipeline',
     layout: pipelineLayout,
-    vertex: { module: slimeModule, entryPoint: 'slimeVertex', buffers: vertexBuffers },
+    vertex: { module: slimeModule, entryPoint: 'slimeVertex', buffers: mesh.vertexLayouts },
     fragment: {
       module: slimeModule,
       entryPoint: 'slimeFragment',
@@ -204,8 +195,16 @@ export async function createFixtureMeshRenderer({
         depthStoreOp: 'store',
       },
     });
-    pass.setVertexBuffer(0, mesh.vertexBuffer);
-    pass.setIndexBuffer(mesh.indexBuffer, mesh.indexFormat);
+    for (let bindingIndex = 0; bindingIndex < mesh.vertexBindings.length; bindingIndex += 1) {
+      const binding = mesh.vertexBindings[bindingIndex];
+      pass.setVertexBuffer(bindingIndex, binding.buffer, binding.byteOffset, binding.byteLength);
+    }
+    pass.setIndexBuffer(
+      mesh.indexBinding.buffer,
+      mesh.indexBinding.format,
+      mesh.indexBinding.byteOffset,
+      mesh.indexBinding.byteLength,
+    );
     pass.setBindGroup(0, frameBindGroup);
     pass.setBindGroup(1, textureBindGroups[displayChain.currentMaximumIndex()]);
     if (params.useGoldWaferBody) {
