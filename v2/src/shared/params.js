@@ -8,6 +8,19 @@
 const WORLD_LINEAR_SCALE = 4;
 const DEFAULT_OAT_POWER = 1.55;
 
+export const PARAM_EXTRACTION_ANCHORS = Object.freeze({
+  smoothFieldDisplayDefault: 'main.js:123',
+  worldLinearScale: 'main.js:158',
+  defaultOatPower: 'main.js:175',
+  baseSimulationAndPresets: 'main.js:325–437',
+  populationControlDefaults: 'main.js:442–458',
+  baseRenderAndPresets: 'main.js:460–529',
+  effectiveParams: 'main.js:531–546',
+  numericInputRanges: 'index.html:317–714',
+  numericBindings: 'main.js:18212–18253',
+  colourToggleAndChoiceBindings: 'main.js:18329–18515',
+});
+
 export const BASE_SIMULATION_VALUES = Object.freeze({
   uptakeRate: 0.035,
   depositRate: 0.005,
@@ -45,12 +58,12 @@ const simulationPreset = (id, label, note, overrides = {}) => Object.freeze({
 });
 
 export const SIMULATION_PRESETS = Object.freeze([
-  simulationPreset('default-current', 'Default', 'Current requested defaults.', {
+  simulationPreset('default-current', 'Default', 'Original defaults plus requested current defaults: rationed oats, crowd blur 30.0, oat supply 0.140.', {
     densityBlur: 30,
     oatSupplyRate: 0.14,
     useOatRationing: true,
   }),
-  simulationPreset('stable-medium', 'Stable ~9k', 'Stable medium population.', {
+  simulationPreset('stable-medium', 'Stable ~9k', '2400-step sweep: 8.4k-10.3k tail, no capacity runaway.', {
     oatPower: 1,
     burnRate: 0.018,
     crowdWeight: 1.5,
@@ -60,7 +73,7 @@ export const SIMULATION_PRESETS = Object.freeze([
     oatSupplyRate: 1,
     useOatRationing: true,
   }),
-  simulationPreset('stable-compact', 'Compact ~7k', 'Compact stable population.', {
+  simulationPreset('stable-compact', 'Compact ~7k', '2400-step sweep: compact colony around 6.7k-7.4k.', {
     oatPower: 1,
     burnRate: 0.018,
     crowdWeight: 1.65,
@@ -69,7 +82,7 @@ export const SIMULATION_PRESETS = Object.freeze([
     maxReserve: 4.2,
     useOatRationing: true,
   }),
-  simulationPreset('stable-loose', 'Loose ~10k', 'Loose stable population.', {
+  simulationPreset('stable-loose', 'Loose ~10k', '2400-step sweep: looser colony around 7.8k-10.2k.', {
     oatPower: 1,
     burnRate: 0.018,
     crowdWeight: 1.35,
@@ -78,7 +91,7 @@ export const SIMULATION_PRESETS = Object.freeze([
     maxReserve: 4.2,
     useOatRationing: true,
   }),
-  simulationPreset('slow-growth', 'Slow growth ~20k', 'Slow long-running growth.', {
+  simulationPreset('slow-growth', 'Slow growth ~20k', 'Conservative food and stronger birth gate; grows slowly past 10k.', {
     oatPower: 0.95,
     burnRate: 0.016,
     crowdWeight: 1.1,
@@ -87,7 +100,7 @@ export const SIMULATION_PRESETS = Object.freeze([
     maxReserve: 4.2,
     useOatRationing: true,
   }),
-  simulationPreset('original-defaults', 'Original defaults', 'Unmodified base tuning.'),
+  simulationPreset('original-defaults', 'Original defaults', 'Original simulation tuning retained for comparison; tends to run away.'),
 ]);
 
 export const BASE_POPULATION_CONTROL_VALUES = Object.freeze({
@@ -150,8 +163,8 @@ const renderPreset = (id, label, note, overrides = {}) => Object.freeze({
 });
 
 export const RENDER_PRESETS = Object.freeze([
-  renderPreset('render-default', 'Original defaults', 'Unmodified base render tuning.'),
-  renderPreset('pearl-bright', 'Pearl bright', 'Current requested render look.', {
+  renderPreset('render-default', 'Original defaults', 'Original render/display defaults retained for comparison.'),
+  renderPreset('pearl-bright', 'Pearl bright', 'Screenshot render look: softer spatial blur, stronger temporal smoothing, white body, thinner film band.', {
     spatialSmoothing: 1,
     temporalSmoothing: 0.93,
     surfaceHeight: 1.4,
@@ -350,4 +363,3 @@ function validateValue(name, value, definition) {
     throw new RangeError(`${name} is not an allowed choice`);
   }
 }
-
