@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>M0 probe — capture / encode / mux</title>
+<style>
+  body { font: 13px/1.5 ui-monospace, Menlo, monospace; background:#0b0d0e; color:#dfe7e4; padding:20px; }
+  h1 { font-size:14px; margin:0 0 12px; color:#8ce8ff; }
+  .row { padding:3px 0; border-bottom:1px solid #1c2224; }
+  .ok { color:#6ddf81; } .bad { color:#ff6f6f; } .warn { color:#ffcd58; } .dim { color:#7f8c89; }
+  #out { white-space:pre-wrap; }
+  canvas { display:block; margin-top:12px; border:1px solid #232a2c; }
+</style>
+</head>
+<body>
+<h1>M0 — end-to-end capture / encode / mux probe</h1>
+<div id="out"></div>
+<canvas id="gl" width="640" height="360"></canvas>
+<script type="module">
+const out = document.getElementById('out');
+const log = (msg, cls = '') => {
+  const d = document.createElement('div');
+  d.className = 'row ' + cls;
+  d.textContent = msg;
+  out.append(d);
+  console.log(msg);
+};
+const results = {};
+
+// ---- 1. API presence -------------------------------------------------------
+log(`userAgent: ${navigator.userAgent}`, 'dim');
+results.hasVideoEncoder = typeof VideoEncoder === 'function';
+results.hasAudioEncoder = typeof AudioEncoder === 'function';
+results.hasVideoFrame   = typeof VideoFrame === 'function';
+results.hasFSA          = typeof window.showSaveFilePicker === 'function';
+log(`VideoEncoder: ${results.hasVideoEncoder}`, results.hasVideoEncoder ? 'ok' : 'bad');
+log(`AudioEncoder: ${results.hasAudioEncoder}`, results.hasAudioEncoder ? 'ok' : 'bad');
+log(`VideoFrame:   ${results.hasVideoFrame}`,   results.hasVideoFrame ? 'ok' : 'bad');
+log(`showSaveFilePicker: ${results.hasFSA}`, results.hasFSA ? 'ok' : 'warn');
+
+// ---- 2. WebGL2 canvas, preserveDrawingBuffer:false --------------------------
+const canvas = document.getElementById('gl');
+const gl = canvas.getContext('webgl2', { preserveDrawingBuffer: false, alpha: false, antialias: false });
+results.webgl2 = !!gl;
+log(`WebGL2 context (preserveDrawingBuffer:false): ${!!gl}`, gl ? 'ok' : 'bad');
+if (gl) {
+  const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+  results.renderer = String(gl.getParameter(dbg ? dbg.UNMASKED_RENDERER_WEBGL : gl.RENDERER));
+  results.floatBlend = !!gl.getExtension('EXT_float_blend');
+  results.colorBufferFloat = !!gl.getExtension('EXT_color_buffer_float');
+  log(`renderer: ${results.renderer}`, 'dim');
+  log(`EXT_color_buffer_float: ${results.colorBufferFloat} | EXT_float_blend: ${results.floatBlend}`, 'dim');
+}
+
+// ---- 3. Codec support ------------------------------------------------------
+const VIDEO_CFG = {
+  codec: 'avc1.640033', width: 640, height: 360,
+  bitrate: 4_000_000, framerate: 30,
+  bitrateMode: 'variable', latencyMode: 'quality',
+  hardwareAcceleration: 'prefer-hardware', avc: { format: 'avc' },
+};
+const AUDIO_CFG = { codec: 'mp4a.40.2', sampleRate: 48000, numberOfChannels: 2, bitrate: 192000 };
+
+try {
+  const v = await VideoEncoder.isConfigSupported(VIDEO_CFG);
+  results.videoSupported = v.supported;
+  log(`VideoEncoder avc1.640033 supported: ${v.supported}`, v.supported ? 'ok' : 'bad');
+} catch (e) { results.videoSupported = false; log(`VideoEncoder probe threw: ${e}`, 'bad'); }
+
+try {
+  const a = await AudioEncoder.isConfigSupported(AUDIO_CFG);
+  results.audioSupported = a.supported;
+  log(`AudioEncoder mp4a.40.2 supported: ${a.supported}`, a.supported ? 'ok' : 'bad');
+} catch (e) { results.audioSupported = false; log(`AudioEncoder probe threw: ${e}`, 'bad'); }
+
+// ---- 4. Real video encode: WebGL canvas -> VideoFrame (same task) -----------
+let vChunks = 0, vBytes = 0, vErr = null;
+if (results.videoSupported && gl) {
+  try {
+    const enc = new VideoEncoder({
+      output: (chunk) => { vChunks++; vBytes += chunk.byteLength; },
+      error: (e) => { vErr = e; },
+    });
+    enc.configure(VIDEO_CFG);
+    for (let i = 0; i < 30; i++) {
+      // draw, then grab in the SAME task — the plan's core capture claim
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      gl.clearColor((i % 30) / 30, 0.15, 0.35, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      const frame = new VideoFrame(canvas, {
+        timestamp: Math.round(i * 1e6 / 30),
+        duration: Math.round(1e6 / 30),
+      });
+      enc.encode(frame, { keyFrame: i % 30 === 0 });
+      frame.close();
+      while (enc.encodeQueueSize > 6) await new Promise(r => setTimeout(r, 0));
+    }
+    await enc.flush();
+    enc.close();
+    results.videoChunks = vChunks; results.videoBytes = vBytes;
+    log(`video encode: ${vChunks} chunks, ${vBytes} bytes${vErr ? ' ERR ' + vErr : ''}`,
+        vChunks > 0 && !vErr ? 'ok' : 'bad');
+    log(`  -> same-task VideoFrame(canvas) capture WORKS with preserveDrawingBuffer:false`,
+        vChunks > 0 ? 'ok' : 'bad');
+  } catch (e) { log(`video encode threw: ${e}`, 'bad'); results.videoEncodeError = String(e); }
+}
+
+// ---- 5. Real audio encode + decoderConfig.description -----------------------
+if (results.audioSupported) {
+  try {
+    let firstMeta = null, aChunks = 0;
+    const enc = new AudioEncoder({
+      output: (chunk, meta) => { aChunks++; if (!firstMeta) firstMeta = meta; },
+      error: (e) => log(`audio encoder error: ${e}`, 'bad'),
+    });
+    enc.configure({ ...AUDIO_CFG, aac: { format: 'aac' } });
+    const N = 4800;
+    for (let c = 0; c < 5; c++) {
+      const data = new Float32Array(2 * N);
+      for (let i = 0; i < N; i++) {
+        const s = Math.sin(2 * Math.PI * 440 * (c * N + i) / 48000) * 0.2;
+        data[i] = s; data[N + i] = s;
+      }
+      const ad = new AudioData({
+        format: 'f32-planar', sampleRate: 48000, numberOfFrames: N,
+        numberOfChannels: 2, timestamp: Math.round(c * N / 48000 * 1e6), data,
+      });
+      enc.encode(ad); ad.close();
+    }
+    await enc.flush();
+    enc.close();
+    const desc = firstMeta?.decoderConfig?.description;
+    results.audioChunks = aChunks;
+    results.audioDescBytes = desc ? (desc.byteLength ?? desc.length ?? 0) : 0;
+    log(`audio encode: ${aChunks} chunks`, aChunks > 0 ? 'ok' : 'bad');
+    log(`  decoderConfig.description: ${results.audioDescBytes} bytes ` +
+        `(must be non-zero or the MP4 esds box is undecodable)`,
+        results.audioDescBytes > 0 ? 'ok' : 'bad');
+  } catch (e) { log(`audio encode threw: ${e}`, 'bad'); results.audioEncodeError = String(e); }
+}
+
+// ---- 6. Mediabunny reachable from CDN --------------------------------------
+try {
+  const mb = await import('https://cdn.jsdelivr.net/npm/mediabunny/+esm');
+  results.mediabunny = Object.keys(mb).filter(k =>
+    ['Output','Mp4OutputFormat','CanvasSource','AudioBufferSource','BufferTarget','StreamTarget','canEncodeAudio']
+      .includes(k));
+  log(`mediabunny import OK; exports present: ${results.mediabunny.join(', ')}`,
+      results.mediabunny.length >= 5 ? 'ok' : 'warn');
+} catch (e) {
+  results.mediabunnyError = String(e);
+  log(`mediabunny import FAILED: ${e}`, 'bad');
+}
+
+log('');
+log('RESULTS_JSON ' + JSON.stringify(results));
+window.__m0 = results;
+</script>
+</body>
+</html>

@@ -20,6 +20,15 @@
         "8137"
       ],
       "port": 8137
+    },
+    {
+      "name": "replay",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "replay/devserver.mjs",
+        "8140"
+      ],
+      "port": 8140
     }
   ]
 }
