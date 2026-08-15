@@ -14,7 +14,7 @@ struct Oat { uvPos: vec2<f32>, radiusUv: f32, peakFood: f32 }
 fn refreshOatField(@builtin(global_invocation_id) invocation: vec3<u32>) {
   let size = fieldSize();
   if (invocation.x >= size || invocation.y >= size) { return; }
-  let uvPos = (vec2<f32>(invocation.xy) + 0.5) / f32(size);
+  let uvPos = (vec2<f32>(invocation.xy) + vec2<f32>(0.5)) / f32(size);
   let oatCount = parameterUint(${PARAM_SLOT_OAT_META}u, 0u);
   var food = 0.0;
   for (var oatIndex = 0u; oatIndex < ${MAX_OATS}u; oatIndex += 1u) {

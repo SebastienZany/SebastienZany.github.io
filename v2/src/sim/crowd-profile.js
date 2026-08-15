@@ -92,6 +92,34 @@ export function crowdProfileResidual(reference, candidate) {
   };
 }
 
+export function crowdProfileResidualSvg(reference, candidate, size, { title = 'Crowd profile residual' } = {}) {
+  const row = Math.floor(size / 2);
+  const referenceRow = reference.slice(row * size, (row + 1) * size);
+  const candidateRow = candidate.slice(row * size, (row + 1) * size);
+  const width = 720;
+  const height = 260;
+  const pad = 28;
+  const peak = Math.max(1 / 255, ...referenceRow, ...candidateRow);
+  const points = (values, residual = false) => values.map((value, index) => {
+    const x = pad + index * (width - pad * 2) / Math.max(1, size - 1);
+    const normalized = residual ? 0.5 + value / (peak * 2) : 1 - value / peak;
+    const y = pad + normalized * (height - pad * 2);
+    return `${x.toFixed(2)},${y.toFixed(2)}`;
+  }).join(' ');
+  const differences = candidateRow.map((value, index) => value - referenceRow[index]);
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+  <rect width="100%" height="100%" fill="#07100e"/>
+  <text x="${pad}" y="18" fill="#dce7e4" font-family="monospace" font-size="12">${escapeXml(title)}</text>
+  <line x1="${pad}" y1="${height / 2}" x2="${width - pad}" y2="${height / 2}" stroke="#4a5d57"/>
+  <polyline fill="none" stroke="#7ee0a3" stroke-width="2" points="${points(referenceRow)}"/>
+  <polyline fill="none" stroke="#76a9ff" stroke-width="1.5" points="${points(candidateRow)}"/>
+  <polyline fill="none" stroke="#ff8c83" stroke-width="1" points="${points(differences, true)}"/>
+  <text x="${pad}" y="${height - 8}" fill="#7ee0a3" font-family="monospace" font-size="10">legacy</text>
+  <text x="${pad + 62}" y="${height - 8}" fill="#76a9ff" font-family="monospace" font-size="10">v2</text>
+  <text x="${pad + 88}" y="${height - 8}" fill="#ff8c83" font-family="monospace" font-size="10">residual (zero at midline)</text>
+</svg>`;
+}
+
 function binomial3x3(field, size, x, y) {
   let sum = 0;
   for (let offsetY = -1; offsetY <= 1; offsetY += 1) {
@@ -116,4 +144,8 @@ function reversedSmoothstep(normalizedRadiusSq) {
 
 function wrapIndex(value, size) {
   return ((value % size) + size) % size;
+}
+
+function escapeXml(value) {
+  return String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 }

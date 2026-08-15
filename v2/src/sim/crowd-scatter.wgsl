@@ -31,7 +31,7 @@ fn scatterCrowd(@builtin(global_invocation_id) invocation: vec3<u32>) {
     return;
   }
 
-  let texelPos = wrapUv(agent.uvPos) * f32(fieldSize()) - 0.5;
+  let texelPos = wrapUv(agent.uvPos) * f32(fieldSize()) - vec2<f32>(0.5);
   let base = vec2<i32>(floor(texelPos));
   let fraction = fract(texelPos);
   let mass = peak * parameterFloat(${PARAM_SLOT_CROWD_KERNEL}u, 2u);

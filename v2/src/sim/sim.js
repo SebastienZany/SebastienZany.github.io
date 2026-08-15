@@ -4,6 +4,7 @@ import { createParams } from '../shared/params.js';
 import { createSimulationBindings } from './bindings.js';
 import {
   AGENT_BYTES,
+  AGENT_WORKGROUP_SIZE,
   DEFAULT_OAT_RADIUS,
   FLAT_MANIFEST_ROOT_HASH,
   MAX_CAPACITY,
@@ -20,6 +21,7 @@ import { createSimulationLayouts } from './layouts.js';
 import { packSimulationParams } from './params-layout.js';
 import { encodeSimulationStep, encodeStateHash } from './pass-graph.js';
 import { createSimulationPipelines } from './pipelines.js';
+import { readAgentRecords, readScalarTexture } from './readback.js';
 import { createSimulationResources, destroySimulationResources } from './resources.js';
 import { buildSeedAgents, normalizeOats, packOats } from './seed.js';
 import {
@@ -131,7 +133,7 @@ export async function createFlatTorusSimulation({
     return countReadPromise;
   }
 
-  async function hashState() {
+  async function inspectState() {
     requireLive();
     if (hashReadPromise) return hashReadPromise;
     hashReadPromise = (async () => {
@@ -173,32 +175,41 @@ export async function createFlatTorusSimulation({
   async function readAgents(limit = capacity) {
     const population = await count();
     const readCount = Math.min(population, Math.max(0, Math.floor(limit)));
-    if (readCount === 0) return [];
-    const readback = registry.createBuffer({
-      label: 'sim-debug-agent-readback',
-      size: readCount * AGENT_BYTES,
-      usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+    return readAgentRecords({
+      device, registry, buffer: resources.agentBuffers[agentParity], count: readCount,
     });
-    const encoder = device.createCommandEncoder({ label: 'sim-debug-agent-copy' });
-    encoder.copyBufferToBuffer(resources.agentBuffers[agentParity], 0, readback, 0, readCount * AGENT_BYTES);
-    device.queue.submit([encoder.finish()]);
-    try {
-      await readback.mapAsync(GPUMapMode.READ);
-      const bytes = readback.getMappedRange().slice(0);
-      const floats = new Float32Array(bytes);
-      const uints = new Uint32Array(bytes);
-      return Array.from({ length: readCount }, (_, index) => ({
-        uvPos: [floats[index * 8], floats[index * 8 + 1]],
-        heading: floats[index * 8 + 2],
-        reserve: floats[index * 8 + 3],
-        idLo: uints[index * 8 + 4],
-        idHi: uints[index * 8 + 5],
-        flags: uints[index * 8 + 6],
-      }));
-    } finally {
-      if (readback.mapState === 'mapped') readback.unmap();
-      registry.destroy(readback);
+  }
+
+  async function debugReplaceState({ agents = [], field = zeroField, nextStepIndex = 0 } = {}) {
+    if (agents.length > capacity) throw new RangeError('Debug agent set exceeds capacity');
+    const agentData = new ArrayBuffer(agents.length * AGENT_BYTES);
+    const floats = new Float32Array(agentData);
+    const uints = new Uint32Array(agentData);
+    for (let index = 0; index < agents.length; index += 1) {
+      const agent = agents[index];
+      const base = index * 8;
+      floats.set([agent.uvPos[0], agent.uvPos[1], agent.heading, agent.reserve], base);
+      uints.set([agent.idLo >>> 0, agent.idHi >>> 0, agent.flags >>> 0, 0], base + 4);
     }
+    const scalarField = field instanceof Float32Array ? field : Float32Array.from(field);
+    const { upload, rowBytes } = paddedFieldUpload(scalarField, fieldSize);
+    clearMutableBuffers();
+    if (agentData.byteLength > 0) device.queue.writeBuffer(resources.agentBuffers[0], 0, agentData);
+    writePopulationArgs(agents.length);
+    device.queue.writeTexture(
+      { texture: resources.dynamicFields[0] }, upload,
+      { bytesPerRow: rowBytes, rowsPerImage: fieldSize }, [fieldSize, fieldSize, 1],
+    );
+    device.queue.writeTexture(
+      { texture: resources.dynamicFields[1] }, zeroField,
+      { bytesPerRow: fieldSize * 4, rowsPerImage: fieldSize }, [fieldSize, fieldSize, 1],
+    );
+    agentParity = 0;
+    densityIndex = 0;
+    stepIndex = nextStepIndex >>> 0;
+    oatDirty = true;
+    uploadParameters(1);
+    await device.queue.onSubmittedWorkDone();
   }
 
   async function snapshot() {
@@ -329,7 +340,7 @@ export async function createFlatTorusSimulation({
     device.queue.writeBuffer(resources.countBuffers[0], 0, new Uint32Array([population]));
     device.queue.writeBuffer(resources.countBuffers[1], 0, new Uint32Array([0]));
     device.queue.writeBuffer(resources.dispatchArgs, 0, new Uint32Array([
-      Math.ceil(population / 64), 1, 1,
+      Math.ceil(population / AGENT_WORKGROUP_SIZE), 1, 1,
     ]));
     device.queue.writeBuffer(resources.renderArgs, 0, new Uint32Array([population, 1, 0, 0]));
   }
@@ -355,8 +366,9 @@ export async function createFlatTorusSimulation({
     advance,
     seed,
     count,
-    hashState,
-    scanFinite: async () => (await hashState()).nonFinite,
+    hashState: async () => (await inspectState()).value,
+    inspectState,
+    scanFinite: async () => (await inspectState()).nonFinite,
     snapshot,
     restore,
     setOats,
@@ -366,7 +378,12 @@ export async function createFlatTorusSimulation({
     controllerState: () => clonePopulationControllerState(controllerState),
     allocatorDiagnostics,
     readAgents,
+    readField: () => readScalarTexture({ device, registry, texture: resources.dynamicFields[0], fieldSize }),
+    readDensityField: () => readScalarTexture({ device, registry, texture: resources.crowdFields[densityIndex], fieldSize }),
+    readOatField: () => readScalarTexture({ device, registry, texture: resources.oatField, fieldSize }),
+    debugReplaceState,
     currentAgentBuffer: () => resources.agentBuffers[agentParity],
+    allAgentBuffers: () => [...resources.agentBuffers],
     currentCountBuffer: () => resources.countBuffers[agentParity],
     currentFieldTexture: () => resources.dynamicFields[0],
     currentFieldView: () => resources.dynamicFieldViews[0],
