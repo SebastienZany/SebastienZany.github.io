@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { verifyC1Reconstruction } from '../../tools/c1-verification.mjs';
 import { fixtureBakeMesh } from '../../tools/fixture-pipeline.mjs';
 import { buildFixtureSet } from '../../tools/fixtures.mjs';
 import { rasterizeAtlas } from '../../tools/rasterize.mjs';
@@ -41,6 +42,11 @@ test('fixture seam tables prove coverage, transpose, exact hinge walks, and faul
 
     const affine = measureAffineWalkBands(mesh, repack, frames, raster.surfaceTopology);
     assert.ok(Math.max(...affine.map((row) => row.maxAffineErrorTexels)) < 1e-3, name);
+    const c1 = verifyC1Reconstruction(mesh, repack, raster, frames);
+    assert.ok(c1.pathCount >= frames.frameCount, name);
+    assert.ok(c1.smooth.negativeControlValueViolations > 0, name);
+    assert.ok(c1.smooth.negativeControlGradientViolations > 0, name);
+    assert.ok(c1.sharp.negativeControlValueViolations > 0, name);
     if (name === 'folded-quad-45' || name === 'folded-quad-80') {
       assert.ok(Math.max(...affine.map((row) => row.maxLegacyErrorTexels)) > 1, name);
     }

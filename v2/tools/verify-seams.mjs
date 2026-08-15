@@ -6,6 +6,7 @@ import { parseMeshAsset } from '../src/atlas/asset.js';
 import { DEFAULT_ATLAS_TARGETS, MAX_SECTION_BYTES } from './atlas-constants.mjs';
 import { buildBlockGraph } from './block-graph.mjs';
 import { buildBoundaryFrameIndex } from './boundary-index.mjs';
+import { verifyC1Reconstruction } from './c1-verification.mjs';
 import { fixtureBakeMesh } from './fixture-pipeline.mjs';
 import { buildFixtureSet } from './fixtures.mjs';
 import { rasterizeAtlas } from './rasterize.mjs';
@@ -102,9 +103,10 @@ function verifyOneTarget(mesh, target, seed) {
   const smooth = measureWalkReconstruction(mesh, repack, raster, smoothWorldField);
   const sharp = measureWalkReconstruction(mesh, repack, raster, sharpWorldField);
   const affine = measureAffineWalkBands(mesh, repack, frames, raster.surfaceTopology);
+  const c1 = verifyC1Reconstruction(mesh, repack, raster, frames);
   const transport = measureRandomTransport(repack, raster, boundary, frames, TRANSPORT_SAMPLES, seed ^ 0xa63_17e5);
   const corruption = verifyCorruptedDonorIsDetected(mesh, repack, raster);
-  return { repack, raster, frames, boundary, graph, coverage, stencils, transpose, smooth, sharp, affine, transport, corruption };
+  return { repack, raster, frames, boundary, graph, coverage, stencils, transpose, smooth, sharp, affine, c1, transport, corruption };
 }
 
 function applyCoreGates(metrics, label, failures, fixture) {
@@ -120,6 +122,15 @@ function applyCoreGates(metrics, label, failures, fixture) {
   if (metrics.smooth.disabledMaxValueError <= smoothFilledMaximum) failures.push(`${label}: smooth no-fill negative control did not fail`);
   if (metrics.sharp.disabledMaxValueError <= sharpFilledMaximum) failures.push(`${label}: sharp no-fill negative control did not fail`);
   if (!metrics.corruption.rejected) failures.push(`${label}: corrupted donor injection passed`);
+  if (metrics.c1.smooth.interiorValueViolations || metrics.c1.smooth.interiorGradientViolations) {
+    failures.push(
+      `${label}: seam-interior C1 smooth gate has ${metrics.c1.smooth.interiorValueViolations} value and `
+      + `${metrics.c1.smooth.interiorGradientViolations} gradient violations`,
+    );
+  }
+  if (metrics.c1.sharp.interiorValueViolations) {
+    failures.push(`${label}: seam-interior sharp-front pointwise gate has ${metrics.c1.sharp.interiorValueViolations} violations`);
+  }
   if (fixture) {
     const maximumAffine = Math.max(...metrics.affine.map(({ maxAffineErrorTexels }) => maxAffineErrorTexels));
     if (maximumAffine > EXACT_STENCIL_MOMENT_TEXELS) failures.push(`${label}: fixture hinge affine error ${maximumAffine} texels`);
@@ -140,6 +151,7 @@ function compactMetrics(metrics) {
     smooth: metrics.smooth,
     sharp: metrics.sharp,
     affine: metrics.affine,
+    c1: metrics.c1,
     transport: { ...metrics.transport, failureTexels: undefined },
     frameOverflow: metrics.boundary.overflowCount,
     maximumFrameCandidates: maximum(metrics.boundary.candidateCounts),
@@ -196,6 +208,11 @@ function realTargetReport(row) {
 | Smooth/sharp no-fill negative-control max | ${scientific(row.smooth.disabledMaxValueError)} / ${scientific(row.sharp.disabledMaxValueError)} |
 | Affine max by distance | ${row.affine.map(({ distanceTexels, maxAffineErrorTexels }) => `${distanceTexels}: ${maxAffineErrorTexels.toFixed(4)}`).join('; ')} texels |
 | Legacy max by distance | ${row.affine.map(({ distanceTexels, maxLegacyErrorTexels }) => `${distanceTexels}: ${maxLegacyErrorTexels.toFixed(4)}`).join('; ')} texels |
+| C1 paths / interior / corner-zone samples | ${formatInteger(row.c1.pathCount)} / ${formatInteger(row.c1.smooth.interiorSampleCount)} / ${formatInteger(row.c1.smooth.cornerSampleCount)} |
+| Smooth interior value / gradient violations | ${formatInteger(row.c1.smooth.interiorValueViolations)} / ${formatInteger(row.c1.smooth.interiorGradientViolations)} |
+| Smooth corner-zone value / gradient violations | ${formatInteger(row.c1.smooth.cornerValueViolations)} / ${formatInteger(row.c1.smooth.cornerGradientViolations)} |
+| Sharp interior / corner-zone pointwise violations | ${formatInteger(row.c1.sharp.interiorValueViolations)} / ${formatInteger(row.c1.sharp.cornerValueViolations)} |
+| C1 disabled-fill value/gradient trips | ${formatInteger(row.c1.smooth.negativeControlValueViolations + row.c1.sharp.negativeControlValueViolations)} / ${formatInteger(row.c1.smooth.negativeControlGradientViolations)} |
 | Random transport samples / seam resolves / failures | ${formatInteger(row.transport.sampleCount)} / ${formatInteger(row.transport.seamCount)} / ${formatInteger(row.transport.conservativeFailureCount)} |
 | Cross-backs >¼ / worst | ${formatInteger(row.transport.crossBackOverQuarterTexel)} / ${row.transport.maxCrossBackErrorTexels.toFixed(5)} texels |
 | Frame cap overflow / maximum candidates | ${formatInteger(row.frameOverflow)} / ${row.maximumFrameCandidates} |
@@ -208,7 +225,6 @@ Every conservative-failure texel from this run is listed in \`${row.failureFile}
 
 function pendingInvariantList() {
   return [
-    'Formal C1 value/gradient comparison against a per-side seamless reconstruction at the direct-tap clamp, including the pointwise sharp-front gate.',
     'Transport sampling conditioned on true geometric seam crossings, including world-heading continuity and resolver cross-back (the current random endpoint probe is diagnostic only).',
     'Per-edge-local cone-corner cross-bisector jump and gradient-error-radius distribution on every real ≥3-chart corner.',
     '100-step real-atlas per-seam-band signed diffusion flux bounds and real-table wrong-diffusion-tap sensitivity.',
