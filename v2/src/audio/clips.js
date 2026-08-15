@@ -25,8 +25,16 @@ export const TUMBLE_LOOP = Object.freeze({
   lookaheadSeconds: 12,
   pumpIntervalMilliseconds: 1000,
   startDelaySeconds: 0.02,
+  defaultGameFadeInSeconds: 3.46,
   sourceStopTailSeconds: 0.05,
   legacyAnchor: 'main.js:199-205,9037-9170',
+});
+
+export const PRELOAD_POLICY = Object.freeze({
+  priorityClipIds: Object.freeze(['slime-fuse', 'intro']),
+  idleTimeoutMilliseconds: 1500,
+  fallbackDelayMilliseconds: 250,
+  legacyAnchor: 'main.js:8988-9011',
 });
 
 export const TUMBLE_SPATIAL = Object.freeze({
