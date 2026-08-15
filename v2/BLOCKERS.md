@@ -27,6 +27,12 @@ negative weight**. The nearest-tap construction's measured worst first-moment er
 texels for the remaining rank-deficient cases. Thus an unsigned-only asset would omit or change
 real shipped donors, not merely an unused fallback path.
 
+The completed 1536/G4/s=0.90 pass independently has 879,753 resolved gutters, 25,639 degraded
+stencils, and **7,914 signed degraded stencils**. Across both required targets the missing
+encoding affects 16,779 records. `npm run bake` measures and reports both targets, writes the
+full overflow censuses, then refuses to create a manifest or any apparently deployable atlas
+section set.
+
 Resolution needed: choose a signed deployed weight encoding and its exact-sum rule (or prohibit
 negative deployed weights), and replace “scatter then gather equals one” with the transpose
 inner-product identity plus a separate conservation assertion.
