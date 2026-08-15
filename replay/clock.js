@@ -32,6 +32,17 @@ const state = {
   lastCb: null,
 };
 
+const frameHooks = [];
+
+/** Run fn(timestamp) after every game frame, in live and offline mode alike. */
+export function onFrame(fn) {
+  frameHooks.push(fn);
+  return () => {
+    const i = frameHooks.indexOf(fn);
+    if (i >= 0) frameHooks.splice(i, 1);
+  };
+}
+
 export const clock = {
   get mode() { return state.mode; },
   get virtualMs() { return state.virtualMs; },
@@ -67,9 +78,19 @@ export function installClock() {
   state.installed = true;
 
   window.requestAnimationFrame = (cb) => {
-    state.lastCb = cb;
-    if (state.mode === 'live') return scheduleLive(cb);
-    state.pending = cb;
+    // Wrap at registration so frame hooks fire in BOTH modes: live callbacks go
+    // through scheduleLive, offline ones are invoked by step(), and both end up
+    // calling this same wrapper. Hooks run AFTER the game's frame so they observe
+    // the state the frame produced — which is what the recorder needs to sample.
+    const wrapped = (t) => {
+      cb(t);
+      for (const h of frameHooks) {
+        try { h(t); } catch (err) { console.warn('[clock] frame hook failed', err); }
+      }
+    };
+    state.lastCb = wrapped;
+    if (state.mode === 'live') return scheduleLive(wrapped);
+    state.pending = wrapped;
     return ++state.pendingId;
   };
   window.cancelAnimationFrame = (id) => {

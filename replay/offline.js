@@ -389,16 +389,37 @@ async function recordSession({ ticks = 900, seed = 0xC0FFEE, player = null, name
 }
 
 /** Load a recording and render it to MP4. */
+/**
+ * Replay a recording to MP4.
+ *
+ * `speed` is playback rate: 1 = realtime, 0.5 = half-speed (slow motion, twice
+ * as many frames), 2 = double speed (time-lapse).
+ *
+ * The tick->frame mapping is a cumulative RATIONAL schedule, not a loop count.
+ * ticksPerFrame is frequently fractional — 60Hz to 24fps is 2.5, and slow motion
+ * makes it less than 1, meaning some frames must consume ZERO ticks. So output
+ * frame i targets tick floor(i * p / q) and the driver advances to that tick,
+ * applying every intervening tick's intents. Frame count uses a half-open
+ * interval, F = ceil(T * q / p) with frames 0..F-1; the intuitive "greatest i
+ * whose target tick <= T" is off by one and would desync audio.
+ */
 async function replayToVideo({
-  file = 'session.cvr', width = 1280, height = 720, fps = 30,
+  file = 'session.cvr', width = 1280, height = 720, fps = 30, speed = 1,
   name = 'replay.mp4', bpp = 0.12, onProgress = null,
 } = {}) {
   const recording = await fetch(`/replay/out/${file}`).then((r) => r.json());
-  const p = createPlayer({ api, recording });
+  const player = createPlayer({ api, recording });
 
   const total = recording.totalTicks;
-  const ticksPerFrame = Math.max(1, Math.round(recording.simHz / fps));
-  const frames = Math.ceil(total / ticksPerFrame);
+
+  // exact rational ticksPerFrame = simHz / fps * speed, kept integral so the
+  // schedule cannot drift over thousands of frames
+  const SCALE = 1000;
+  const p = Math.round(recording.simHz * speed * SCALE);
+  const q = Math.round(fps * SCALE);
+  if (p <= 0) throw new Error(`bad schedule: simHz=${recording.simHz} fps=${fps} speed=${speed}`);
+  const frames = Math.ceil((total * q) / p);
+  const targetTick = (i) => Math.floor((i * p) / q);
 
   const canvas = document.getElementById('sim');
   setRenderSize(width, height);
@@ -406,19 +427,24 @@ async function replayToVideo({
     throw new Error(`canvas is ${canvas.width}x${canvas.height}, expected ${width}x${height}`);
   }
 
-  p.begin();
+  player.begin();
 
   const enc = await createMp4Encoder({ canvas, fps, bpp });
   await enc.start();
   await armOffline({ startMs: 100000 });
 
   const timings = [];
+  let cursor = 0;   // ticks already simulated
   try {
     for (let f = 0; f < frames; f++) {
       const t0 = clock.realNow();
-      for (let k = 0; k < ticksPerFrame; k++) {
-        p.applyTick(f * ticksPerFrame + k);
+      // advance to this frame's target tick, applying EVERY intervening tick.
+      // may be zero ticks (slow motion) or several (time-lapse).
+      const target = Math.min(total, targetTick(f + 1));
+      while (cursor < target) {
+        player.applyTick(cursor);
         step(1000 / 60);
+        cursor++;
       }
       await enc.addFrame(f);
       timings.push(clock.realNow() - t0);
@@ -432,14 +458,15 @@ async function replayToVideo({
 
   const warm = timings.slice(20);
   return {
-    source: file, frames, width, height, fps, ticksPerFrame,
-    recordedTicks: total,
+    source: file, frames, width, height, fps, speed,
+    ticksPerFrame: +(p / q).toFixed(4),
+    recordedTicks: total, simulatedTicks: cursor,
     bytes: buf.byteLength,
     meanMsPerFrame: +(warm.reduce((a, b) => a + b, 0) / Math.max(1, warm.length)).toFixed(2),
     totalSeconds: +(timings.reduce((a, b) => a + b, 0) / 1000).toFixed(1),
     // Non-empty means the replay's world drifted enough to change an outcome —
     // the loud-failure signal the plan asked for.
-    mismatches: p.mismatches,
+    mismatches: player.mismatches,
     save,
   };
 }
@@ -515,6 +542,7 @@ if (qs.get('auto') === '1') {
         file: qs.get('replay'),
         width: W, height: H,
         fps: num('fps', 30),
+        speed: num('speed', 1),
         bpp: num('bpp', 0.12),
         name: qs.get('name') || 'replay.mp4',
         onProgress: (frame, total) => postStatus({ phase: 'replaying', frame, total }),

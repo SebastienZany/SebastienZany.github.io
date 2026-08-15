@@ -854,6 +854,12 @@
     if (new URLSearchParams(location.search).has('safe')) {
       window.__diag?.log?.('safe-mode', 'main.js intentionally not loaded; see previous-run section below for the crashed run');
       window.__diag?.show?.();
+    } else if (new URLSearchParams(location.search).has('rec')) {
+      // Live play with session recording on; press R to open the render panel.
+      const script = document.createElement('script');
+      script.type = 'module';
+      script.src = 'replay/record-boot.js';
+      document.body.appendChild(script);
     } else if (new URLSearchParams(location.search).has('render')) {
       // Offline replay render mode (dev only). The replay harness installs its
       // virtual clock BEFORE main.js evaluates — main.js captures timestamps at

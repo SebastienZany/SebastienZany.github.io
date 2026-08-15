@@ -169,6 +169,7 @@ export function createRecorder({ api, clock, buildStamp = null }) {
     logEvent,
 
     start({ seed = (Math.random() * 2 ** 32) >>> 0 } = {}) {
+      state.wallStart = clock.realNow();
       const a = c();
       state.seed = seed >>> 0;
       a.seedSimRng(state.seed);
@@ -187,6 +188,7 @@ export function createRecorder({ api, clock, buildStamp = null }) {
     },
 
     stop() {
+      state.wallMs = clock.realNow() - (state.wallStart ?? clock.realNow());
       state.recording = false;
       for (const u of state.unhooks.splice(0)) u();
       return this.toJSON();
@@ -196,6 +198,14 @@ export function createRecorder({ api, clock, buildStamp = null }) {
       return {
         ...state.header,
         totalTicks: state.tick,
+        // Real elapsed time of the session. One recorded tick == one rendered
+        // LIVE frame, and live frame rate is variable, so tick count is not
+        // wall-clock seconds. Replay re-runs the same number of ticks at a fixed
+        // step, which means it reproduces the same simulation progression but
+        // its duration is totalTicks/simHz, not wallMs. Kept so the UI can show
+        // both honestly.
+        wallMs: Math.round(state.wallMs ?? 0),
+        liveFps: state.wallMs ? +((state.tick / (state.wallMs / 1000)).toFixed(1)) : null,
         camera: state.camera,
         repel: state.repel,
         events: state.events,
@@ -203,8 +213,11 @@ export function createRecorder({ api, clock, buildStamp = null }) {
     },
 
     stats() {
+      const elapsed = clock.realNow() - (state.wallStart ?? clock.realNow());
       return {
         tick: state.tick,
+        wallSeconds: +(elapsed / 1000).toFixed(1),
+        liveFps: elapsed > 0 ? +((state.tick / (elapsed / 1000)).toFixed(1)) : null,
         cameraKeys: state.camera.length,
         repelKeys: state.repel.length,
         events: state.events.length,
