@@ -6,6 +6,13 @@
 
 ## Open
 
+- **[F3] The real cuttlefish renders** (SHA-bound c3dccba): `/v2/look.html` now loads MESH1 —
+  iridescent film, bump, tentacles, painted world-continuous field. Claude's eye: big step;
+  overexposed at defaults (white-pearl blowout — Slime base / film range / brightness want your
+  hand), seam squares visible AND expected (original UVs; banner on page). Screenshot:
+  `v2/reference/f3-real-mesh.png`.
+
+
 - **[F2] Material look-dev page live** (SHA-bound 67e9b0a + gate fixes): open `/v2/look.html`
   (locally or on the site once pushed) — fixture sphere, full Surface param group live. Claude's
   honest first-eye: machinery proven, look NOT yet the legacy pearl (no iridescence shimmer/gold
