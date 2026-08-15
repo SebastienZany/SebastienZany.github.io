@@ -1,7 +1,6 @@
 import { gameClock } from '../shared/clock.js';
 import {
-  CLIPS,
-  CLIP_DEFAULTS,
+  AUDIO_NUMERICS,
   COMPRESSOR_CONTROLS,
   COMPRESSOR_DEFAULTS,
   ENV_LOOP,
@@ -11,12 +10,14 @@ import {
 } from './clips.js';
 import { applyGainAutomation, clampFinite, rampAudioParam } from './audio-param.js';
 import { createAudioBufferStore } from './buffer-store.js';
+import { createClipSettingsStore } from './clip-settings.js';
 import { createOneShotPlayer } from './one-shots.js';
 import { defaultContextFactory, defaultTimers, safeDisconnect } from './platform.js';
 import { planEnvSchedule, planTumbleSchedule } from './schedulers.js';
 import {
   createStubPositionProvider,
   createTumbleSpatialGraph,
+  initialTumbleReferenceDistance,
   syncTumbleSpatialGraph,
 } from './spatial.js';
 import {
@@ -41,13 +42,7 @@ export function createAudioEngine({
   random = Math.random,
   logger = console,
 } = {}) {
-  const clipSettings = new Map(CLIPS.map((clip) => [clip.id, {
-    volume: clip.gain,
-    maximumVolume: clip.maxGain,
-    loop: clip.loop,
-    fadeInSeconds: clip.fadeInSeconds,
-    fadeOutSeconds: clip.fadeOutSeconds,
-  }]));
+  const clipSettings = createClipSettingsStore();
   const compressorSettings = { ...COMPRESSOR_DEFAULTS };
   const state = {
     context: null,
@@ -58,6 +53,7 @@ export function createAudioEngine({
     tumble: {
       graph: null, sources: [], running: false, nextStartSeconds: null,
       scheduleTimerId: null, spatialTimerId: null, duration: 0, startingPromise: null,
+      referenceDistance: initialTumbleReferenceDistance(positionProvider),
     },
   };
 
@@ -157,7 +153,7 @@ export function createAudioEngine({
     const output = ensureEnvOutput();
     const settings = getClipSettings('env');
     output.gain.cancelScheduledValues(context.currentTime);
-    output.gain.setValueAtTime(settings.fadeInSeconds > 0 ? 0.0001 : settings.volume, context.currentTime);
+    output.gain.setValueAtTime(settings.fadeInSeconds > 0 ? AUDIO_NUMERICS.silenceGain : settings.volume, context.currentTime);
     if (settings.fadeInSeconds > 0) output.gain.linearRampToValueAtTime(settings.volume, context.currentTime + settings.fadeInSeconds);
     state.env.buffer = buffer;
     state.env.running = true;
@@ -207,6 +203,7 @@ export function createAudioEngine({
     if (!state.tumble.graph) {
       state.tumble.graph = createTumbleSpatialGraph(context, state.masterGain, {
         positionProvider, volume: getClipSettings('slime-tumble').volume, random,
+        referenceDistance: state.tumble.referenceDistance,
       });
     }
     syncSpatial({ force: true, smooth: false });
@@ -216,7 +213,7 @@ export function createAudioEngine({
     const fadeSeconds = Math.max(0, Number(fadeInSeconds) || 0);
     const fadeParam = state.tumble.graph.fadeGain.gain;
     fadeParam.cancelScheduledValues(context.currentTime);
-    fadeParam.setValueAtTime(0.0001, startSeconds);
+    fadeParam.setValueAtTime(AUDIO_NUMERICS.silenceGain, startSeconds);
     if (fadeSeconds > 0) fadeParam.linearRampToValueAtTime(1, startSeconds + fadeSeconds);
     else fadeParam.setValueAtTime(1, startSeconds);
     state.tumble.running = true;
@@ -246,8 +243,8 @@ export function createAudioEngine({
     const fadeParam = state.tumble.graph?.fadeGain.gain;
     if (fadeParam) {
       fadeParam.cancelScheduledValues(state.context.currentTime);
-      fadeParam.setValueAtTime(fadeSeconds > 0 ? fadeParam.value : 0.0001, state.context.currentTime);
-      if (fadeSeconds > 0) fadeParam.linearRampToValueAtTime(0.0001, state.context.currentTime + fadeSeconds);
+      fadeParam.setValueAtTime(fadeSeconds > 0 ? fadeParam.value : AUDIO_NUMERICS.silenceGain, state.context.currentTime);
+      if (fadeSeconds > 0) fadeParam.linearRampToValueAtTime(AUDIO_NUMERICS.silenceGain, state.context.currentTime + fadeSeconds);
     }
     fadeAndStopLoopSources(state.tumble.sources, fadeSeconds);
   }
@@ -272,8 +269,8 @@ export function createAudioEngine({
     const nowSeconds = state.context?.currentTime ?? 0;
     for (const record of [...records]) {
       record.gain.gain.cancelScheduledValues(nowSeconds);
-      record.gain.gain.setValueAtTime(fadeOutSeconds > 0 ? record.gain.gain.value : 0.0001, nowSeconds);
-      if (fadeOutSeconds > 0) record.gain.gain.linearRampToValueAtTime(0.0001, nowSeconds + fadeOutSeconds);
+      record.gain.gain.setValueAtTime(fadeOutSeconds > 0 ? record.gain.gain.value : AUDIO_NUMERICS.silenceGain, nowSeconds);
+      if (fadeOutSeconds > 0) record.gain.gain.linearRampToValueAtTime(AUDIO_NUMERICS.silenceGain, nowSeconds + fadeOutSeconds);
       try {
         record.source.stop(nowSeconds + fadeOutSeconds + ONE_SHOT_POLICY.sourceStopTailSeconds);
       } catch {
@@ -304,40 +301,27 @@ export function createAudioEngine({
   }
 
   function setClipVolume(clipId, value, { smooth = true } = {}) {
-    const settings = getMutableClipSettings(clipId);
-    settings.volume = clampFinite(value, 0, settings.maximumVolume, settings.volume);
-    if (clipId === 'env' && state.env.output) rampAudioParam(state.env.output.gain, settings.volume, state.context, { smooth });
+    const volume = clipSettings.setVolume(clipId, value);
+    if (clipId === 'env' && state.env.output) rampAudioParam(state.env.output.gain, volume, state.context, { smooth });
     if (clipId === 'slime-tumble' && state.tumble.graph) syncSpatial({ force: true, smooth });
-    oneShots.rampVolumes(clipId, settings.volume, state.context, smooth);
-    return settings.volume;
+    oneShots.rampVolumes(clipId, volume, state.context, smooth);
+    return volume;
   }
 
   function setClipLoop(clipId, enabled) {
-    const settings = getMutableClipSettings(clipId);
-    settings.loop = Boolean(enabled);
-    return settings.loop;
+    return clipSettings.setLoop(clipId, enabled);
   }
 
   function setClipFadeIn(clipId, seconds) {
-    const settings = getMutableClipSettings(clipId);
-    settings.fadeInSeconds = clampFinite(seconds, 0, CLIP_DEFAULTS.maximumFadeSeconds, settings.fadeInSeconds);
-    return settings.fadeInSeconds;
+    return clipSettings.setFadeIn(clipId, seconds);
   }
 
   function setClipFadeOut(clipId, seconds) {
-    const settings = getMutableClipSettings(clipId);
-    settings.fadeOutSeconds = clampFinite(seconds, 0, CLIP_DEFAULTS.maximumFadeSeconds, settings.fadeOutSeconds);
-    return settings.fadeOutSeconds;
+    return clipSettings.setFadeOut(clipId, seconds);
   }
 
   function getClipSettings(clipId) {
-    return { ...getMutableClipSettings(clipId) };
-  }
-
-  function getMutableClipSettings(clipId) {
-    const settings = clipSettings.get(clipId);
-    if (!settings) throw new RangeError(`Unknown audio clip: ${clipId}`);
-    return settings;
+    return clipSettings.get(clipId);
   }
 
   function getSchedulerClock() {
@@ -357,6 +341,14 @@ export function createAudioEngine({
       contextCreated: Boolean(state.context),
       contextState: state.context?.state ?? 'absent',
       masterRoute: state.masterRoute,
+      graph: {
+        oneShots: 'source>envelopeGain>volumeGain>master',
+        env: 'source>crossfadeGain>envOutput>master',
+        tumble: 'source>crossfadeGain>panner>fadeGain>distanceFilter>volumeGain>{dry,reverbSend>convolver>wet}>master',
+        master: state.masterRoute === 'uninitialized'
+          ? 'uninitialized'
+          : state.masterRoute === 'compressor' ? 'master>compressor>destination' : 'master>destination',
+      },
       compressor: { ...compressorSettings, nodeCreated: Boolean(state.compressor) },
       loadedPaths: buffers.loadedPaths,
       activeOneShots: oneShots.inspect(),
@@ -364,11 +356,15 @@ export function createAudioEngine({
         running: state.env.running,
         selectedPath: buffers.selectedEnvPath,
         scheduledSources: state.env.sources.length,
+        sourcePlans: state.env.sources.map(({ startSeconds, stopSeconds }) => ({ startSeconds, stopSeconds })),
         nextStartSeconds: state.env.nextStartSeconds,
       },
       tumble: {
         running: state.tumble.running,
         scheduledSources: state.tumble.sources.length,
+        sourcePlans: state.tumble.sources.map(({ startSeconds, stopSeconds, offsetSeconds }) => ({
+          startSeconds, stopSeconds, offsetSeconds,
+        })),
         nextStartSeconds: state.tumble.nextStartSeconds,
         graph: tumbleGraph ? {
           panningModel: tumbleGraph.panner.panningModel,
@@ -382,7 +378,7 @@ export function createAudioEngine({
           route: 'copyGain>panner>fadeGain>distanceFilter>volumeGain>{dry,reverbSend>convolver>wet}>master',
         } : null,
       },
-      clipSettings: Object.fromEntries([...clipSettings].map(([clipId, settings]) => [clipId, { ...settings }])),
+      clipSettings: clipSettings.inspect(),
     };
   }
 

@@ -109,8 +109,8 @@
       for (const [clipId, controls] of clipRows) {
         const oneShotActive = state.activeOneShots.some((voice) => voice.clipId === clipId && !voice.stopping);
         const active = clipId === 'env'
-          ? state.env.running
-          : clipId === 'slime-tumble' ? state.tumble.running : oneShotActive;
+          ? state.env.running || oneShotActive
+          : clipId === 'slime-tumble' ? state.tumble.running || oneShotActive : oneShotActive;
         controls.play.setAttribute('aria-pressed', String(active));
         controls.play.textContent = active ? 'Playing' : 'Play';
       }
@@ -196,7 +196,7 @@
     for (const control of COMPRESSOR_CONTROLS) {
       const label = document.createElement('label');
       const name = document.createElement('span');
-      name.textContent = control.key;
+      name.textContent = control.label;
       const input = document.createElement('input');
       input.type = 'range';
       input.min = String(control.min);
@@ -222,6 +222,7 @@
       ready: true,
     });
     engine.schedulePreload();
+    window.setInterval(renderTransportState, 250);
   </script>
 </body>
 </html>

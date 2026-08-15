@@ -6,6 +6,7 @@ import {
   performanceMillisecondsToContextTime,
 } from '../../src/audio/engine.js';
 import { FakeAudioContext, createFakeTimers, successfulFetch } from '../fixtures/fake-audio.js';
+import { createStubPositionProvider } from '../../src/audio/spatial.js';
 
 function harness(contextOptions = {}) {
   let nowMilliseconds = 0;
@@ -40,6 +41,8 @@ test('context is lazy, gesture unlock resumes synchronously, and compressor rewi
   assert.equal(engine.setCompressorParam('ratio', 40), 20);
   engine.setCompressorEnabled(false);
   assert.equal(engine.getState().masterRoute, 'destination');
+  assert.equal(engine.setClipVolume('intro', 99), 2.1809);
+  assert.equal(engine.setClipFadeOut('intro', 99), 30);
 });
 
 test('preloading decodes while leaving a suspended context locked', async () => {
@@ -54,6 +57,31 @@ test('preloading decodes while leaving a suspended context locked', async () => 
   await engine.loadClipBuffer('intro', { resumeContext: false });
   assert.equal(context.state, 'suspended');
   assert.equal(context.resumeCalls, 0);
+});
+
+test('preload staging warms fuse and intro before the idle batch', async () => {
+  const context = new FakeAudioContext({ decodeDurations: Array(11).fill(2) });
+  const timers = createFakeTimers();
+  const requestedPaths = [];
+  const engine = createAudioEngine({
+    clock: { now: () => 0 },
+    createContext: () => context,
+    fetchResource: async (path) => {
+      requestedPaths.push(path);
+      return successfulFetch();
+    },
+    timers,
+    logger: { warn() {} },
+  });
+  engine.schedulePreload();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.deepEqual(requestedPaths, [
+    '../shen-soundpack/wav/slime-fuse.wav',
+    '../shen-soundpack/wav/intro.wav',
+  ]);
+  assert.equal(context.resumeCalls, 0);
+  assert.deepEqual([...timers.idleCallbacks.values()].map(({ options }) => options), [{ timeout: 1500 }]);
 });
 
 test('env fallback is sticky and warned once', async () => {
@@ -122,6 +150,23 @@ test('env and tumble build and schedule their real node graphs', async () => {
   assert.deepEqual([...timers.intervals.values()].map(({ delay }) => delay).sort((a, b) => a - b), [66, 1000, 1000]);
   const tumbleSources = context.createdNodes.filter(({ kind, startCalls }) => kind === 'bufferSource' && startCalls[0]?.length === 3);
   assert.deepEqual(tumbleSources.map(({ startCalls }) => startCalls[0]), [[0.02, 8, 12], [10.02, 8, 12]]);
+});
+
+test('tumble panner captures the initial camera distance before playback', async () => {
+  const context = new FakeAudioContext({ decodeDurations: [20] });
+  const positionProvider = createStubPositionProvider();
+  const engine = createAudioEngine({
+    clock: { now: () => 0 },
+    positionProvider,
+    createContext: () => context,
+    fetchResource: successfulFetch,
+    timers: createFakeTimers(),
+    random: () => 0.5,
+    logger: { warn() {} },
+  });
+  positionProvider.setListenerPose({ position: { x: 0, y: 0, z: 10 } });
+  await engine.startTumble({ fadeInSeconds: 0 });
+  assert.equal(engine.getState().tumble.graph.referenceDistance, 4);
 });
 
 test('output timestamps map both directions and fallback to the injected clock', () => {

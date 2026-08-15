@@ -1,6 +1,19 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { CLIPS, getClip } from '../../src/audio/clips.js';
+import {
+  AUDIO_NUMERICS,
+  AUDIO_RAMP,
+  CLIPS,
+  CLIP_DEFAULTS,
+  COMPRESSOR_CONTROLS,
+  COMPRESSOR_DEFAULTS,
+  ENV_LOOP,
+  ONE_SHOT_POLICY,
+  PRELOAD_POLICY,
+  TUMBLE_LOOP,
+  TUMBLE_SPATIAL,
+  getClip,
+} from '../../src/audio/clips.js';
 
 const EXPECTED_CLIPS = Object.freeze({
   intro: { gain: 1, maxGain: 2.1809, usedInGame: true },
@@ -35,4 +48,20 @@ test('scheduled loops carry their fallback, crop, and overlap metadata', () => {
     kind: 'crop-overlap-crossfade', cropStartSeconds: 8, crossfadeSeconds: 2,
   });
   assert.equal(getClip('missing'), null);
+});
+
+test('every audio constant table carries a direct legacy anchor', () => {
+  const tables = [
+    AUDIO_NUMERICS,
+    AUDIO_RAMP,
+    CLIP_DEFAULTS,
+    COMPRESSOR_DEFAULTS,
+    ENV_LOOP,
+    ONE_SHOT_POLICY,
+    PRELOAD_POLICY,
+    TUMBLE_LOOP,
+    TUMBLE_SPATIAL,
+    ...COMPRESSOR_CONTROLS,
+  ];
+  for (const table of tables) assert.match(table.legacyAnchor, /^main\.js:\d+/);
 });

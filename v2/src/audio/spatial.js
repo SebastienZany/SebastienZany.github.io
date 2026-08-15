@@ -1,4 +1,4 @@
-import { TUMBLE_SPATIAL } from './clips.js';
+import { AUDIO_NUMERICS, TUMBLE_SPATIAL } from './clips.js';
 import { rampAudioParam } from './audio-param.js';
 
 const ORIGIN = Object.freeze({ x: 0, y: 0, z: 0 });
@@ -36,10 +36,10 @@ export function resolveAudioSourceWorldPos(snapshot = {}) {
 export function createStubPositionProvider() {
   let sourceSnapshot = { oats: [], targetWorldPos: { ...ORIGIN } };
   let listenerPose = {
-    position: { x: 0, y: 0, z: 4 },
+    position: { x: 0, y: 0, z: TUMBLE_SPATIAL.stubCameraZWorld },
     forward: { x: 0, y: 0, z: -1 },
     up: { x: 0, y: 1, z: 0 },
-    maximumDistance: 5.6 * 4,
+    maximumDistance: TUMBLE_SPATIAL.stubMaximumDistanceWorld,
   };
 
   return Object.freeze({
@@ -50,21 +50,28 @@ export function createStubPositionProvider() {
   });
 }
 
+export function initialTumbleReferenceDistance(positionProvider) {
+  const snapshot = positionProvider.getSourceSnapshot();
+  const listenerPose = positionProvider.getListenerPose();
+  const targetWorldPos = finiteVector(snapshot.targetWorldPos) ?? resolveAudioSourceWorldPos(snapshot);
+  return Math.max(AUDIO_NUMERICS.minimumDistanceWorld, distance(listenerPose.position, targetWorldPos));
+}
+
 export function createTumbleSpatialGraph(context, masterGain, {
   positionProvider,
   volume,
   random = Math.random,
+  referenceDistance: capturedReferenceDistance = initialTumbleReferenceDistance(positionProvider),
 } = {}) {
   const sourceSnapshot = positionProvider.getSourceSnapshot();
   const sourceWorldPos = resolveAudioSourceWorldPos(sourceSnapshot);
   const listenerPose = positionProvider.getListenerPose();
-  const referenceTarget = finiteVector(sourceSnapshot.targetWorldPos) ?? sourceWorldPos;
-  const referenceDistance = Math.max(0.001, distance(listenerPose.position, referenceTarget));
+  const referenceDistance = Math.max(AUDIO_NUMERICS.minimumDistanceWorld, capturedReferenceDistance);
   const fallbackFarDistance = referenceDistance * 2;
   const maximumDistance = Number.isFinite(listenerPose.maximumDistance)
     ? listenerPose.maximumDistance
     : fallbackFarDistance;
-  const farDistance = Math.max(referenceDistance + 0.001, maximumDistance || fallbackFarDistance);
+  const farDistance = Math.max(referenceDistance + AUDIO_NUMERICS.minimumDistanceWorld, maximumDistance || fallbackFarDistance);
 
   const graph = {
     panner: context.createPanner(),
@@ -98,9 +105,9 @@ export function createTumbleSpatialGraph(context, masterGain, {
     coneOuterAngle: TUMBLE_SPATIAL.coneOuterAngleDegrees,
   });
   graph.distanceFilter.type = 'lowpass';
-  const initialDistance = Math.max(0.001, distance(listenerPose.position, sourceWorldPos));
+  const initialDistance = Math.max(AUDIO_NUMERICS.minimumDistanceWorld, distance(listenerPose.position, sourceWorldPos));
   const initialTargets = distanceTargets(initialDistance, referenceDistance, farDistance);
-  setParamNow(graph.fadeGain.gain, 0.0001, context);
+  setParamNow(graph.fadeGain.gain, AUDIO_NUMERICS.silenceGain, context);
   setParamNow(graph.distanceFilter.frequency, initialTargets.lowpassHz, context);
   setParamNow(graph.distanceFilter.Q, TUMBLE_SPATIAL.lowpassQ, context);
   setParamNow(graph.volumeGain.gain, volume, context);
@@ -122,13 +129,13 @@ export function createTumbleSpatialGraph(context, masterGain, {
 
 export function makeTumbleReverbImpulse(context, random = Math.random) {
   const length = Math.max(1, Math.floor(context.sampleRate * TUMBLE_SPATIAL.reverbSeconds));
-  const impulse = context.createBuffer(2, length, context.sampleRate);
+  const impulse = context.createBuffer(TUMBLE_SPATIAL.reverbChannels, length, context.sampleRate);
   for (let channel = 0; channel < impulse.numberOfChannels; channel++) {
     const samples = impulse.getChannelData(channel);
     for (let sampleIndex = 0; sampleIndex < length; sampleIndex++) {
       const progress = sampleIndex / Math.max(1, length - 1);
       const decayEnvelope = (1 - progress) ** TUMBLE_SPATIAL.reverbDecay;
-      const earlyLift = 0.36 + 0.64 * Math.min(
+      const earlyLift = TUMBLE_SPATIAL.reverbEarlyBase + TUMBLE_SPATIAL.reverbEarlyRange * Math.min(
         1,
         sampleIndex / (context.sampleRate * TUMBLE_SPATIAL.reverbEarlyLiftSeconds),
       );
@@ -165,7 +172,7 @@ export function syncTumbleSpatialGraph(graph, context, clock, positionProvider, 
     graph.lastListenerUp = normalized(listenerPose.up);
   }
 
-  const sourceDistance = Math.max(0.001, distance(listenerPose.position, sourceWorldPos));
+  const sourceDistance = Math.max(AUDIO_NUMERICS.minimumDistanceWorld, distance(listenerPose.position, sourceWorldPos));
   const targets = distanceTargets(sourceDistance, graph.referenceDistance, graph.farDistance);
   const minimumVolumeDelta = Math.max(TUMBLE_SPATIAL.volumeEpsilonMinimum, volume * TUMBLE_SPATIAL.volumeEpsilonRatio);
   if (force || !Number.isFinite(graph.lastVolume) || Math.abs(volume - graph.lastVolume) >= minimumVolumeDelta) {

@@ -4,6 +4,7 @@ import { rampAudioParam, targetRampValue } from '../../src/audio/audio-param.js'
 import {
   createStubPositionProvider,
   createTumbleSpatialGraph,
+  distanceTargets,
   makeTumbleReverbImpulse,
   resolveAudioSourceWorldPos,
   syncTumbleSpatialGraph,
@@ -116,4 +117,10 @@ test('procedural reverb is stereo with the anchored duration, decay, and early l
   assert.ok(Math.abs(impulse.getChannelData(0)[0] - 0.0396) < 1e-7);
   assert.equal(impulse.getChannelData(0).at(-1), 0);
   assert.deepEqual(impulse.getChannelData(0), impulse.getChannelData(1));
+});
+
+test('distance response smoothsteps from open and dry to muffled and wet', () => {
+  assert.deepEqual(distanceTargets(4, 4, 20), { progress: 0, lowpassHz: 18000, wet: 0 });
+  assert.deepEqual(distanceTargets(12, 4, 20), { progress: 0.5, lowpassHz: 9450, wet: 0.29 });
+  assert.deepEqual(distanceTargets(20, 4, 20), { progress: 1, lowpassHz: 900, wet: 0.58 });
 });

@@ -1,6 +1,4 @@
-import { CLIP_DEFAULTS, ENV_LOOP, TUMBLE_LOOP } from './clips.js';
-
-const MINIMUM_SEGMENT_SECONDS = 0.001;
+import { AUDIO_NUMERICS, CLIP_DEFAULTS, ENV_LOOP, TUMBLE_LOOP } from './clips.js';
 
 /**
  * Plans ambience copies through the current lookahead horizon.
@@ -13,9 +11,9 @@ export function planEnvSchedule(clock, clipDuration, params = {}) {
   const crossfadeSeconds = clamp(
     params.crossfadeSeconds ?? ENV_LOOP.crossfadeSeconds,
     0,
-    Math.min(CLIP_DEFAULTS.maximumFadeSeconds, durationSeconds - MINIMUM_SEGMENT_SECONDS),
+    Math.min(CLIP_DEFAULTS.maximumFadeSeconds, durationSeconds - AUDIO_NUMERICS.minimumSegmentSeconds),
   );
-  const intervalSeconds = Math.max(MINIMUM_SEGMENT_SECONDS, durationSeconds - crossfadeSeconds);
+  const intervalSeconds = Math.max(AUDIO_NUMERICS.minimumSegmentSeconds, durationSeconds - crossfadeSeconds);
   const horizonSeconds = params.untilSeconds ?? nowSeconds + (params.lookaheadSeconds ?? ENV_LOOP.lookaheadSeconds);
   let nextStartSeconds = params.nextStartSeconds ?? nowSeconds + (params.startDelaySeconds ?? ENV_LOOP.startDelaySeconds);
   const sources = [];
@@ -33,7 +31,7 @@ export function planEnvSchedule(clock, clipDuration, params = {}) {
         ? [
           { type: 'set', timeSeconds: nextStartSeconds, value: 1 },
           { type: 'set', timeSeconds: fadeStartSeconds, value: 1 },
-          { type: 'linear', timeSeconds: stopSeconds, value: 0.0001 },
+          { type: 'linear', timeSeconds: stopSeconds, value: AUDIO_NUMERICS.silenceGain },
         ]
         : [{ type: 'set', timeSeconds: nextStartSeconds, value: 1 }],
     });
@@ -51,16 +49,16 @@ export function planEnvSchedule(clock, clipDuration, params = {}) {
 export function planTumbleSchedule(clock, clipDuration, params = {}) {
   const durationSeconds = requireDuration(clipDuration, 'slime tumble');
   const requestedCropStartSeconds = Number(params.cropStartSeconds ?? TUMBLE_LOOP.cropStartSeconds);
-  if (!Number.isFinite(requestedCropStartSeconds) || durationSeconds <= requestedCropStartSeconds + MINIMUM_SEGMENT_SECONDS) {
+  if (!Number.isFinite(requestedCropStartSeconds) || durationSeconds <= requestedCropStartSeconds + AUDIO_NUMERICS.minimumSegmentSeconds) {
     throw new RangeError('slime tumble clip must contain audio after its crop');
   }
   const cropStartSeconds = clamp(
     requestedCropStartSeconds,
     0,
-    Math.max(0, durationSeconds - MINIMUM_SEGMENT_SECONDS),
+    Math.max(0, durationSeconds - AUDIO_NUMERICS.minimumSegmentSeconds),
   );
   const loopDurationSeconds = durationSeconds - cropStartSeconds;
-  if (loopDurationSeconds < MINIMUM_SEGMENT_SECONDS) {
+  if (loopDurationSeconds < AUDIO_NUMERICS.minimumSegmentSeconds) {
     throw new RangeError('slime tumble clip must contain audio after its crop');
   }
 
@@ -70,7 +68,7 @@ export function planTumbleSchedule(clock, clipDuration, params = {}) {
     0,
     Math.min(CLIP_DEFAULTS.maximumFadeSeconds, loopDurationSeconds * 0.5),
   );
-  const intervalSeconds = Math.max(MINIMUM_SEGMENT_SECONDS, loopDurationSeconds - crossfadeSeconds);
+  const intervalSeconds = Math.max(AUDIO_NUMERICS.minimumSegmentSeconds, loopDurationSeconds - crossfadeSeconds);
   const horizonSeconds = params.untilSeconds ?? nowSeconds + (params.lookaheadSeconds ?? TUMBLE_LOOP.lookaheadSeconds);
   let nextStartSeconds = params.nextStartSeconds ?? nowSeconds + (params.startDelaySeconds ?? TUMBLE_LOOP.startDelaySeconds);
   const sources = [];
@@ -85,10 +83,10 @@ export function planTumbleSchedule(clock, clipDuration, params = {}) {
       nodeStopSeconds: stopSeconds + TUMBLE_LOOP.sourceStopTailSeconds,
       gainAutomation: crossfadeSeconds > 0
         ? [
-          { type: 'set', timeSeconds: nextStartSeconds, value: 0.0001 },
+          { type: 'set', timeSeconds: nextStartSeconds, value: AUDIO_NUMERICS.silenceGain },
           { type: 'linear', timeSeconds: nextStartSeconds + crossfadeSeconds, value: 1 },
           { type: 'set', timeSeconds: stopSeconds - crossfadeSeconds, value: 1 },
-          { type: 'linear', timeSeconds: stopSeconds, value: 0.0001 },
+          { type: 'linear', timeSeconds: stopSeconds, value: AUDIO_NUMERICS.silenceGain },
         ]
         : [{ type: 'set', timeSeconds: nextStartSeconds, value: 1 }],
     });

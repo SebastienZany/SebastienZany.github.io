@@ -7,6 +7,7 @@ const AUDIO_MODULES = [
   'audio-param.js',
   'buffer-store.js',
   'clips.js',
+  'clip-settings.js',
   'engine.js',
   'one-shots.js',
   'platform.js',

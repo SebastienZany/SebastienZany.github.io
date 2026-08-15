@@ -10,6 +10,13 @@ export const CLIP_DEFAULTS = Object.freeze({
   legacyAnchor: 'main.js:216-221',
 });
 
+export const AUDIO_NUMERICS = Object.freeze({
+  silenceGain: 0.0001,
+  minimumSegmentSeconds: 0.001,
+  minimumDistanceWorld: 0.001,
+  legacyAnchor: 'main.js:9026-9057,9132-9147,9271-9285,9392-9410',
+});
+
 export const ENV_LOOP = Object.freeze({
   crossfadeSeconds: 2.5,
   lookaheadSeconds: 12,
@@ -42,7 +49,10 @@ export const TUMBLE_SPATIAL = Object.freeze({
   reverbDecay: 3.2,
   reverbMaximumWet: 0.58,
   reverbEarlyLiftSeconds: 0.035,
+  reverbEarlyBase: 0.36,
+  reverbEarlyRange: 0.64,
   reverbAmplitude: 0.22,
+  reverbChannels: 2,
   spatialSmoothSeconds: 0.045,
   syncIntervalMilliseconds: 66,
   positionEpsilonWorld: 0.012 * 4,
@@ -60,6 +70,8 @@ export const TUMBLE_SPATIAL = Object.freeze({
   lowpassEpsilonHz: 8,
   wetEpsilonMinimum: 0.0005,
   wetEpsilonRatio: 0.002,
+  stubCameraZWorld: 4,
+  stubMaximumDistanceWorld: 5.6 * 4,
   legacyAnchor: 'main.js:158,199-215,8545-8721,9059-9118',
 });
 
@@ -86,11 +98,11 @@ export const COMPRESSOR_DEFAULTS = Object.freeze({
 });
 
 export const COMPRESSOR_CONTROLS = Object.freeze([
-  Object.freeze({ key: 'threshold', min: -100, max: 0, step: 1, suffix: 'dB', digits: 0 }),
-  Object.freeze({ key: 'knee', min: 0, max: 40, step: 1, suffix: 'dB', digits: 0 }),
-  Object.freeze({ key: 'ratio', min: 1, max: 20, step: 0.1, suffix: ':1', digits: 1 }),
-  Object.freeze({ key: 'attack', min: 0, max: 1, step: 0.001, suffix: 's', digits: 3 }),
-  Object.freeze({ key: 'release', min: 0, max: 1, step: 0.01, suffix: 's', digits: 2 }),
+  Object.freeze({ key: 'threshold', label: 'Threshold', min: -100, max: 0, step: 1, suffix: 'dB', digits: 0, legacyAnchor: 'main.js:227' }),
+  Object.freeze({ key: 'knee', label: 'Knee', min: 0, max: 40, step: 1, suffix: 'dB', digits: 0, legacyAnchor: 'main.js:228' }),
+  Object.freeze({ key: 'ratio', label: 'Ratio', min: 1, max: 20, step: 0.1, suffix: ':1', digits: 1, legacyAnchor: 'main.js:229' }),
+  Object.freeze({ key: 'attack', label: 'Attack', min: 0, max: 1, step: 0.001, suffix: 's', digits: 3, legacyAnchor: 'main.js:230' }),
+  Object.freeze({ key: 'release', label: 'Release', min: 0, max: 1, step: 0.01, suffix: 's', digits: 2, legacyAnchor: 'main.js:231' }),
 ]);
 
 const SOUND_PATH = '../shen-soundpack/wav/';

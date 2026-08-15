@@ -1,4 +1,4 @@
-import { ONE_SHOT_POLICY, getClip } from './clips.js';
+import { AUDIO_NUMERICS, ONE_SHOT_POLICY, getClip } from './clips.js';
 import { rampAudioParam } from './audio-param.js';
 import { createVoicePool } from './voice-pool.js';
 
@@ -35,10 +35,10 @@ export function createOneShotPlayer({
       : context.currentTime;
     const settings = getClipSettings(clip.id);
     const shouldLoop = Boolean(audition && settings.loop);
-    const fadeInSeconds = Math.min(settings.fadeInSeconds, Math.max(0, buffer.duration - 0.001));
+    const fadeInSeconds = Math.min(settings.fadeInSeconds, Math.max(0, buffer.duration - AUDIO_NUMERICS.minimumSegmentSeconds));
     const fadeOutSeconds = shouldLoop
       ? 0
-      : Math.min(settings.fadeOutSeconds, Math.max(0, buffer.duration - fadeInSeconds - 0.001));
+      : Math.min(settings.fadeOutSeconds, Math.max(0, buffer.duration - fadeInSeconds - AUDIO_NUMERICS.minimumSegmentSeconds));
     const source = context.createBufferSource();
     const envelopeGain = context.createGain();
     const volumeGain = context.createGain();
@@ -54,12 +54,12 @@ export function createOneShotPlayer({
     envelopeGain.connect(volumeGain);
     volumeGain.connect(getMasterGain());
     volumeGain.gain.setValueAtTime(settings.volume, startSeconds);
-    envelopeGain.gain.setValueAtTime(fadeInSeconds > 0 ? 0.0001 : 1, startSeconds);
+    envelopeGain.gain.setValueAtTime(fadeInSeconds > 0 ? AUDIO_NUMERICS.silenceGain : 1, startSeconds);
     if (fadeInSeconds > 0) envelopeGain.gain.linearRampToValueAtTime(1, startSeconds + fadeInSeconds);
     if (fadeOutSeconds > 0) {
       const fadeStartSeconds = startSeconds + Math.max(fadeInSeconds, buffer.duration - fadeOutSeconds);
       envelopeGain.gain.setValueAtTime(1, fadeStartSeconds);
-      envelopeGain.gain.linearRampToValueAtTime(0.0001, startSeconds + buffer.duration);
+      envelopeGain.gain.linearRampToValueAtTime(AUDIO_NUMERICS.silenceGain, startSeconds + buffer.duration);
     }
     source.addEventListener('ended', () => remove(record), { once: true });
     voicePool.admit(clip.id, record, clip.maxVoices ?? ONE_SHOT_POLICY.maximumVoicesPerClip);
@@ -75,8 +75,8 @@ export function createOneShotPlayer({
     const envelopeParam = record.envelopeGain?.gain ?? record.volumeGain?.gain;
     if (envelopeParam) {
       envelopeParam.cancelScheduledValues(nowSeconds);
-      envelopeParam.setValueAtTime(fadeSeconds > 0 ? envelopeParam.value : 0.0001, nowSeconds);
-      if (fadeSeconds > 0) envelopeParam.linearRampToValueAtTime(0.0001, nowSeconds + fadeSeconds);
+      envelopeParam.setValueAtTime(fadeSeconds > 0 ? envelopeParam.value : AUDIO_NUMERICS.silenceGain, nowSeconds);
+      if (fadeSeconds > 0) envelopeParam.linearRampToValueAtTime(AUDIO_NUMERICS.silenceGain, nowSeconds + fadeSeconds);
     }
     try {
       record.source.stop(Math.max(nowSeconds, record.startedAtSeconds ?? nowSeconds) + fadeSeconds + ONE_SHOT_POLICY.sourceStopTailSeconds);
