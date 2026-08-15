@@ -37,10 +37,11 @@ fn scoreAt(uvPos: vec2<f32>, sampleUvPos: vec2<f32>, reserve: f32) -> f32 {
   let foodSignal = 1.0 - exp(-1.2 * food); // main.js:3159
   let reproThreshold = parameterFloat(${PARAM_SLOT_MOVEMENT}u, 3u);
   let appetite = 1.0 - smoothstep(reproThreshold * 0.55, reproThreshold * 1.05, reserve);
-  let target = max(parameterFloat(${PARAM_SLOT_CROWD}u, 2u), 0.001);
-  let densityRatio = max(crowd / target, 0.0);
+  // "target" is a WGSL reserved keyword (prototype-assessment gotcha); densityTarget is the param name anyway.
+  let densityTarget = max(parameterFloat(${PARAM_SLOT_CROWD}u, 2u), 0.001);
+  let densityRatio = max(crowd / densityTarget, 0.0);
   let occupiedEnough = smoothstep(0.0, 1.0, densityRatio);
-  let crowdRangeMax = max(1.0001, min(3.0, 1.0 / target));
+  let crowdRangeMax = max(1.0001, min(3.0, 1.0 / densityTarget));
   let tooCrowded = smoothstep(1.0, crowdRangeMax, densityRatio);
   let crowdCurve = max(parameterFloat(${PARAM_SLOT_CROWD}u, 1u), 1.0);
   let superlinearPenalty = tooCrowded * pow(max(densityRatio, 1.0), crowdCurve - 1.0);
