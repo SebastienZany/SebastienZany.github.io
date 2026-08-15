@@ -237,4 +237,3 @@ function element(document, tagName, className = '', attributes = {}) {
   for (const [name, value] of Object.entries(attributes)) node.setAttribute(name, value);
   return node;
 }
-

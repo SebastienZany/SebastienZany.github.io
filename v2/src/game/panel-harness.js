@@ -163,4 +163,3 @@ const api = {
 window.__v2 = Object.freeze({ ...(window.__v2 ?? {}), panel: api });
 panelView.update();
 requestAnimationFrame(animate);
-

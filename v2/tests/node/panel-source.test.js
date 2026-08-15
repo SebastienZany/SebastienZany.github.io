@@ -26,4 +26,3 @@ test('panel harness is standalone DOM with its own dark-glass stylesheet', async
   assert.match(css, /min-width: 64px/);
   assert.match(css, /min-height: 64px/);
 });
-

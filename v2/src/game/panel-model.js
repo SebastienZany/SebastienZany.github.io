@@ -73,4 +73,3 @@ export function createPanelModel({ values = createParams(), onPatch = () => {} }
 function findMatchingPreset(presets, params) {
   return presets.find(({ values }) => Object.entries(values).every(([name, value]) => params[name] === value))?.id;
 }
-

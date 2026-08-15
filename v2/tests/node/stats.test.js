@@ -61,4 +61,3 @@ test('stats requests expose opt-in and load-suppression flags to the provider', 
   assert.equal(requests[2].readbackEnabled, false);
   assert.equal(requests[2].readbackPermitted, false);
 });
-

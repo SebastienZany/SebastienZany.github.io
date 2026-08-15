@@ -69,4 +69,3 @@ function validateSample({ timeMs, agentCount } = {}) {
   }
   return Object.freeze({ timeMs, agentCount });
 }
-

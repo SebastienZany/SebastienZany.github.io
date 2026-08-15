@@ -73,4 +73,3 @@ export function createTripleTapStateMachine({ clock, onTripleTap, windowMs = 120
     },
   });
 }
-
