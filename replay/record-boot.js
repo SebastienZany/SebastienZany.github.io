@@ -12,8 +12,14 @@
 import { installClock, onFrame, clock } from './clock.js';
 import { createRecorder } from './recorder.js';
 import { installPanel } from './panel.js';
+import { pinViewportBeforeBoot } from './viewport.js';
 
 installClock();
+// Before main.js: boot raycasts through the camera to place the initial oat, and
+// a collapsed CSS box gives aspect 0 and a singular projection inverse, so the
+// ray misses and the food lands via a fallback. See viewport.js. Live play in a
+// visible window already has a real box; this only rescues headless/hidden boots.
+if (!document.getElementById('sim')?.clientWidth) await pinViewportBeforeBoot(1280, 720);
 await import('../main.js');
 
 const api = () => window.__cuttle;

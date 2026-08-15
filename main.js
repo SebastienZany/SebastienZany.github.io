@@ -7973,6 +7973,11 @@ let surfaceCoverageBuildDiagnostics = {
   newlyCoveredTexels: 0,
 };
 let lastFrameTime = performance.now();
+// The dt the last frame actually advanced the simulation by, in 60Hz-frame
+// units. Exposed for session recording: one recorded tick is one live frame, and
+// live frames carry rawDt ~2.0 at 30fps, so a replay that assumes 1.0 simulates
+// half the session. Read-only; frame() is the only writer.
+let lastRawDt = 1;
 let fpsSmoothed = 60;
 let lastStatsRead = 0;
 let statsReadbackCooldownUntil = performance.now() + STATS_READBACK_RESET_COOLDOWN_MS;
@@ -15808,6 +15813,18 @@ async function onLoad(gltf) {
     // It has to be part of any snapshot or recording header.
     getAgentAllocationFrame: () => agentAllocationFrame,
     setAgentAllocationFrame: (v) => { agentAllocationFrame = (v >>> 0); },
+    // The simulation is NOT step-size invariant: simulate() applies field decay
+    // and diffusion once per CALL while metabolism scales with dt, so replaying a
+    // recorded frame at the wrong dt changes the physics, not just the pacing.
+    // A recording therefore has to carry the dt of every frame it captured.
+    getFrameTiming: () => ({ rawDt: lastRawDt, clamp: FRAME_DT_CLAMP }),
+    // Resolved pause state. A paused frame still advances oat decay, seeding and
+    // the display chain and still writes oatRT/densityRT — it only skips
+    // simulate() — so this is "do not advance the field", not "freeze the world".
+    // Used by the offline renderer to redraw at a corrected canvas size without
+    // applying another diffuseField() decay to the field.
+    getSimulateEnabled: () => !paused,
+    setSimulateEnabled: (v) => { paused = !v; },
     // Determinism probe: hash the authoritative simulation state. Covers more
     // than fieldRT alone, because a divergence can exist in the agent buffer a
     // while before it shows up in the field.
@@ -18700,6 +18717,7 @@ function ensureWireframeOverlay() {
 function frame(now) {
   const rawDt = Math.min((now - lastFrameTime) / 16.6667, FRAME_DT_CLAMP);
   lastFrameTime = now;
+  lastRawDt = rawDt;
 
   updateStartScreenUi(now);
   updateIntroSequence(now);

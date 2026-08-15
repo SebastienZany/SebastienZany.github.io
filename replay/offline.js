@@ -14,6 +14,7 @@ import { createMp4Encoder, bitrateFor, pickAvcCodec } from './encode.js';
 import { createRecorder, createPlayer } from './recorder.js';
 import { createAudioRecorder, renderSessionAudio, installAudioProbe, describeAudioEvents } from './audio.js';
 import { createOverlayCompositor } from './overlays.js';
+import { pinViewportBeforeBoot } from './viewport.js';
 
 const qs = new URLSearchParams(location.search);
 const log = (...a) => { console.log('[replay]', ...a); };
@@ -22,6 +23,16 @@ installClock();
 // Must precede main.js: the probe tags decoded buffers, and
 // scheduleSoundPackPreload decodes the whole pack during boot.
 if (qs.get('audio') !== '0') installAudioProbe();
+
+// Must ALSO precede main.js: boot places the initial oat by raycasting through
+// the camera, and a collapsed CSS box (hidden tab) gives aspect 0 and a singular
+// projection inverse, so the ray misses and the food is placed by a fallback
+// somewhere else. See viewport.js.
+const pinned = await pinViewportBeforeBoot(
+  qs.has('w') ? Number(qs.get('w')) : 1280,
+  qs.has('h') ? Number(qs.get('h')) : 720,
+);
+log('viewport pinned before boot', pinned);
 
 // Boot the game with the shim already in place.
 await import('../main.js');
@@ -333,6 +344,13 @@ async function liveRun({ seconds = 90, sampleEvery = 10, skipIntro = true, offli
   const sample = (elapsed) => {
     const o = c.oats[0] ?? null;
     const f = readFieldNearOat();
+    // Mouse repel is sticky: mouseRepelState stays active until a pointerleave
+    // or a failed raycast clears it, with no timeout. A cursor left resting over
+    // the colony therefore pushes agents off their food for the whole run, and
+    // the signature — population falling WHILE field food rises — is exactly the
+    // signature of ordinary starvation. Always record it so the two can never be
+    // confused again.
+    const m = c.getMouseRepelState ? c.getMouseRepelState() : null;
     curve.push({
       t: +elapsed.toFixed(1),
       frames,
@@ -343,6 +361,14 @@ async function liveRun({ seconds = 90, sampleEvery = 10, skipIntro = true, offli
       now: Math.round(performance.now()),
       fieldSum: f?.sum ?? null,
       fieldPeak: f?.peak ?? null,
+      repelActive: m ? !!m.active : null,
+      repelDistFromOat: (m?.active && m.uv && o?.uv)
+        ? +Math.hypot(m.uv.x - o.uv.x, m.uv.y - o.uv.y).toFixed(4) : null,
+      // The initial oat is NOT stable across boots: the viewport-centre raycast
+      // misses and falls back to updateInitialOatFromCameraRotationCenter, so
+      // its UV moves. Recorded here because it makes cross-boot comparisons
+      // invalid unless it is checked.
+      oatUv: o?.uv ? [+o.uv.x.toFixed(4), +o.uv.y.toFixed(4)] : null,
       oatPower: o ? +Number(o.power).toFixed(4) : null,
       decayStartedAt: o?.foodDecayStartedAt != null ? Math.round(o.foodDecayStartedAt) : null,
       decayElapsedMs: o?.foodDecayStartedAt != null ? Math.round(performance.now() - o.foodDecayStartedAt) : null,
@@ -686,14 +712,30 @@ async function replayToVideo({
 
   const total = recording.totalTicks;
 
-  // exact rational ticksPerFrame = simHz / fps * speed, kept integral so the
-  // schedule cannot drift over thousands of frames
-  const SCALE = 1000;
-  const p = Math.round(recording.simHz * speed * SCALE);
-  const q = Math.round(fps * SCALE);
-  if (p <= 0) throw new Error(`bad schedule: simHz=${recording.simHz} fps=${fps} speed=${speed}`);
-  const frames = Math.ceil((total * q) / p);
-  const targetTick = (i) => Math.floor((i * p) / q);
+  // Schedule on SIMULATED TIME, not tick count.
+  //
+  // One recorded tick is one live frame, and a live frame carries whatever dt
+  // the frame rate produced — rawDt ~2.0 at 30fps, clamped at FRAME_DT_CLAMP.
+  // The old schedule stepped every tick at a flat 1.0, which both halved the
+  // simulated time of a 30fps session and changed its physics, since simulate()
+  // applies field decay and diffusion once per CALL while metabolism scales with
+  // dt. So walk the recorded dt stream and give each tick back the dt it had.
+  //
+  // Cumulative rather than per-frame arithmetic so the schedule cannot drift
+  // over thousands of frames.
+  const TICK_MS = 1000 / 60;                    // one dt unit, in ms
+  const cumMs = new Float64Array(total + 1);    // simulated ms before tick i
+  for (let i = 0; i < total; i++) cumMs[i + 1] = cumMs[i] + player.dtAt(i) * TICK_MS;
+  const simDurationMs = cumMs[total];
+  const outDurationMs = simDurationMs / speed;
+  const frames = Math.max(1, Math.ceil((outDurationMs / 1000) * fps));
+  // Simulated-time cutoff for output frame i, in the recording's own timebase.
+  const targetMs = (i) => Math.min(simDurationMs, (i * 1000 * speed) / fps);
+  log(
+    `schedule: ${total} ticks = ${(simDurationMs / 1000).toFixed(2)}s simulated ` +
+    `(mean dt ${(simDurationMs / TICK_MS / Math.max(1, total)).toFixed(3)}), ` +
+    `${frames} frames @${fps}fps${player.hasDtStream ? '' : ' — NO dt stream, assuming 1.0'}`,
+  );
 
   const canvas = document.getElementById('sim');
   setRenderSize(width, height);
@@ -733,18 +775,26 @@ async function replayToVideo({
   try {
     for (let f = 0; f < frames; f++) {
       const t0 = clock.realNow();
-      // advance to this frame's target tick, applying EVERY intervening tick.
-      // may be zero ticks (slow motion) or several (time-lapse).
-      const target = Math.min(total, targetTick(f + 1));
-      while (cursor < target) {
+      // Advance until this frame's simulated-time cutoff, applying EVERY
+      // intervening tick at the dt it was recorded with. May consume zero ticks
+      // (slow motion) or several (time-lapse, or a stretch of slow live frames).
+      const cutoff = targetMs(f + 1);
+      while (cursor < total && cumMs[cursor + 1] <= cutoff) {
         player.applyTick(cursor);
         arec?.sample(cursor);      // absolute tick, not an index within the frame
-        step(1000 / 60);
+        step(player.dtAt(cursor) * TICK_MS);
         cursor++;
       }
       if (assertRenderSize(width, height)) {
         resizeCorrections++;
-        step(1000 / 60);   // redraw at the corrected size before capturing
+        // Redraw at the corrected size WITHOUT advancing the field. A plain
+        // extra step would run another simulate(), and diffuseField() applies
+        // params.fieldDecay once per call regardless of dt — so the old
+        // full-tick redraw silently evaporated food every time the canvas moved.
+        const c = api();
+        const wasEnabled = c.getSimulateEnabled ? c.getSimulateEnabled() : true;
+        c.setSimulateEnabled?.(false);
+        try { step(0); } finally { c.setSimulateEnabled?.(wasEnabled); }
       }
       // Same JS task as the draw, for the reason encode.js documents.
       overlays?.composite(canvas, clock.virtualMs);
@@ -767,6 +817,10 @@ async function replayToVideo({
         totalTicks: cursor,
         simHz: recording.simHz,
         speed,                            // cues must follow the same schedule as frames
+        // Ticks are not uniform in time — each carries the dt of the live frame
+        // it came from — so a cue's media time is its cumulative simulated time,
+        // not tick/simHz. Same schedule the video frames use.
+        tickToSec: (tick) => cumMs[Math.min(Math.max(0, tick), total)] / 1000,
         sampleRate: 48000,
         durationSeconds: frames / fps,   // match the video exactly
       });
@@ -792,8 +846,11 @@ async function replayToVideo({
   const warm = timings.slice(20);
   return {
     source: file, frames, width, height, fps, speed,
-    ticksPerFrame: +(p / q).toFixed(4),
     recordedTicks: total, simulatedTicks: cursor,
+    // What the session actually simulated, vs what a flat-1.0 replay would have.
+    simulatedSeconds: +(simDurationMs / 1000).toFixed(2),
+    meanRawDt: +(simDurationMs / TICK_MS / Math.max(1, total)).toFixed(3),
+    usedDtStream: player.hasDtStream,
     bytes: buf.byteLength,
     meanMsPerFrame: +(warm.reduce((a, b) => a + b, 0) / Math.max(1, warm.length)).toFixed(2),
     totalSeconds: +(timings.reduce((a, b) => a + b, 0) / 1000).toFixed(1),

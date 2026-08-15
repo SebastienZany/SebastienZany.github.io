@@ -34,6 +34,8 @@ export function createRecorder({ api, clock, buildStamp = null }) {
     header: null,
     camera: [],        // [tick, x, y, z, tx, ty, tz, fov] — change-gated
     repel: [],         // [tick, active, u, v, chartId] — change-gated
+    dtStream: [],      // [tick, rawDt] — change-gated; see sample()
+    lastDtKey: '',
     events: [],        // [{ tick, phase, type, ...payload }]
     lastCamKey: '',
     lastRepelKey: '',
@@ -52,7 +54,11 @@ export function createRecorder({ api, clock, buildStamp = null }) {
       buildStamp,
       createdAt: new Date().toISOString(),
       simHz: 60,
-      dt: 1.0,                       // main.js normalises rawDt to 60fps frames
+      // Nominal only. The authoritative per-frame dt is the change-gated `dt`
+      // stream; this stays for older readers and for recordings made before the
+      // stream existed, which really did assume a flat 1.0.
+      dt: 1.0,
+      frameDtClamp: (a.getFrameTiming ? a.getFrameTiming().clamp : null),
       // environment/profile — a replay must boot into the same one
       env: {
         fieldSize: a.FIELD_SIZE ?? null,
@@ -92,6 +98,22 @@ export function createRecorder({ api, clock, buildStamp = null }) {
     if (camKey !== state.lastCamKey) {
       state.camera.push([state.tick, ...cam]);
       state.lastCamKey = camKey;
+    }
+
+    // Per-frame dt. One recorded tick is one LIVE frame, and a live frame at
+    // 30fps advances the simulation by rawDt ~2.0, not 1.0. The simulation is
+    // not step-size invariant either — simulate() applies field decay and
+    // diffusion once per call while metabolism scales with dt — so replaying at
+    // a fixed 1.0 both halves the simulated time and changes the physics.
+    // Quantised to 3dp: the value is already a ratio near 1-2.2, and the stream
+    // is change-gated, so a steady frame rate costs almost nothing.
+    const t = a.getFrameTiming ? a.getFrameTiming() : null;
+    if (t && Number.isFinite(t.rawDt)) {
+      const dtKey = q(t.rawDt, 3);
+      if (String(dtKey) !== state.lastDtKey) {
+        state.dtStream.push([state.tick, dtKey]);
+        state.lastDtKey = String(dtKey);
+      }
     }
 
     const m = a.getMouseRepelState ? a.getMouseRepelState() : null;
@@ -179,9 +201,11 @@ export function createRecorder({ api, clock, buildStamp = null }) {
       state.tick = 0;
       state.camera = [];
       state.repel = [];
+      state.dtStream = [];
       state.events = [];
       state.lastCamKey = '';
       state.lastRepelKey = '';
+      state.lastDtKey = '';
       state.header = captureHeader();
       hook();
       return state.header;
@@ -208,6 +232,7 @@ export function createRecorder({ api, clock, buildStamp = null }) {
         liveFps: state.wallMs ? +((state.tick / (state.wallMs / 1000)).toFixed(1)) : null,
         camera: state.camera,
         repel: state.repel,
+        dtStream: state.dtStream,
         events: state.events,
       };
     },
@@ -219,6 +244,7 @@ export function createRecorder({ api, clock, buildStamp = null }) {
         wallSeconds: +(elapsed / 1000).toFixed(1),
         liveFps: elapsed > 0 ? +((state.tick / (elapsed / 1000)).toFixed(1)) : null,
         cameraKeys: state.camera.length,
+        dtKeys: state.dtStream.length,
         repelKeys: state.repel.length,
         events: state.events.length,
       };
@@ -241,11 +267,30 @@ export function createPlayer({ api, recording }) {
     evAt.get(e.tick).push(e);
   }
 
+  // Per-frame dt, expanded from the change-gated stream into a dense lookup.
+  // Recordings made before the stream existed fall back to the flat 1.0 they
+  // were actually replayed at, so old files still play — just as inaccurately as
+  // they always did, rather than differently.
+  const dtOf = new Float64Array(Math.max(1, recording.totalTicks ?? 0));
+  {
+    const rows = recording.dtStream ?? [];
+    let cur = 1;
+    let ri = 0;
+    for (let t = 0; t < dtOf.length; t++) {
+      while (ri < rows.length && rows[ri][0] <= t) { cur = rows[ri][1]; ri++; }
+      dtOf[t] = Number.isFinite(cur) && cur > 0 ? cur : 1;
+    }
+  }
+
   let lastCam = null;
   const mismatches = [];
 
   return {
     get mismatches() { return mismatches; },
+
+    /** The dt (in 60Hz-frame units) that the live session's frame `tick` used. */
+    dtAt(tick) { return dtOf[Math.min(Math.max(0, tick), dtOf.length - 1)] ?? 1; },
+    get hasDtStream() { return !!recording.dtStream?.length; },
 
     /** Restore the world to the recording's opening state. */
     begin() {

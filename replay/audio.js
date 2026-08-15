@@ -893,11 +893,11 @@ function makeTumbleReverbImpulse(ctx, seed = 0x5EED1E) {
  * before a source starts would otherwise ramp from the wrong origin.
  */
 function applySpatialAutomation({
-  spatial, simHz, speed, T, startSec, stopSec, pan, distance, lowpass, wet,
+  spatial, simHz, speed, T, startSec, stopSec, pan, distance, lowpass, wet, tickSec = null,
 }) {
   if (!Array.isArray(spatial) || spatial.length === 0) return 0;
 
-  const toSec = (tick) => tick / (simHz * speed);
+  const toSec = tickSec ?? ((tick) => tick / (simHz * speed));
   let applied = 0;
   let anchored = false;
 
@@ -971,6 +971,11 @@ export async function renderSessionAudio({
   onWarning = null,
   speed = 1,
   spatial = [],
+  // tick -> SECONDS OF MEDIA TIME, before the speed divide. Supplied by the
+  // caller because ticks are not uniform in time: one recorded tick is one live
+  // frame, and live frames carry whatever dt the frame rate produced. Defaults
+  // to the flat tick/simHz that recordings without a dt stream really used.
+  tickToSec = null,
 } = {}) {
   const warn = (msg, extra) => {
     if (onWarning) onWarning(msg, extra);
@@ -981,7 +986,7 @@ export async function renderSessionAudio({
   // where a sound sits on the timeline.
   const mediaDuration = Number.isFinite(durationSeconds) && durationSeconds > 0
     ? durationSeconds
-    : Math.max(1 / simHz, totalTicks / simHz);
+    : Math.max(1 / simHz, typeof tickToSec === 'function' ? tickToSec(totalTicks) : totalTicks / simHz);
 
   const frames = Math.max(1, Math.ceil(mediaDuration * sampleRate));
   const ctx = new OfflineAudioContext({ numberOfChannels: channels, length: frames, sampleRate });
@@ -992,7 +997,10 @@ export async function renderSessionAudio({
   // cues placed at tick/simHz would all land twice as late and fall past the
   // end. Pitch is deliberately NOT time-scaled — correct for music, and the
   // loops would otherwise chirp.
-  const cues = events.map((e) => ({ ...e, mediaSec: (e.tick / (simHz * speed)) + ((Number(e.leadMs) || 0) / 1000) }))
+  const tickSec = typeof tickToSec === 'function'
+    ? (tick) => tickToSec(tick) / speed
+    : (tick) => tick / (simHz * speed);
+  const cues = events.map((e) => ({ ...e, mediaSec: tickSec(e.tick) + ((Number(e.leadMs) || 0) / 1000) }))
     .sort((a, b) => a.mediaSec - b.mediaSec);
 
   const needed = new Set();
@@ -1253,7 +1261,7 @@ export async function renderSessionAudio({
       else fadeGain.gain.setValueAtTime(1, T(startAt));
 
       report.spatialPoints = (report.spatialPoints || 0) + applySpatialAutomation({
-        spatial, simHz, speed, T,
+        spatial, simHz, speed, T, tickSec,
         startSec: startAt,
         stopSec: Number.isFinite(ev.stopSec) ? ev.stopSec : mediaDuration,
         pan: panner.pan,
