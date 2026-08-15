@@ -6,6 +6,14 @@
 
 ## Open
 
+- **[F2] Material look-dev page live** (SHA-bound 67e9b0a + gate fixes): open `/v2/look.html`
+  (locally or on the site once pushed) — fixture sphere, full Surface param group live. Claude's
+  honest first-eye: machinery proven, look NOT yet the legacy pearl (no iridescence shimmer/gold
+  gleam at defaults — LUT film off, provisional env, dim synthetic field). Screenshot:
+  `v2/reference/f2-material-look.png`. Look iteration continues on the real mesh (F3/M5) where
+  your eye is the gate; param feedback welcome any time.
+
+
 - **[F2] Fixture material look** — bound to commit
   `67e9b0aee180509b23100aa1e0273e61090fa167`. After Claude runs the hardware-browser gate,
   inspect `v2/reference/f2-material-look.png` and the deployed `/v2/look.html`: orbit around the
