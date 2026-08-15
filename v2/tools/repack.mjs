@@ -6,6 +6,11 @@ const DESKTOP_WORLD_TEXEL_RATIO_LIMIT = 1.15;
 
 export function repackAtlas(splitMesh, fieldSize, overrides = {}) {
   const target = atlasTarget(fieldSize, overrides);
+  return repackAtlasWithTarget(splitMesh, target);
+}
+
+export function repackAtlasWithTarget(splitMesh, target) {
+  const { fieldSize } = target;
   const raster = buildChartMasks(splitMesh, target);
   if (target.role === 'mobile' && raster.measuredDemandRatio > MAX_PACKING_DEMAND) {
     throw new Error(
