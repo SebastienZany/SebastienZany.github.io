@@ -295,6 +295,8 @@ function realTargetReport(row) {
 | Random transport samples / seam resolves / failures | ${formatInteger(row.transport.sampleCount)} / ${formatInteger(row.transport.seamCount)} / ${formatInteger(row.transport.conservativeFailureCount)} |
 | Cross-backs >¼ / worst | ${formatInteger(row.transport.crossBackOverQuarterTexel)} / ${row.transport.maxCrossBackErrorTexels.toFixed(5)} texels |
 | Conditioned walks / eligible frames / resolver failures | ${formatInteger(row.conditionedTransport.sampleCount)} / ${formatInteger(row.conditionedTransport.eligibleFrameCount)} / ${formatInteger(row.conditionedTransport.resolverFailures)} |
+| Missing-group / present-group resolver failures | ${formatInteger(row.conditionedTransport.expectedGroupAbsentFailures)} / ${formatInteger(row.conditionedTransport.expectedGroupPresentFailures)} |
+| Wrong-frame / wrong-curve successful resolves | ${formatInteger(row.conditionedTransport.wrongFrameResolves)} / ${formatInteger(row.conditionedTransport.wrongGroupResolves)} |
 | Conditioned position / heading / cross-back failures | ${formatInteger(row.conditionedTransport.positionViolations)} / ${formatInteger(row.conditionedTransport.headingViolations)} / ${formatInteger(row.conditionedTransport.crossBackViolations)} |
 | Conditioned worst position / heading / cross-back | ${row.conditionedTransport.maxPositionErrorTexels.toFixed(5)} texels / ${row.conditionedTransport.maxHeadingErrorDegrees.toFixed(5)}° / ${row.conditionedTransport.maxCrossBackErrorTexels.toFixed(5)} texels |
 | Frame cap overflow / maximum candidates | ${formatInteger(row.frameOverflow)} / ${row.maximumFrameCandidates} |
@@ -316,6 +318,12 @@ Worst signed diffusion bands:
 | Seam-curve group | Relative flux | Signed world-area flux |
 |---:|---:|---:|
 ${row.diffusion.worstGroups.slice(0, 10).map((group) => `| ${group.groupId} | ${scientific(group.relativeFlux)} | ${scientific(group.signedFlux)} |`).join('\n')}
+
+Impulse tensor samples:
+
+| Pair | Density ratio | Trace ratio | Ellipticity ratio | World-area mass |
+|---:|---:|---:|---:|---:|
+${row.impulse.rows.map((impulse) => `| ${impulse.pairIndex} | ${impulse.densityRatio.toFixed(5)} | ${impulse.traceRatio.toFixed(5)} | ${impulse.ellipticityRatio.toFixed(5)} | ${impulse.mass.toFixed(5)} |`).join('\n')}
 `;
 }
 

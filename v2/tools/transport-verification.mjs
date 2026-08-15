@@ -22,6 +22,8 @@ export function verifySeamConditionedTransport(
   if (!eligibleFrames.length) throw new Error('transport: no seam has a corner-free legal step interval');
   const random = mulberry32(seed);
   let acceptedSamples = 0; let attempts = 0; let resolverFailures = 0;
+  let expectedGroupAbsentFailures = 0; let expectedGroupPresentFailures = 0;
+  let wrongFrameResolves = 0; let wrongGroupResolves = 0;
   let positionViolations = 0; let headingViolations = 0; let crossBackViolations = 0; let crossBackEligible = 0;
   let maxPositionErrorTexels = 0; let maxHeadingErrorDegrees = 0; let maxCrossBackErrorTexels = 0;
   const failureTexels = new Set();
@@ -60,9 +62,20 @@ export function verifySeamConditionedTransport(
       frameTable,
     });
     acceptedSamples += 1;
+    const expectedGroup = boundaryIndex.frameGroupIds[frame.id];
+    const listedFrameIds = Array.from(
+      boundaryIndex.frameLists.subarray(baseTexel * 4, baseTexel * 4 + boundaryIndex.frameListCounts[baseTexel]),
+    );
+    const expectedGroupListed = listedFrameIds.some((frameId) => boundaryIndex.frameGroupIds[frameId] === expectedGroup);
     if (!result.valid || !result.frameId) {
-      resolverFailures += 1; failureTexels.add(baseTexel); continue;
+      resolverFailures += 1;
+      if (expectedGroupListed) expectedGroupPresentFailures += 1;
+      else expectedGroupAbsentFailures += 1;
+      failureTexels.add(baseTexel);
+      continue;
     }
+    if (result.frameId !== frame.id) wrongFrameResolves += 1;
+    if (boundaryIndex.frameGroupIds[result.frameId] !== expectedGroup) wrongGroupResolves += 1;
     const walked = walkSurfaceOffset({
       mesh,
       uv1: repack.uv1,
@@ -111,6 +124,10 @@ export function verifySeamConditionedTransport(
     attempts,
     eligibleFrameCount: eligibleFrames.length,
     resolverFailures,
+    expectedGroupAbsentFailures,
+    expectedGroupPresentFailures,
+    wrongFrameResolves,
+    wrongGroupResolves,
     positionViolations,
     headingViolations,
     crossBackEligible,
