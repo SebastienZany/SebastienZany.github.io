@@ -118,10 +118,18 @@ async function main() {
   };
   appendFileSync(`${LOG_DIR}/ledger.ndjson`, JSON.stringify(ledgerRow) + '\n');
 
+  // Machine contract (stolen from codex-fleet's CLI rules): one JSON value on the final line,
+  // exit 0 only when the report says complete. Diagnostics above are for humans.
+  let report = null;
+  try { report = JSON.parse(finalText); } catch { /* non-JSON final = failure below */ }
   console.log('\n=== THREAD ' + thread.id + ' ===');
   console.log('=== USAGE ' + JSON.stringify(usage) + ' ===');
   console.log('=== FINAL REPORT ===');
-  console.log(finalText);
+  console.log(JSON.stringify(report ?? { status: 'blocked', parse_error: true, raw: finalText.slice(0, 2000) }));
+  if (!report) process.exitCode = 70;
+  else if (report.status === 'complete') process.exitCode = 0;
+  else if (report.status === 'partial') process.exitCode = 5;
+  else process.exitCode = 6;
 }
 
 main().catch((e) => {

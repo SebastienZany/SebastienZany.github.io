@@ -586,7 +586,13 @@ v2 shell promoted to root, README notes. Legacy remains reachable.
   else 1280" unless overridden; look gates (M5) queue screenshots + deployed URLs and later
   feedback lands as shader/param tweaks, never architecture; v2-only commits are pushed to main
   after Claude's gate review (verified to touch nothing outside v2/) so every milestone is
-  immediately phone-testable.
+  immediately phone-testable. Three disciplines adopted from codex-fleet: **produced vs
+  accepted** — a downstream dispatch may start against a *produced* milestone commit while
+  Claude's gate review runs concurrently, but merging to main always requires *accepted*;
+  **SHA-bound queue items** — every REVIEW-QUEUE entry cites the exact commit it describes, so
+  later approval binds to that state, never "latest"; **reconcile from the repo** — after any
+  uncertain dispatch death, `git log`/`git status` in the stream's worktree is the authority on
+  what happened; thread transcripts are evidence only.
 
 ## 6. Risk register
 
