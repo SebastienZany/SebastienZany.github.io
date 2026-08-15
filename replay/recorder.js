@@ -190,12 +190,16 @@ export function createRecorder({ api, clock, buildStamp = null }) {
     sample,
     logEvent,
 
-    start({ seed = (Math.random() * 2 ** 32) >>> 0 } = {}) {
+    // spawnAgents:false reproduces what boot actually does — the world starts
+    // with the initial oat and NO agents, and the colony is seeded later by the
+    // intro. Use it when recording from the Begin click so the starting sequence
+    // and the progressive seeding are part of the capture rather than skipped.
+    start({ seed = (Math.random() * 2 ** 32) >>> 0, spawnAgents = true } = {}) {
       state.wallStart = clock.realNow();
       const a = c();
       state.seed = seed >>> 0;
       a.seedSimRng(state.seed);
-      a.resetSimulation({ resetOats: true, spawnAgents: true });
+      a.resetSimulation({ resetOats: true, spawnAgents });
 
       state.recording = true;
       state.tick = 0;

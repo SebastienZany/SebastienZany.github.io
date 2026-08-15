@@ -646,7 +646,56 @@ async function gpuDeterminismTest({ ticks = 200, runs = 3, growFirst = 600, onRu
  * and places oats. Whatever it does is captured as resolved intents, so replay
  * consumes the recording alone and never re-runs the player.
  */
-async function recordSession({ ticks = 900, seed = 0xC0FFEE, player = null, name = 'session.cvr' } = {}) {
+/**
+ * Press Begin on the virtual clock and wait until the intro is actually armed.
+ *
+ * requestIntroStart() is async: it awaits the intro clip's decode (bounded by a
+ * 4s setTimeout race) before stamping startScreenUiState.clickedAt and
+ * introSequenceState.requestedAt. Those stamps are taken with performance.now(),
+ * which is virtual once armed — so the click has to happen AFTER armOffline, or
+ * the intro's whole timeline is anchored to a real timestamp the session will
+ * never reach.
+ *
+ * The await also means the click cannot simply be fired and stepped past: in a
+ * synchronous tick loop the continuation would not run until the loop yielded,
+ * and the intro would begin hundreds of ticks late. So resolve it here first.
+ */
+async function pressBegin({ timeoutMs = 30000 } = {}) {
+  const c = api();
+  const btn = document.getElementById('startButton');
+  if (!btn) throw new Error('start button not found — cannot record from Begin');
+
+  // Boot requests the intro by itself, anchored to the performance.now() of that
+  // moment. The virtual clock starts far later, so without rewinding first the
+  // sequence reads as long finished: requestIntroStart() returns immediately,
+  // nothing is captured, and — because the recording starts with no agents on
+  // purpose — the intro never seeds the colony either, leaving a session with
+  // zero agents throughout. (Measured: 7 oats placed, 0 story triggers, every
+  // slime score 0.) Rewinding re-anchors the sequence onto the virtual clock.
+  c.resetIntroSequenceToStartScreen?.(performance.now());
+
+  btn.disabled = false;
+  btn.hidden = false;
+  btn.click();
+
+  const t0 = clock.realNow();
+  while (clock.realNow() - t0 < timeoutMs) {
+    const intro = c.getIntroSequenceState?.() ?? {};
+    if (intro.requested && Number.isFinite(intro.requestedAt) && intro.requestedAt > 0) {
+      return { requestedAt: Math.round(intro.requestedAt), waitedMs: Math.round(clock.realNow() - t0) };
+    }
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  throw new Error('intro never armed after clicking Begin');
+}
+
+async function recordSession({
+  ticks = 900, seed = 0xC0FFEE, player = null, name = 'session.cvr',
+  // Capture the piece as a viewer sees it: from the Begin click, through the
+  // starting sequence and the progressive initial seeding, rather than starting
+  // mid-life with 4096 agents already on the mesh.
+  fromBegin = false,
+} = {}) {
   const rec = createRecorder({ api, clock, buildStamp: document.querySelector('meta[name=build]')?.content ?? null });
 
   // Arm the virtual clock BEFORE rec.start(), and let it continue from real
@@ -664,13 +713,22 @@ async function recordSession({ ticks = 900, seed = 0xC0FFEE, player = null, name
   // which is what a player sees.
   await armOffline();
 
-  const header = rec.start({ seed });
-  log('recording started', header.rngSeed);
+  const header = rec.start({ seed, spawnAgents: !fromBegin });
+  let begin = null;
+  if (fromBegin) {
+    begin = await pressBegin();
+    log('Begin pressed', begin);
+  }
+  log('recording started', header.rngSeed, fromBegin ? '(from Begin click)' : '');
   try {
     for (let t = 0; t < ticks; t++) {
       if (player) player(t, api());
       rec.sample();               // capture resolved state for THIS tick
       step(1000 / 60);
+      // The intro's own continuations (audio decode, sprite scheduling) are
+      // async. Draining to a macrotask periodically lets them land at roughly
+      // the right tick instead of all at once when the loop finally yields.
+      if (fromBegin && t % 30 === 0) await new Promise((r) => setTimeout(r, 0));
     }
   } finally { exitOffline(); }
 
@@ -684,7 +742,36 @@ async function recordSession({ ticks = 900, seed = 0xC0FFEE, player = null, name
     totalTicks: recording.totalTicks,
     bytes: json.length,
     kbPerMinute: +((json.length / 1024) / (recording.totalTicks / 60 / 60)).toFixed(1),
+    fromBegin, begin,
+    // Whether the footage will actually contain story callouts. A box is earned
+    // by the colony growing over an oat until its slime score clears the trigger
+    // threshold, so this cannot be assumed from the number of oats placed.
+    story: describeObservations(),
     ...rec.stats(),
+  };
+}
+
+/** How many oats have actually produced a story callout, and which. */
+function describeObservations() {
+  const c = api();
+  const oats = c.oats ?? [];
+  const rows = oats.map((o, i) => ({
+    i,
+    initial: !!o.initial,
+    suppressed: !!o.suppressObservation,
+    triggered: !!o.observation?.triggered,
+    score: o.observation?.slimeTriggerScore != null
+      ? +Number(o.observation.slimeTriggerScore).toFixed(4) : null,
+    hasText: !!o.storyText || !!o.observation?.textLines?.length,
+  }));
+  const eligible = rows.filter((r) => !r.initial && !r.suppressed);
+  return {
+    threshold: c.params?.observationSlimeTriggerThreshold ?? null,
+    storyBoxesEnabled: c.params?.storyBoxesEnabled !== false,
+    oats: oats.length,
+    eligible: eligible.length,
+    triggered: eligible.filter((r) => r.triggered).length,
+    rows,
   };
 }
 
@@ -927,6 +1014,7 @@ if (qs.get('auto') === '1') {
         seed: num('seed', 0xC0FFEE),
         player,
         name: qs.get('name') || 'session.cvr',
+        fromBegin: qs.get('frombegin') === '1',
       });
       await postStatus({ phase: 'done', result });
 

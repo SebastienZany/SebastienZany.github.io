@@ -15542,6 +15542,14 @@ async function onLoad(gltf) {
     setCameraAngles,
     replayInitialAgentSeed,
     skipIntroSequence,
+    // Rewind the start screen so the intro can be played again from a Begin
+    // click. Boot requests the intro on its own, and its timeline is anchored to
+    // whatever performance.now() read at that moment — so an offline recording,
+    // whose virtual clock starts much later, finds the intro already long
+    // complete and captures none of the starting sequence. Resetting first
+    // re-anchors the whole sequence onto the virtual clock. Touches only intro
+    // and start-screen state, never the simulation.
+    resetIntroSequenceToStartScreen,
     visualLayers: {
       get slimeVisible() {
         return slimeVisualVisible;

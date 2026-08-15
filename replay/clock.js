@@ -83,6 +83,13 @@ export function installClock() {
     // calling this same wrapper. Hooks run AFTER the game's frame so they observe
     // the state the frame produced — which is what the recorder needs to sample.
     const wrapped = (t) => {
+      // Remember the last timestamp the frame loop actually saw. main.js derives
+      // rawDt from (now - lastFrameTime), so the virtual clock must not be seeded
+      // BEHIND this value or the first offline frame gets a negative dt and the
+      // simulation runs backwards for one step. Real rAF timestamps are not
+      // guaranteed to be <= performance.now() inside the callback, so seeding
+      // from realNow() alone is not enough. See enterOffline.
+      state.lastTs = t;
       cb(t);
       for (const h of frameHooks) {
         try { h(t); } catch (err) { console.warn('[clock] frame hook failed', err); }
@@ -106,9 +113,14 @@ export function installClock() {
 // current real time keeps already-captured module-scope timestamps meaningful,
 // which matters because main.js stores absolute deadlines (oat decay, intro,
 // ending) that were stamped during live boot.
-export function enterOffline({ startMs = realNow() } = {}) {
+export function enterOffline({ startMs = null } = {}) {
   state.mode = 'offline';
-  state.virtualMs = startMs;
+  // Never seed behind the last timestamp the loop dispatched: main.js computes
+  // rawDt = (now - lastFrameTime) / 16.6667, so a virtual clock starting before
+  // lastFrameTime yields a NEGATIVE dt on the first offline frame and the
+  // simulation steps backwards. Observed as dtStream [[0, 2.2], [1, -1.664], ...]
+  // in a recording, i.e. one frame of reversed agent motion and reserve gain.
+  state.virtualMs = startMs ?? Math.max(realNow(), state.lastTs ?? 0);
   state.tickIndex = 0;
 
   // Hand off the in-flight callback. While live+hidden it is parked in
