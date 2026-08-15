@@ -3,7 +3,7 @@
 // and prints a structured final report. Resumable via thread id.
 //
 // Usage:
-//   node dispatch-codex.mjs --brief ../../briefs/M0-scaffold.md --label M0 [--effort xhigh]
+//   node dispatch-codex.mjs --brief v2/briefs/M0-scaffold.md --label M0 [--effort xhigh] [--worktree /path]
 //   node dispatch-codex.mjs --resume <threadId> --label M0-fix --prompt "tests X fail: ..."
 //
 // Contract: Codex works in the repo worktree (workspace-write sandbox, never-ask approvals),
@@ -85,7 +85,9 @@ async function main() {
   if (args.resume && args.prompt) {
     prompt = args.prompt;
   } else {
-    const briefPath = resolve(here, args.brief);
+    // Briefs resolve against the TARGET worktree so parallel streams always read their own
+    // (possibly gate-amended) copy — resolving against `here` once embedded a stale brief.
+    const briefPath = resolve(WORKTREE, args.brief);
     const brief = readFileSync(briefPath, 'utf8');
     prompt = `${PREAMBLE}\n\n=== THE BRIEF (${args.brief}) ===\n\n${brief}\n\nExecute it now.`;
   }
