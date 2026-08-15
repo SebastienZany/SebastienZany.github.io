@@ -86,7 +86,8 @@ function projectControl(parameterName) {
   if (!definition || !label || !help) throw new Error(`Incomplete panel control: ${parameterName}`);
   const widget = definition.type === 'number'
     ? (parameterName === 'populationTarget' ? 'number' : 'range')
-    : definition.type === 'boolean' ? 'checkbox' : definition.type;
+    : definition.type === 'boolean' ? 'checkbox'
+      : definition.type === 'choice' ? 'select' : definition.type;
   return Object.freeze({
     parameterName,
     label,
@@ -109,4 +110,3 @@ export const PANEL_GROUPS = Object.freeze(GROUP_PARAMETER_NAMES.map(([id, label,
 
 export const PANEL_CONTROLS = Object.freeze(PANEL_GROUPS.flatMap(({ controls }) => controls));
 export const PANEL_PARAMETER_NAMES = Object.freeze(PANEL_CONTROLS.map(({ parameterName }) => parameterName));
-

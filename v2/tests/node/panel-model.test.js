@@ -28,6 +28,7 @@ test('panel is a complete, drift-free projection of checklist section 2c', () =>
     );
     assert.ok(control.help.length > 0, `${control.parameterName} has no help string`);
   }
+  assert.equal(PANEL_CONTROLS.find(({ parameterName }) => parameterName === 'debugView').widget, 'select');
 });
 
 test('stable-medium applies its exact full vector and a subsequent edit marks it custom', () => {
@@ -51,4 +52,3 @@ test('population control forces oat rationing without changing unrelated values'
   assert.equal(model.getState().params.useOatRationing, true);
   assert.equal(model.getState().params.surfaceHeight, createParams().surfaceHeight);
 });
-
