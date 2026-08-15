@@ -18,6 +18,22 @@ test('planar fixture impulse spread stays within the seamless tensor bound', () 
   });
   const raster = rasterizeAtlas(mesh, repack);
   const result = verifyImpulseSpread(mesh, repack, raster, 4, 4);
+  assert.deepEqual(result.rows.map(({ pairIndex }) => pairIndex), [...mesh.fixtureSeamPairIndices]);
   assert.equal(result.traceViolations, 0);
   assert.equal(result.ellipticityViolations, 0);
+});
+
+test('disconnected thin-sheet fixture is not assigned a synthetic cap seam', () => {
+  const mesh = splitChartLocalSlits(fixtureBakeMesh(buildFixtureSet()['thin-sheet']));
+  const repack = repackAtlasWithTarget(mesh, {
+    fieldSize: 128,
+    gutterTexels: 2,
+    directTapClampTexels: 1,
+    densityScale: 0.3,
+    role: 'fixture',
+  });
+  const raster = rasterizeAtlas(mesh, repack);
+  const result = verifyImpulseSpread(mesh, repack, raster, 4, 4);
+  assert.equal(result.sampleCount, 0);
+  assert.match(result.skippedReason, /no connected surface seam/);
 });

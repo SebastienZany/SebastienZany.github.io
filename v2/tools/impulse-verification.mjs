@@ -11,6 +11,18 @@ export function verifyImpulseSpread(mesh, repack, raster, requestedSamples = 8, 
     chartTable: repack.chartTable,
   };
   const candidates = impulseCandidates(mesh, repack, raster);
+  if (!candidates.length && mesh.fixtureSeamPairIndices?.length === 0) {
+    return {
+      sampleCount: 0,
+      stepCount,
+      traceViolations: 0,
+      ellipticityViolations: 0,
+      maximumTraceMismatch: 0,
+      maximumEllipticityMismatch: 0,
+      rows: [],
+      skippedReason: 'fixture declares no connected surface seam',
+    };
+  }
   if (!candidates.length) throw new Error('impulse: no seam-interior authoritative source texel');
   const selected = evenlySpaced(candidates, Math.min(requestedSamples, candidates.length));
   const rows = selected.map((candidate) => measureOneImpulse(mesh, repack, raster, atlas, candidate, stepCount));
@@ -29,7 +41,8 @@ export function verifyImpulseSpread(mesh, repack, raster, requestedSamples = 8, 
 
 function impulseCandidates(mesh, repack, raster) {
   const rows = [];
-  for (let pairIndex = 0; pairIndex < mesh.seamPairs.length; pairIndex += 1) {
+  const pairIndices = mesh.fixtureSeamPairIndices ?? mesh.seamPairs.map((_, pairIndex) => pairIndex);
+  for (const pairIndex of pairIndices) {
     const pair = mesh.seamPairs[pairIndex]; const source = pair.sides[0];
     const start = vertex2(repack.uv1, source.vertex0); const end = vertex2(repack.uv1, source.vertex1);
     const lengthTexels = distance2(start, end) * repack.fieldSize;

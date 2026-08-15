@@ -11,6 +11,7 @@ export function fixtureBakeMesh(fixture) {
   const normals = vertexNormals(positions, indices);
   const segmentation = buildChartSegmentation(uv0, indices);
   const seams = extractSeamEdges(positions, uv0, indices, segmentation);
+  const fixtureSeamPairIndices = declaredSeamPairIndices(fixture, positions, seams.seamPairs);
   return {
     positions,
     normals,
@@ -26,7 +27,49 @@ export function fixtureBakeMesh(fixture) {
     seamPairCount: seams.seamPairs.length,
     directionalSideCount: seams.seamPairs.length * 2,
     slitComponentCount: seams.slitComponents.length,
+    fixtureName: fixture.name,
+    fixtureSeamPairIndices,
   };
+}
+
+function declaredSeamPairIndices(fixture, expandedPositions, seamPairs) {
+  const declaredEdges = new Set();
+  for (const seam of fixture.seams) {
+    if (seam.edgeA) declaredEdges.add(sourcePhysicalEdgeKey(fixture, seam.edgeA));
+    if (seam.edgeB) declaredEdges.add(sourcePhysicalEdgeKey(fixture, seam.edgeB));
+    if (seam.closedPolyline) {
+      for (let index = 0; index + 1 < seam.closedPolyline.length; index += 1) {
+        declaredEdges.add(sourcePhysicalEdgeKey(fixture, seam.closedPolyline.slice(index, index + 2)));
+      }
+    }
+  }
+  const pairIndices = [];
+  seamPairs.forEach((pair, pairIndex) => {
+    const side = pair.sides[0];
+    const key = expandedPhysicalEdgeKey(expandedPositions, side.vertex0, side.vertex1);
+    if (declaredEdges.has(key)) pairIndices.push(pairIndex);
+  });
+  return Uint32Array.from(pairIndices);
+}
+
+function sourcePhysicalEdgeKey(fixture, [vertex0, vertex1]) {
+  return physicalEdgeKey(
+    fixture.attributes.positions.slice(vertex0 * 3, vertex0 * 3 + 3),
+    fixture.attributes.positions.slice(vertex1 * 3, vertex1 * 3 + 3),
+  );
+}
+
+function expandedPhysicalEdgeKey(positions, vertex0, vertex1) {
+  return physicalEdgeKey(
+    Array.from(positions.subarray(vertex0 * 3, vertex0 * 3 + 3)),
+    Array.from(positions.subarray(vertex1 * 3, vertex1 * 3 + 3)),
+  );
+}
+
+function physicalEdgeKey(first, second) {
+  const firstKey = first.map((value) => Math.round(value * 1e7) / 1e7).join(',');
+  const secondKey = second.map((value) => Math.round(value * 1e7) / 1e7).join(',');
+  return firstKey < secondKey ? `${firstKey}|${secondKey}` : `${secondKey}|${firstKey}`;
 }
 
 function expandDeclaredCharts(fixture) {

@@ -42,6 +42,8 @@ export function splitChartLocalSlits(mesh) {
     seamPairs,
     extensionEdges: seamPairs.filter((pair) => pair.isExtension),
     cutEdgeKeys,
+    fixtureName: mesh.fixtureName,
+    fixtureSeamPairIndices: mesh.fixtureSeamPairIndices,
     stats: {
       inputChartCount: mesh.chartCount,
       outputChartCount: charts.length,
