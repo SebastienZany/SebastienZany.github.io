@@ -60,6 +60,16 @@ test('chart-local slit splitting preserves geometry and separates every original
     if (pair.wasSlit) assert.notEqual(pair.sides[0].chartId, pair.sides[1].chartId);
   }
   assert.ok(split.extensionEdges.every((pair) => pair.sides[0].chartId !== pair.sides[1].chartId));
+  for (const pair of split.extensionEdges) {
+    for (let endpoint = 0; endpoint < 2; endpoint += 1) {
+      const vertex0 = pair.sides[0][`vertex${endpoint}`];
+      const vertex1 = pair.sides[1][`vertex${endpoint}`];
+      assert.deepEqual(
+        split.positions.subarray(vertex0 * 3, vertex0 * 3 + 3),
+        split.positions.subarray(vertex1 * 3, vertex1 * 3 + 3),
+      );
+    }
+  }
   assert.equal(split.charts.reduce((sum, chart) => sum + chart.triangleCount, 0), mesh.triangleCount);
 });
 

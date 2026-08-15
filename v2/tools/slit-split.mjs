@@ -206,8 +206,9 @@ function rebuildSeamPairs(mesh, geometry, finalCharts, topology, cutEdgeKeys) {
     const uses = topology.edgeUses.get(edgeKey);
     if (uses?.length !== 2) throw new Error(`slit split: extension edge ${edgeKey} is not paired`);
     const [first, second] = uses;
+    const alignedSecond = { ...second, vertex0: first.vertex0, vertex1: first.vertex1 };
     pairs.push({
-      sides: [first, second].map((use) => remapSide(use, geometry, finalCharts)),
+      sides: [first, alignedSecond].map((use) => remapSide(use, geometry, finalCharts)),
       foldAngleRadians: triangleFold(mesh.positions, mesh.indices, first.triangleIndex, second.triangleIndex),
       coincidenceError: 0,
       sourcePairIndex: -1,
