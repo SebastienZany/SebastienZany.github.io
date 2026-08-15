@@ -30,6 +30,12 @@
 
 ## Resolved
 
+- **M1 accepted** (gate 2026-08-15, Track A): 6 commits; 27/27 node + 3/3 browser green from
+  Claude's shell; every audited count confirmed exactly; MESH1 locked
+  (sha256 dbf3f435…). Spec amendment at gate: slit work units are the 630 chart-local
+  components with **zero loops** (M2's loop machinery deleted; the round-3 "5 loops" were
+  endpoint-grouping artifacts).
+
 - **M0 accepted** (gate review 2026-08-15, bound to the merge SHA recorded in git): 11 Codex
   commits + 2 gate amendments (test-glob spec fix; Chrome probe results from Claude's shell —
   Codex's sandbox cannot launch Chrome, so GPU suites are gate-run by Claude as standing

@@ -20,7 +20,7 @@
 <!-- mac-chrome:start -->
 ## Mac Chrome 151.0.7922.138
 
-- Recorded: 2026-08-15T00:45:35.890Z
+- Recorded: 2026-08-15T01:08:42.297Z
 - Harness: Playwright system Chrome channel, headless=true, no extra launch flags.
 - GPU gate: `adapter.info.isFallbackAdapter === false`.
 - Adapter identity: `{"vendor":"apple","architecture":"metal-3","device":"","description":"","isFallbackAdapter":false}`
@@ -28,7 +28,7 @@
 ```json
 {
   "schema": "v2-capability-probe@1",
-  "generatedAt": "2026-08-15T00:45:29.921Z",
+  "generatedAt": "2026-08-15T01:08:37.076Z",
   "environment": {
     "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/151.0.0.0 Safari/537.36",
     "devicePixelRatio": 1,
@@ -225,12 +225,12 @@
           "displayBlurPasses": 1,
           "blurFillPairsPerFrame": 6,
           "maximumLegalSettings": false,
-          "frames": 122,
-          "measuredDurationMs": 1678.9000000059605,
-          "startMsPerFrame": 18.21000000089407,
-          "endMsPerFrame": 12.109999999403954,
-          "sustainedMsPerFrame": 13.759016393393766,
-          "thermalRatio": 0.6650192201432938,
+          "frames": 130,
+          "measuredDurationMs": 1669.6000000089407,
+          "startMsPerFrame": 17.490000000596048,
+          "endMsPerFrame": 11.179999999701977,
+          "sustainedMsPerFrame": 12.842307692307692,
+          "thermalRatio": 0.6392224127684946,
           "dispatchesPerFrame": 14
         },
         {
@@ -242,11 +242,11 @@
           "blurFillPairsPerFrame": 170,
           "maximumLegalSettings": true,
           "frames": 7,
-          "measuredDurationMs": 1837.800000011921,
-          "startMsPerFrame": 272.0333333313465,
-          "endMsPerFrame": 251.26666667064032,
-          "sustainedMsPerFrame": 262.52857142899717,
-          "thermalRatio": 0.9236613160365474,
+          "measuredDurationMs": 1725,
+          "startMsPerFrame": 256.53333333631355,
+          "endMsPerFrame": 236.66666666666666,
+          "sustainedMsPerFrame": 246.42857142857142,
+          "thermalRatio": 0.922557172546455,
           "dispatchesPerFrame": 349
         },
         {
@@ -257,12 +257,12 @@
           "displayBlurPasses": 1,
           "blurFillPairsPerFrame": 6,
           "maximumLegalSettings": false,
-          "frames": 154,
-          "measuredDurationMs": 1672.0999999940395,
-          "startMsPerFrame": 11.559999999403953,
-          "endMsPerFrame": 10.57999999821186,
-          "sustainedMsPerFrame": 10.857142857046096,
-          "thermalRatio": 0.9152249133873164,
+          "frames": 162,
+          "measuredDurationMs": 1667.8999999910593,
+          "startMsPerFrame": 10.779999999701976,
+          "endMsPerFrame": 9.970000000298024,
+          "sustainedMsPerFrame": 10.295061728376666,
+          "thermalRatio": 0.9248608534854966,
           "dispatchesPerFrame": 14
         }
       ]
