@@ -21,6 +21,12 @@ the CPU gather/scatter oracle are unaffected. Emitting the required degraded rec
 the requested deployed-data test are stopped rather than silently changing the format or
 weakening the assertion.
 
+The real 1024/G3/s=0.83 bake confirms this is not a theoretical corner: all 429,181 gutter
+texels resolve, but 14,721 use the degraded class and **8,865 of those require at least one
+negative weight**. The nearest-tap construction's measured worst first-moment error is 3.5733
+texels for the remaining rank-deficient cases. Thus an unsigned-only asset would omit or change
+real shipped donors, not merely an unused fallback path.
+
 Resolution needed: choose a signed deployed weight encoding and its exact-sum rule (or prohibit
 negative deployed weights), and replace “scatter then gather equals one” with the transpose
 inner-product identity plus a separate conservation assertion.

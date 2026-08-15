@@ -99,7 +99,19 @@ export function walkRay(mesh, uv1, topology, startTriangle, startWorldPos, start
   let remaining = distanceWorld;
   let triangleHopCount = 0;
   let chartCrossingCount = 1;
+  let priorTriangle = -1;
   for (; triangleHopCount <= maxHops; triangleHopCount += 1) {
+    const immediateEdge = immediateExitEdge(mesh, topology, triangleIndex, worldPos, direction, priorTriangle);
+    if (immediateEdge) {
+      const neighborOffset = triangleIndex * 3 + immediateEdge.edgeCorner;
+      const neighborTriangle = topology.neighborTriangles[neighborOffset];
+      if (neighborTriangle < 0) throw new Error(`walk: ray left the physical mesh at edge ${immediateEdge.edgeId}`);
+      if (mesh.triangleChartIds?.[neighborTriangle] !== mesh.triangleChartIds?.[triangleIndex]) chartCrossingCount += 1;
+      direction = hingeTransportAcrossCorners(mesh, triangleIndex, immediateEdge.edgeCorner, neighborTriangle, direction);
+      priorTriangle = triangleIndex;
+      triangleIndex = neighborTriangle;
+      continue;
+    }
     const intersection = nextTriangleEdge(mesh, topology, triangleIndex, worldPos, direction);
     if (!intersection || intersection.distance >= remaining - RAY_EPSILON) {
       worldPos = addScaled3(worldPos, direction, remaining);
@@ -120,9 +132,30 @@ export function walkRay(mesh, uv1, topology, startTriangle, startWorldPos, start
       neighborTriangle,
       direction,
     );
+    priorTriangle = triangleIndex;
     triangleIndex = neighborTriangle;
   }
   throw new Error(`walk: exceeded ${maxHops} triangle crossings`);
+}
+
+function immediateExitEdge(mesh, topology, triangleIndex, worldPos, direction, priorTriangle) {
+  const barycentric = worldBarycentric(mesh, triangleIndex, worldPos);
+  const probe = worldBarycentric(mesh, triangleIndex, addScaled3(worldPos, direction, 1e-8));
+  const candidates = [];
+  for (let oppositeCorner = 0; oppositeCorner < 3; oppositeCorner += 1) {
+    const derivative = probe[oppositeCorner] - barycentric[oppositeCorner];
+    if (barycentric[oppositeCorner] > 1e-6 || derivative >= -1e-10) continue;
+    const edgeCorner = (oppositeCorner + 1) % 3;
+    const neighbor = topology.neighborTriangles[triangleIndex * 3 + edgeCorner];
+    candidates.push({
+      edgeCorner,
+      edgeId: topology.edgeIds[triangleIndex * 3 + edgeCorner],
+      derivative,
+      returnsToPrior: neighbor === priorTriangle,
+    });
+  }
+  candidates.sort((left, right) => left.returnsToPrior - right.returnsToPrior || left.derivative - right.derivative || left.edgeId - right.edgeId);
+  return candidates[0] ?? null;
 }
 
 function nextTriangleEdge(mesh, topology, triangleIndex, worldPos, worldDirection) {
@@ -175,22 +208,35 @@ function worldBarycentric(mesh, triangleIndex, worldPos) {
 }
 
 function hingeTransport(mesh, sourceSide, destinationSide, vector) {
-  const axis = normalize3(subtract3(vertex3(mesh.positions, sourceSide.vertex1), vertex3(mesh.positions, sourceSide.vertex0)));
-  return rotateBetweenTriangles(mesh, sourceSide.triangleIndex, destinationSide.triangleIndex, axis, vector);
+  const start = vertex3(mesh.positions, sourceSide.vertex0);
+  const end = vertex3(mesh.positions, sourceSide.vertex1);
+  const axis = normalize3(subtract3(end, start));
+  return rotateBetweenTriangles(mesh, sourceSide.triangleIndex, destinationSide.triangleIndex, axis, midpoint3(start, end), vector);
 }
 
 function hingeTransportAcrossCorners(mesh, sourceTriangle, sourceEdgeCorner, destinationTriangle, vector) {
   const vertex0 = mesh.indices[sourceTriangle * 3 + sourceEdgeCorner];
   const vertex1 = mesh.indices[sourceTriangle * 3 + ((sourceEdgeCorner + 1) % 3)];
-  const axis = normalize3(subtract3(vertex3(mesh.positions, vertex1), vertex3(mesh.positions, vertex0)));
-  return rotateBetweenTriangles(mesh, sourceTriangle, destinationTriangle, axis, vector);
+  const start = vertex3(mesh.positions, vertex0); const end = vertex3(mesh.positions, vertex1);
+  const axis = normalize3(subtract3(end, start));
+  return rotateBetweenTriangles(mesh, sourceTriangle, destinationTriangle, axis, midpoint3(start, end), vector);
 }
 
-function rotateBetweenTriangles(mesh, sourceTriangle, destinationTriangle, axis, vector) {
-  const sourceNormal = triangleNormal(mesh, sourceTriangle);
-  const destinationNormal = triangleNormal(mesh, destinationTriangle);
-  const angle = Math.atan2(dot3(axis, cross3(sourceNormal, destinationNormal)), dot3(sourceNormal, destinationNormal));
+function rotateBetweenTriangles(mesh, sourceTriangle, destinationTriangle, axis, edgeMidpoint, vector) {
+  const sourceOutward = triangleInward(mesh, sourceTriangle, edgeMidpoint, axis).map((value) => -value);
+  const destinationInward = triangleInward(mesh, destinationTriangle, edgeMidpoint, axis);
+  const angle = Math.atan2(dot3(axis, cross3(sourceOutward, destinationInward)), dot3(sourceOutward, destinationInward));
   return rotate3(vector, axis, angle);
+}
+
+function triangleInward(mesh, triangleIndex, edgeMidpoint, edgeAxis) {
+  const vertices = [...mesh.indices.subarray(triangleIndex * 3, triangleIndex * 3 + 3)];
+  const centroid = [0, 1, 2].map((coordinate) => vertices.reduce((sum, vertex) => (
+    sum + mesh.positions[vertex * 3 + coordinate]
+  ), 0) / 3);
+  const direction = subtract3(centroid, edgeMidpoint);
+  const alongEdge = dot3(direction, edgeAxis);
+  return normalize3(direction.map((value, coordinate) => value - edgeAxis[coordinate] * alongEdge));
 }
 
 function triangleNormal(mesh, triangleIndex) {
@@ -214,6 +260,8 @@ function positionKey(positions, vertex) {
 function interpolateEdge(positions, vertex0, vertex1, fraction) {
   return [0, 1, 2].map((axis) => positions[vertex0 * 3 + axis] * (1 - fraction) + positions[vertex1 * 3 + axis] * fraction);
 }
+
+function midpoint3(a, b) { return a.map((value, index) => (value + b[index]) * 0.5); }
 
 function vertex3(values, vertex) { return [...values.subarray(vertex * 3, vertex * 3 + 3)]; }
 function project2(vector, basisX, basisY) { return [dot3(vector, basisX), dot3(vector, basisY)]; }

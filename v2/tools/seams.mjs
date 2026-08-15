@@ -114,19 +114,26 @@ export function projectJacobian(destination, source) {
 }
 
 function hingeRotation(mesh, source, destination) {
-  const sourceNormal = triangleNormal(mesh, source.triangleIndex);
-  const destinationNormal = triangleNormal(mesh, destination.triangleIndex);
   const axis = normalize3(worldVector(mesh.positions, source.vertex0, source.vertex1));
-  const cross = cross3(sourceNormal, destinationNormal);
+  const midpoint = [0, 1, 2].map((coordinate) => (
+    mesh.positions[source.vertex0 * 3 + coordinate] + mesh.positions[source.vertex1 * 3 + coordinate]
+  ) * 0.5);
+  const sourceOutward = triangleInward(mesh, source.triangleIndex, midpoint, axis).map((value) => -value);
+  const destinationInward = triangleInward(mesh, destination.triangleIndex, midpoint, axis);
   return {
     axis,
-    angleRadians: Math.atan2(dot3(axis, cross), dot3(sourceNormal, destinationNormal)),
+    angleRadians: Math.atan2(dot3(axis, cross3(sourceOutward, destinationInward)), dot3(sourceOutward, destinationInward)),
   };
 }
 
-function triangleNormal(mesh, triangleIndex) {
-  const [a, b, c] = [...mesh.indices.subarray(triangleIndex * 3, triangleIndex * 3 + 3)];
-  return normalize3(cross3(worldVector(mesh.positions, a, b), worldVector(mesh.positions, a, c)));
+function triangleInward(mesh, triangleIndex, edgeMidpoint, edgeAxis) {
+  const vertices = [...mesh.indices.subarray(triangleIndex * 3, triangleIndex * 3 + 3)];
+  const centroid = [0, 1, 2].map((coordinate) => vertices.reduce((sum, vertex) => (
+    sum + mesh.positions[vertex * 3 + coordinate]
+  ), 0) / 3);
+  const towardCentroid = centroid.map((value, coordinate) => value - edgeMidpoint[coordinate]);
+  const alongEdge = dot3(towardCentroid, edgeAxis);
+  return normalize3(towardCentroid.map((value, coordinate) => value - edgeAxis[coordinate] * alongEdge));
 }
 
 function rotateVector(vector, axis, angle) {

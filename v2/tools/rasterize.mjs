@@ -1,5 +1,5 @@
 import { GUTTER_RECORD_OFFSET } from './atlas-constants.mjs';
-import { triangleJacobian } from './seams.mjs';
+import { directionalFrame, triangleJacobian } from './seams.mjs';
 import { buildDonorStencil, quantizeNonnegativeWeights } from './stencils.mjs';
 import {
   buildSurfaceTopology,
@@ -60,7 +60,18 @@ export function rasterizeAtlas(splitMesh, repack) {
           offsetUv: subtract2(gutterUvPos, boundaryUvPos),
         });
         const destinationChart = splitMesh.triangleChartIds[endpoint.triangleIndex];
-        const stencil = buildDonorStencil(endpoint.uvPos, destinationChart, authoritativeOwner, fieldSize);
+        let stencil;
+        try {
+          stencil = buildDonorStencil(endpoint.uvPos, destinationChart, authoritativeOwner, fieldSize);
+        } catch (error) {
+          throw new Error(
+            `raster: donor failed at ${x},${y}; edge=${descriptor.id}; pair=${descriptor.pairIndex}; `
+            + `sourceChart=${mask.chart.id}; destinationChart=${destinationChart}; `
+            + `triangle=${endpoint.triangleIndex}; endpointUv=${endpoint.uvPos.join(',')}; `
+            + `hops=${endpoint.triangleHopCount}`,
+            { cause: error },
+          );
+        }
         gutterCoords[recordIndex] = texelIndex;
         tapIndices.set(stencil.tapIndices, recordIndex * 4);
         weights.set(stencil.weights, recordIndex * 4);
@@ -150,7 +161,10 @@ function buildBoundaryEdges(mesh, uv1) {
         sourceUv0: vertexUv(uv1, source.vertex0),
         sourceUv1: vertexUv(uv1, source.vertex1),
       };
-      edge.outwardNormal = outwardNormal(mesh, uv1, source, edge.sourceUv0, edge.sourceUv1);
+      edge.entryMatrix = directionalFrame(mesh, uv1, pair, pairIndex, direction, 1).matrix;
+      edge.destinationUv = [vertexUv(uv1, destination.vertex0), vertexUv(uv1, destination.vertex1)];
+      edge.destinationTriangleUv = [...mesh.indices.subarray(destination.triangleIndex * 3, destination.triangleIndex * 3 + 3)]
+        .map((vertex) => ({ vertex, uv: vertexUv(uv1, vertex) }));
       edges.push(edge); byChart[source.chartId].push(edge);
     }
   });
@@ -170,15 +184,13 @@ function assignNearestBoundary(mask, placement, edges, fieldSize, gutterTexels) 
     const maxX = Math.min(placement.x + mask.width - 1, Math.ceil(Math.max(start[0], end[0]) + radius));
     const minY = Math.max(placement.y, Math.floor(Math.min(start[1], end[1]) - radius));
     const maxY = Math.min(placement.y + mask.height - 1, Math.ceil(Math.max(start[1], end[1]) + radius));
-    const outward = edge.outwardNormal;
     for (let y = minY; y <= maxY; y += 1) for (let x = minX; x <= maxX; x += 1) {
       const localIndex = (y - placement.y) * mask.width + x - placement.x;
       if (!mask.dilated[localIndex] || mask.authoritative[localIndex]) continue;
       const closest = closestPointOnSegment([x + 0.5, y + 0.5], start, end);
       const offset = subtract2([x + 0.5, y + 0.5], closest.point);
-      const offsetLength = Math.hypot(...offset);
-      const alignment = (closest.t <= 1e-7 || closest.t >= 1 - 1e-7) && offsetLength > 0
-        ? dot2(outward, offset.map((value) => value / offsetLength)) : 0;
+      const alignment = (closest.t <= 1e-7 || closest.t >= 1 - 1e-7)
+        ? entryConeScore(edge, closest.t, offset) : 0;
       const better = closest.distanceSquared < distances[localIndex] - 1e-7
         || (Math.abs(closest.distanceSquared - distances[localIndex]) <= 1e-7 && (
           alignment > alignments[localIndex] + 1e-7
@@ -195,15 +207,21 @@ function assignNearestBoundary(mask, placement, edges, fieldSize, gutterTexels) 
   return { edgeIds, edgeFractions, distances };
 }
 
-function outwardNormal(mesh, uv, side, start, end) {
-  const vertices = [...mesh.indices.subarray(side.triangleIndex * 3, side.triangleIndex * 3 + 3)];
-  const oppositeVertex = vertices.find((vertex) => vertex !== side.vertex0 && vertex !== side.vertex1);
-  const opposite = vertexUv(uv, oppositeVertex);
-  const midpoint = [(start[0] + end[0]) * 0.5, (start[1] + end[1]) * 0.5];
-  const edge = subtract2(end, start);
-  let normal = normalize2([-edge[1], edge[0]]);
-  if (dot2(normal, subtract2(opposite, midpoint)) > 0) normal = normal.map((value) => -value);
-  return normal;
+function entryConeScore(edge, fraction, sourceOffset) {
+  const mapped = [
+    edge.entryMatrix.m00 * sourceOffset[0] + edge.entryMatrix.m01 * sourceOffset[1],
+    edge.entryMatrix.m10 * sourceOffset[0] + edge.entryMatrix.m11 * sourceOffset[1],
+  ];
+  const endpointVertex = fraction <= 1e-7 ? edge.destination.vertex0 : edge.destination.vertex1;
+  const endpointUv = fraction <= 1e-7 ? edge.destinationUv[0] : edge.destinationUv[1];
+  const rays = edge.destinationTriangleUv.filter(({ vertex }) => vertex !== endpointVertex)
+    .map(({ uv }) => subtract2(uv, endpointUv));
+  if (rays.length !== 2) return -Infinity;
+  const determinant = cross2(rays[0], rays[1]);
+  if (Math.abs(determinant) < 1e-20) return -Infinity;
+  const first = cross2(mapped, rays[1]) / determinant;
+  const second = cross2(rays[0], mapped) / determinant;
+  return Math.min(first, second) / (Math.abs(first) + Math.abs(second) + 1e-20);
 }
 
 function writeGatheredMap(recordIndex, texelIndex, tapIndices, weights, worldPos, tangentFrame) {
@@ -244,7 +262,5 @@ function vertexUv(uv, vertex) { return [uv[vertex * 2], uv[vertex * 2 + 1]]; }
 function lerp2(a, b, t) { return [a[0] * (1 - t) + b[0] * t, a[1] * (1 - t) + b[1] * t]; }
 function subtract2(a, b) { return [a[0] - b[0], a[1] - b[1]]; }
 function cross2(a, b) { return a[0] * b[1] - a[1] * b[0]; }
-function dot2(a, b) { return a[0] * b[0] + a[1] * b[1]; }
-function normalize2(value) { const length = Math.hypot(...value); return value.map((axis) => axis / length); }
 function normalize3(value) { const length = Math.hypot(...value); return value.map((axis) => axis / length); }
 function normalizeInPlace(values, offset) { const length = Math.hypot(values[offset], values[offset + 1], values[offset + 2]); if (length > 0) for (let axis = 0; axis < 3; axis += 1) values[offset + axis] /= length; }
