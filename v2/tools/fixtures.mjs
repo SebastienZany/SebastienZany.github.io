@@ -122,39 +122,40 @@ function cylinder(segmentCount = 16) {
 }
 
 function twoChartSphere(longitudeCount = 16, latitudeCount = 8) {
-  const positions = [];
-  const uv = [];
-  const indices = [];
-  const triangleChartIds = [];
-  for (let latitude = 0; latitude <= latitudeCount; latitude += 1) {
-    const polar = latitude / latitudeCount * Math.PI;
-    for (let longitude = 0; longitude <= longitudeCount; longitude += 1) {
-      const azimuth = longitude / longitudeCount * Math.PI * 2;
-      positions.push(
-        Math.sin(polar) * Math.cos(azimuth),
-        Math.cos(polar),
-        Math.sin(polar) * Math.sin(azimuth),
-      );
-      uv.push(0.04 + 0.92 * longitude / longitudeCount, 0.04 + 0.92 * latitude / latitudeCount);
+  void longitudeCount; void latitudeCount;
+  const physical = [
+    [0, 1, 0], [0, -1, 0], [1, 0, 0], [0, 0, 1], [-1, 0, 0], [0, 0, -1],
+  ];
+  const faceCharts = [
+    [[0, 2, 3], 0], [[0, 5, 2], 0], [[1, 3, 2], 0], [[1, 2, 5], 0],
+    [[0, 3, 4], 1], [[0, 4, 5], 1], [[1, 4, 3], 1], [[1, 5, 4], 1],
+  ];
+  const positions = []; const uv = []; const indices = []; const triangleChartIds = [];
+  const vertexByChartPhysical = new Map();
+  const chartUv = (chart, point) => chart === 0
+    ? [0.5 + point[2] * 0.4, 0.5 + point[1] * 0.4]
+    : [0.5 - point[2] * 0.4, 0.5 + point[1] * 0.4];
+  for (const [face, chart] of faceCharts) {
+    for (const physicalVertex of face) {
+      const key = `${chart}:${physicalVertex}`;
+      let vertex = vertexByChartPhysical.get(key);
+      if (vertex === undefined) {
+        vertex = positions.length / 3;
+        vertexByChartPhysical.set(key, vertex);
+        positions.push(...physical[physicalVertex]);
+        uv.push(...chartUv(chart, physical[physicalVertex]));
+      }
+      indices.push(vertex);
     }
+    triangleChartIds.push(chart);
   }
-  const row = longitudeCount + 1;
-  for (let latitude = 0; latitude < latitudeCount; latitude += 1) {
-    for (let longitude = 0; longitude < longitudeCount; longitude += 1) {
-      const corner = latitude * row + longitude;
-      indices.push(corner, corner + row, corner + 1, corner + 1, corner + row, corner + row + 1);
-      const chartId = longitude < longitudeCount / 2 ? 0 : 1;
-      triangleChartIds.push(chartId, chartId);
-    }
-  }
-  const seamVertices = Array.from({ length: latitudeCount + 1 }, (_, latitude) => latitude * row + longitudeCount / 2);
   return fixture('two-chart-sphere', {
-    purpose: 'A folded two-chart surface with pole convergence.',
+    purpose: 'A nondegenerate octahedral sphere split into two disk-like charts.',
     positions,
     uv,
     indices,
     triangleChartIds,
-    seams: [{ chartA: 0, chartB: 1, polyline: seamVertices }],
+    seams: [{ chartA: 0, chartB: 1, closedPolyline: [0, 3, 1, 5, 0] }],
   });
 }
 
