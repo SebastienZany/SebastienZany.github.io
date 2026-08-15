@@ -8,6 +8,7 @@ import { promisify } from 'node:util';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { parseMeshAsset } from '../../src/atlas/asset.js';
+import { packMeshAsset } from '../../tools/pack.mjs';
 import { readGlb } from '../../tools/glb.mjs';
 import {
   buildChartSegmentation,
@@ -106,6 +107,10 @@ test('two standalone mesh bakes are byte-identical', async (context) => {
   assert.equal(loaded.chartCount, 1_233);
   assert.equal(loaded.seamPairCount, 30_034);
   assert.equal(loaded.slitComponentCount, 630);
+  const roundTripped = parseMeshAsset(packMeshAsset(loaded));
+  for (const sectionName of Object.keys(loaded.rawSections)) {
+    assert.deepEqual(roundTripped.rawSections[sectionName], loaded.rawSections[sectionName], sectionName);
+  }
 });
 
 async function runBake(assetPath, reportPath) {

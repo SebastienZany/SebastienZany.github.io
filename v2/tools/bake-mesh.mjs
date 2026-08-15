@@ -188,10 +188,10 @@ Exact texel-center census:
 | Median adjacent-triangle altitude at 1536 | ${medianAltitude.toFixed(4)} texels |
 | Directional sides below 4 texels altitude | ${formatInteger(altitudesAt1536.filter((altitude) => altitude < 4).length)} |
 
-Corner census: 3-chart ${formatInteger(seams.cornerCensus.byChartCount[3])}, 4-chart
-${formatInteger(seams.cornerCensus.byChartCount[4])}, 5-chart
-${formatInteger(seams.cornerCensus.byChartCount[5])}. Angle defects at the multi-chart corners:
-+${formatInteger(seams.cornerCensus.angleDefects.positive)} positive,
+Corner census: 3-chart ${formatInteger(seams.cornerCensus.byChartCount[3])},
+4-chart ${formatInteger(seams.cornerCensus.byChartCount[4])}, and
+5-chart ${formatInteger(seams.cornerCensus.byChartCount[5])}. Angle defects at the multi-chart
+corners: +${formatInteger(seams.cornerCensus.angleDefects.positive)} positive,
 −${formatInteger(seams.cornerCensus.angleDefects.negative)} negative, and
 ${formatInteger(seams.cornerCensus.angleDefects.flat)} approximately flat (±0.05 rad).
 
