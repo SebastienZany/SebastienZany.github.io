@@ -2,7 +2,12 @@ import assert from 'node:assert/strict';
 import { readFile, readdir } from 'node:fs/promises';
 import test from 'node:test';
 import { preprocessWgsl } from '../../src/gpu/wgsl.js';
-import { AGENT_WORKGROUP_SIZE, FIELD_WORKGROUP_SIZE, MAX_OATS } from '../../src/sim/constants.js';
+import {
+  AGENT_WORKGROUP_SIZE,
+  FIELD_WORKGROUP_SIZE,
+  MAX_OATS,
+  OAT_SUPPORT_SIGMAS,
+} from '../../src/sim/constants.js';
 import { PARAM_WGSL_CONSTANTS } from '../../src/sim/params-layout.js';
 
 const simUrl = new URL('../../src/sim/', import.meta.url);
@@ -17,7 +22,13 @@ test('every simulation shader preprocesses with the shared packing constants and
     }
     const expanded = await preprocessWgsl(source, {
       sourceName: name,
-      constants: { ...PARAM_WGSL_CONSTANTS, AGENT_WORKGROUP_SIZE, FIELD_WORKGROUP_SIZE, MAX_OATS },
+      constants: {
+        ...PARAM_WGSL_CONSTANTS,
+        AGENT_WORKGROUP_SIZE,
+        FIELD_WORKGROUP_SIZE,
+        MAX_OATS,
+        OAT_SUPPORT_SIGMAS,
+      },
       resolveInclude: (includeName) => includeName === 'common.wgsl' ? common : undefined,
     });
     assert.doesNotMatch(expanded, /\$\{/);

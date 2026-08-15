@@ -23,6 +23,8 @@ fn refreshOatField(@builtin(global_invocation_id) invocation: vec3<u32>) {
     let radiusUv = max(oat.radiusUv, 0.001);
     var deltaUv = uvPos - oat.uvPos;
     deltaUv -= round(deltaUv);
+    let supportRadiusUv = radiusUv * ${OAT_SUPPORT_SIGMAS};
+    if (dot(deltaUv, deltaUv) > supportRadiusUv * supportRadiusUv) { continue; }
     let contribution = max(oat.peakFood, 0.0)
       * exp(-dot(deltaUv, deltaUv) / (2.0 * radiusUv * radiusUv));
     food = max(food, contribution);

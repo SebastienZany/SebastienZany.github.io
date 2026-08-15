@@ -18,6 +18,8 @@ export const SIMULATION_CONSTANTS = Object.freeze({
   densityMass: 0.032, // main.js:294
   maxDensityReserveMass: 64, // main.js:295
   defaultOatRadius: 0.08 / WORLD_LINEAR_SCALE, // main.js:174
+  oatEpsilon: 0.001, // main.js:176
+  oatSupportSigmas: Math.sqrt(-2 * Math.log(0.001)), // main.js:177
   maxOats: 64, // main.js:2282
   splatReferenceFieldSize: 1536, // main.js:769
 });

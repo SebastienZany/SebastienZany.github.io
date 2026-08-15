@@ -1,5 +1,10 @@
 import { fetchWgsl } from '../gpu/wgsl.js';
-import { AGENT_WORKGROUP_SIZE, FIELD_WORKGROUP_SIZE, MAX_OATS } from './constants.js';
+import {
+  AGENT_WORKGROUP_SIZE,
+  FIELD_WORKGROUP_SIZE,
+  MAX_OATS,
+  OAT_SUPPORT_SIGMAS,
+} from './constants.js';
 import { PARAM_WGSL_CONSTANTS } from './params-layout.js';
 
 const SHADERS = Object.freeze({
@@ -21,6 +26,7 @@ export async function createSimulationPipelines(device, layouts, { onCompilation
     AGENT_WORKGROUP_SIZE,
     FIELD_WORKGROUP_SIZE,
     MAX_OATS,
+    OAT_SUPPORT_SIGMAS,
   };
   const baseUrl = new URL('./', import.meta.url);
   const sources = Object.fromEntries(await Promise.all(Object.entries(SHADERS).map(async ([name, file]) => [

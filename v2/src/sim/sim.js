@@ -64,10 +64,25 @@ export async function createFlatTorusSimulation({
 
   const rawParams = createParams(parameterOverrides);
   let oatDirty = true;
+  let controllerState = null;
   const params = new Proxy(rawParams, {
     set(target, name, value) {
       if (name === 'oatPower') oatDirty = true;
+      if (controllerState && name === 'usePopulationControl') {
+        const wasEnabled = Boolean(target.usePopulationControl);
+        target[name] = Boolean(value);
+        if (target[name]) target.useOatRationing = true;
+        if (wasEnabled && !target[name]) {
+          target.burnRate = controllerState.baseBurnRate;
+          target.reproThreshold = controllerState.baseReproThreshold;
+        }
+        resetPopulationController(target, controllerState, { preserveBase: wasEnabled && !target[name] });
+        return true;
+      }
       target[name] = value;
+      if (controllerState && (name === 'burnRate' || name === 'reproThreshold')) {
+        resetPopulationController(target, controllerState);
+      }
       return true;
     },
   });
@@ -82,7 +97,8 @@ export async function createFlatTorusSimulation({
   let currentRandomSeed = randomSeed >>> 0;
   let handOutCursor = 0;
   let destroyed = false;
-  let controllerState = createPopulationControllerState(params);
+  controllerState = createPopulationControllerState(params);
+  resetPopulationController(rawParams, controllerState);
   const timebase = createSimulationTimebase({ fixedTick });
   const compatibility = { manifestRootHash, fieldSize, capacity };
   const zeroField = new Float32Array(fieldSize * fieldSize);
@@ -289,7 +305,7 @@ export async function createFlatTorusSimulation({
   async function samplePopulation(now, { force = false } = {}) {
     const visibleAgents = await count();
     const sampleTime = fixedTick ? stepIndex * 16.6667 : now; // main.js:18633 step unit
-    return updatePopulationController(params, controllerState, { now: sampleTime, visibleAgents, force });
+    return updatePopulationController(rawParams, controllerState, { now: sampleTime, visibleAgents, force });
   }
 
   function uploadParameters(dt) {

@@ -156,14 +156,34 @@ test('movement and diffusion are translationally identical across torus boundari
       for (let x = 0; x < 64; x += 1) {
         const shiftedX = (x + 32) % 64;
         maxTranslatedDifference = Math.max(maxTranslatedDifference,
-          Math.abs(border[y * 64 + x] - interior[y * 64 + shiftedX]));
+        Math.abs(border[y * 64 + x] - interior[y * 64 + shiftedX]));
       }
     }
-    return { wrappedAgent, maxTranslatedDifference };
+
+    Object.assign(sim.params, {
+      densityBlur: 1,
+      densityTarget: 0.1,
+      crowdWeight: 0.1,
+      foodWeight: 0,
+      sensorAngle: 0,
+      sensorDistance: 1 / 64,
+      minMoveScale: 0,
+    });
+    sim.clearOats();
+    await sim.debugReplaceState({
+      agents: [
+        { uvPos: [0.1 / 64, 0.5], heading: Math.PI, reserve: 0.1, idLo: 1, idHi: 3, flags: 0 },
+        { uvPos: [63.1 / 64, 0.5], heading: 0, reserve: 2, idLo: 2, idHi: 3, flags: 0 },
+      ],
+    });
+    sim.step(1);
+    const sensedAcrossEdge = (await sim.readAgents()).find(({ idLo }) => idLo === 1);
+    return { wrappedAgent, maxTranslatedDifference, sensedAcrossEdge };
   });
   expect(result.wrappedAgent.uvPos[0]).toBeLessThan(0.01);
   expect(result.wrappedAgent.heading).toBeCloseTo(0, 5);
   expect(result.maxTranslatedDifference).toBeLessThan(1e-7);
+  expect(result.sensedAcrossEdge.uvPos[0]).toBeGreaterThan(0.99);
 });
 
 test('border translation accumulates no growth bias over 1000 steps', async ({ page }) => {
@@ -243,11 +263,17 @@ test('GPU delta pass agrees numerically with the anchored plain-JS oracle', asyn
       maxReserve: 4.2,
     });
     sim.clearOats();
-    const samples = [
-      { x: 7, y: 9, food: 0.12, reserve: 1.25 },
-      { x: 19, y: 33, food: 0.38, reserve: 3.5 },
-      { x: 48, y: 51, food: 0.49, reserve: 4.1 },
-    ];
+    let randomState = 0x6d3f_27a1;
+    const unitRandom = () => {
+      randomState = (Math.imul(randomState, 1_664_525) + 1_013_904_223) >>> 0;
+      return randomState / 0x1_0000_0000;
+    };
+    const samples = Array.from({ length: 24 }, (_, index) => ({
+      x: 4 + (index % 6) * 10,
+      y: 5 + Math.floor(index / 6) * 14,
+      food: 0.02 + unitRandom() * 0.47,
+      reserve: 0.1 + unitRandom() * 4,
+    }));
     const field = new Float32Array(64 * 64);
     const agents = samples.map((sample, index) => {
       field[sample.y * 64 + sample.x] = sample.food;
@@ -269,12 +295,14 @@ test('GPU delta pass agrees numerically with the anchored plain-JS oracle', asyn
     };
   });
   for (const sample of result.samples) {
+    const sampledFood = Math.fround(sample.food);
+    const startingReserve = Math.fround(sample.reserve);
     const finalReserve = Math.min(result.params.maxReserve,
-      sample.reserve + (result.params.uptakeRate * sample.food
+      startingReserve + (result.params.uptakeRate * sampledFood
         - result.params.depositRate - result.params.burnRate) * 0.75);
-    const fixedDensity = Math.round(finalReserve * 0.032 * 256) / 256;
+    const fixedDensity = Math.round(finalReserve * 0.032 * 4096) / 4096;
     const expected = resolveFoodDelta({
-      food: Math.fround(sample.food),
+      food: sampledFood,
       density: fixedDensity,
       uptakeRate: result.params.uptakeRate,
       depositRate: result.params.depositRate,
@@ -296,6 +324,9 @@ test('oats max-compose, clear immediately, ration, and honor all 64 records', as
     ]);
     sim.step(0);
     const overlap = (await sim.readOatField())[32 * 64 + 32];
+    sim.setOats([{ uvPos: [0.5, 0.5], radiusUv: 0.1, peakFood: 1 }]);
+    sim.step(0);
+    const outsideSupport = (await sim.readOatField())[0];
     sim.clearOats();
     sim.step(0);
     const clearedMax = Math.max(...await sim.readOatField());
@@ -329,9 +360,18 @@ test('oats max-compose, clear immediately, ration, and honor all 64 records', as
       sim.step(1);
       return (await sim.readAgents())[0].reserve;
     };
-    return { overlap, clearedMax, honored, lastOat, rationed: await reserveAfter(true), full: await reserveAfter(false) };
+    return {
+      overlap,
+      outsideSupport,
+      clearedMax,
+      honored,
+      lastOat,
+      rationed: await reserveAfter(true),
+      full: await reserveAfter(false),
+    };
   });
   expect(result.overlap).toBeCloseTo(0.6, 4);
+  expect(result.outsideSupport).toBe(0);
   expect(result.clearedMax).toBe(0);
   expect(result.honored).toBe(64);
   expect(result.lastOat).toBeCloseTo(0.415, 4);
@@ -505,6 +545,36 @@ test('NaN scan stays zero and the population can grow then saturate safely', asy
   expect(result.count).toBeLessThanOrEqual(65000);
   expect(result.minimum).toBeGreaterThan(0);
   expect(result.nonFinite).toBe(0);
+});
+
+test('the query-string population target stays bounded and never extinguishes', async ({ page }) => {
+  const target = 900;
+  await openSim(page, `field=64&cap=1024&seed=600&rng=29&target=${target}&paused=1`);
+  const result = await page.evaluate(async () => {
+    const sim = window.__v2.sim;
+    let minimum = await sim.count();
+    for (let step = 1; step <= 720; step += 1) {
+      sim.step(1);
+      if (step % 72 === 0) {
+        const population = await sim.count();
+        minimum = Math.min(minimum, population);
+        await sim.samplePopulation(step * 16.6667);
+      }
+    }
+    return {
+      population: await sim.count(),
+      minimum,
+      supply: sim.params.oatSupplyRate,
+      supplyMin: sim.params.populationOatSupplyMin,
+      supplyMax: sim.params.populationOatSupplyMax,
+      rationing: sim.params.useOatRationing,
+    };
+  });
+  expect(result.minimum).toBeGreaterThan(0);
+  expect(Math.abs(result.population - target) / target).toBeLessThanOrEqual(0.15);
+  expect(result.supply).toBeGreaterThanOrEqual(result.supplyMin);
+  expect(result.supply).toBeLessThanOrEqual(result.supplyMax);
+  expect(result.rationing).toBe(true);
 });
 
 test('performance sample is recorded without becoming a gate', async ({ page }, testInfo) => {
