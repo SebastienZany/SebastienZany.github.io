@@ -15,4 +15,3 @@ test('fixture generator emits the three day-one packed-asset stubs', () => {
   }
   assert.notEqual(fixtures['seam-quad'].attributes.uv[3], fixtures['seam-quad'].attributes.uv[13]);
 });
-

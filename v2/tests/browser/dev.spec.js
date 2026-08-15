@@ -16,4 +16,3 @@ test('dev harness clears to the legacy scene colour without uncaptured errors', 
   expect(result.registryBytes).toBe(256);
   await expect(page.locator('#errors')).toBeHidden();
 });
-

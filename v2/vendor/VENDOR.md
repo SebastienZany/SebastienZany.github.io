@@ -23,4 +23,3 @@ are CPU-only in v2; no three.js renderer may be instantiated.
 
 The upstream packages are MIT licensed. Exact upstream files before the import-only rewrites had
 SHA-256 `80efaade…c07f4e` (OrbitControls) and `336aec44…9b70` (three-mesh-bvh).
-

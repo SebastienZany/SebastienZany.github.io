@@ -85,4 +85,3 @@ function hash2d(x, y) {
   value ^= value >>> 16;
   return (value >>> 0) / 0xffffffff;
 }
-

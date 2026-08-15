@@ -286,4 +286,3 @@ function mean(values) {
 function formatBytes(bytes) {
   return `${(bytes / 2 ** 20).toFixed(1)} MiB`;
 }
-

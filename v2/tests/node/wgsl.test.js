@@ -30,4 +30,3 @@ test('WGSL preprocessor reports a missing include with its parent', async () => 
     /Missing WGSL include "absent\.wgsl" from entry\.wgsl/,
   );
 });
-

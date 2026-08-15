@@ -29,4 +29,3 @@ fn main(@builtin(global_invocation_id) invocation: vec3u) {
   let destination = records[base];
   textureStore(outputField, vec2u(destination % dimensions.x, destination / dimensions.x), vec4f(value, 0.0, 0.0, 0.0));
 }
-

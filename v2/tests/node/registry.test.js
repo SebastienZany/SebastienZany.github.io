@@ -32,4 +32,3 @@ test('registry refuses unlabeled resources and unknown texture formats', () => {
   assert.throws(() => registry.createBuffer({ size: 4, usage: 1 }), /requires a label/);
   assert.throws(() => calculateTextureBytes({ size: [1, 1], format: 'mystery' }), /undefined/);
 });
-

@@ -50,4 +50,3 @@ async function recordMacProbeResult(chromeVersion, hardwareAdapter, report) {
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
-

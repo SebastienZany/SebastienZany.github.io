@@ -15,4 +15,3 @@ fn vertexMain(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec
 fn fragmentMain() -> @location(0) vec4f {
   return vec4f(0.2, 0.4, 0.6, 1.0);
 }
-

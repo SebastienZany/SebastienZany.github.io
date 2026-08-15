@@ -102,4 +102,3 @@ function normalizeExtent(size) {
 function requireLabel(label, kind) {
   if (typeof label !== 'string' || label.trim() === '') throw new Error(`Every GPU ${kind} requires a label`);
 }
-

@@ -128,4 +128,3 @@ function showError(message) {
 
 window.addEventListener('error', (event) => showError(event.error?.message || event.message));
 window.addEventListener('unhandledrejection', (event) => showError(event.reason?.message || String(event.reason)));
-

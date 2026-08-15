@@ -15,4 +15,3 @@
 - **walk** — the bake-time geodesic traversal across mesh triangles used to locate a gutter donor.
 
 Code uses these terms literally. In particular, a random source index is not called a donor unless it is guaranteed authoritative.
-

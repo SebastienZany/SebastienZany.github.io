@@ -20,4 +20,3 @@ fn main(@builtin(global_invocation_id) invocation: vec3u) {
   let noise = f32(hash(linearIndex) & 65535u) / 65535.0;
   textureStore(outputField, invocation.xy, vec4f(noise, 0.0, 0.0, 0.0));
 }
-

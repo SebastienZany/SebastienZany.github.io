@@ -160,4 +160,3 @@ function writeStructureValidDonorRecords(mappedRange, textureCount, recordCount)
     values[base + 6] = weights[2] | (weights[3] << 16);
   }
 }
-

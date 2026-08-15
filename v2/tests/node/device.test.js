@@ -64,4 +64,3 @@ test('development error scope always pops and reports validation errors', async 
   assert.deepEqual(calls, ['push:validation']);
   assert.equal(reported[0].label, 'fixture');
 });
-

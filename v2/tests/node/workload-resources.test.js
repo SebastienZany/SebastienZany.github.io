@@ -45,4 +45,3 @@ test('1024 rehearsal allocates the full set with structure-valid measured-volume
   assert.equal(registry.totalBytes(), 0);
   assert.equal(destroyed.length, resources.all.length);
 });
-

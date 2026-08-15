@@ -37,4 +37,3 @@ function requirePositiveScale(value) {
 }
 
 export const gameClock = createClock();
-

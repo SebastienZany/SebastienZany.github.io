@@ -7,4 +7,3 @@
 fn main() {
   textureStore(target, vec2u(0u), vec4f(0.25, 0.5, 0.75, 1.0));
 }
-

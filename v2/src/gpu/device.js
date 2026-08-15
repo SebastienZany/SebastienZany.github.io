@@ -107,4 +107,3 @@ export async function withGpuErrorScope(device, label, operation, {
   if (thrown) throw thrown;
   return { value, error };
 }
-

@@ -16,4 +16,3 @@ test('clock rejects a non-positive scale', () => {
   const clock = createClock({ read: () => 0 });
   assert.throws(() => { clock.timeScale = 0; }, /positive finite/);
 });
-

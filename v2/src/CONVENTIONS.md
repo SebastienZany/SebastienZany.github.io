@@ -14,4 +14,3 @@ Review every milestone against this checklist.
 - [ ] Atlas textures never receive ordinary mipmaps.
 - [ ] Timelines and schedulers consume `shared/clock.js`, never `performance.now()` directly.
 - [ ] Any knowing legacy-semantic deviation appears in PLAN §1.5 before it lands in code.
-

@@ -11,4 +11,3 @@ fn main(@builtin(global_invocation_id) invocation: vec3u) {
     atomicAdd(&sum, invocation.x + 1u);
   }
 }
-

@@ -15,4 +15,3 @@ fn fragmentMain(@builtin(position) position: vec4f) -> @location(0) vec4f {
   let value = textureSample(sourceField, sourceSampler, position.xy / vec2f(4.0));
   return vec4f(value.r, value.r, value.r, 1.0);
 }
-

@@ -9,4 +9,3 @@ fn main(@builtin(global_invocation_id) invocation: vec3u) {
   let texelIndex = (invocation.x * 1664525u + 1013904223u) % ${FIELD_TEXEL_COUNT}u;
   atomicAdd(&scatterField[texelIndex], 300u);
 }
-

@@ -62,4 +62,3 @@ test('kernel footprint contract derives a four-texel gutter', () => {
 function pickRange({ min, max, step }) {
   return { min, max, step };
 }
-
