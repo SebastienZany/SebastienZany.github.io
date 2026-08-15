@@ -1,4 +1,4 @@
-import { Matrix4, PerspectiveCamera } from '../../vendor/three.module.js';
+import { MOUSE, Matrix4, PerspectiveCamera } from '../../vendor/three.module.js';
 import { OrbitControls } from '../../vendor/controls/OrbitControls.js';
 
 export const LOOK_CAMERA_CONSTANTS = Object.freeze({
@@ -10,6 +10,7 @@ export const LOOK_CAMERA_CONSTANTS = Object.freeze({
   dampingFactor: 0.07,
   rotateSpeed: 0.65,
   zoomSpeed: 0.7,
+  shiftSpeedMultiplier: 1 / 3,
   minDistanceWorld: 3.2,
   maxDistanceWorld: 22.4,
   maxPolarAngleRadians: Math.PI / 2 - 0.04,
@@ -39,6 +40,7 @@ export function createLookCamera({ device, registry, canvas }) {
   controls.maxPolarAngle = constants.maxPolarAngleRadians;
   controls.target.set(...constants.targetWorldPosition);
   controls.update();
+  const disposeSpeedModifiers = installOrbitSpeedModifiers(canvas, controls, constants);
 
   const uniformBuffer = registry.createBuffer({
     label: 'look-camera-uniforms',
@@ -68,5 +70,52 @@ export function createLookCamera({ device, registry, canvas }) {
   }
 
   update(canvas.clientWidth, canvas.clientHeight);
-  return { camera, controls, uniformBuffer, update, dispose: () => controls.dispose() };
+  return {
+    camera,
+    controls,
+    uniformBuffer,
+    update,
+    dispose() {
+      disposeSpeedModifiers();
+      controls.dispose();
+    },
+  };
+}
+
+function installOrbitSpeedModifiers(canvas, controls, constants) {
+  const defaultLeftAction = controls.mouseButtons.LEFT;
+  const inputMultiplier = (event) => (event.shiftKey ? constants.shiftSpeedMultiplier : 1);
+
+  const handlePointerDown = (event) => {
+    controls.rotateSpeed = constants.rotateSpeed * inputMultiplier(event);
+    // OrbitControls normally interprets Shift+left as pan. Selecting its PAN action here makes
+    // that same branch choose rotate, while enablePan remains false (parity checklist §4).
+    if (event.button === 0 && event.shiftKey) controls.mouseButtons.LEFT = MOUSE.PAN;
+  };
+  const handlePointerMove = (event) => {
+    controls.rotateSpeed = constants.rotateSpeed * inputMultiplier(event);
+  };
+  const handlePointerEnd = () => {
+    controls.rotateSpeed = constants.rotateSpeed;
+    controls.mouseButtons.LEFT = defaultLeftAction;
+  };
+  const handleWheel = (event) => {
+    controls.zoomSpeed = constants.zoomSpeed * inputMultiplier(event);
+    queueMicrotask(() => {
+      controls.zoomSpeed = constants.zoomSpeed;
+    });
+  };
+
+  canvas.addEventListener('pointerdown', handlePointerDown, { capture: true });
+  canvas.addEventListener('pointermove', handlePointerMove, { capture: true });
+  canvas.addEventListener('pointerup', handlePointerEnd, { capture: true });
+  canvas.addEventListener('pointercancel', handlePointerEnd, { capture: true });
+  canvas.addEventListener('wheel', handleWheel, { capture: true, passive: true });
+  return () => {
+    canvas.removeEventListener('pointerdown', handlePointerDown, { capture: true });
+    canvas.removeEventListener('pointermove', handlePointerMove, { capture: true });
+    canvas.removeEventListener('pointerup', handlePointerEnd, { capture: true });
+    canvas.removeEventListener('pointercancel', handlePointerEnd, { capture: true });
+    canvas.removeEventListener('wheel', handleWheel, { capture: true });
+  };
 }

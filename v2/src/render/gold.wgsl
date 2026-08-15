@@ -1,5 +1,5 @@
 // Gold body mesh material (F2 material-look lane; main.js:2972,4948-4952,5165-5266 semantics).
-// Inputs: fixture position/normal/UV, camera/material/light UBOs, r32float running-max food, F1 LUT.
+// Inputs: mesh position/normal/original UV, camera/material/light UBOs, r32float running-max food, F1 LUT.
 // Output: opaque linear scene radiance drawn before the slime film into a depth24plus pass.
 // Units: positions are surface/world-space, history is field value, film thickness nanometres.
 // Invariants: remembered food never decreases; the 600x256 LUT costs exactly one bilinear fetch per fragment.

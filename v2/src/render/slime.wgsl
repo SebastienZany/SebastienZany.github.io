@@ -1,8 +1,8 @@
 // Slime mesh material (F2 material-look lane; main.js:3979-4376 semantics).
-// Inputs: fixture position/normal/UV, camera/material/light UBOs, filterable r16float display field, gold LUT.
+// Inputs: mesh position/normal/original UV, camera/material/light UBOs, filterable r16float display field, gold LUT.
 // Output: linear scene radiance with coverage alpha for One/OneMinusSrcAlpha layering over opaque gold.
 // Units: positions are surface/world-space, UVs normalized, bump radius texel-space, film thickness nanometres.
-// Invariants: 4 axial plus 4 diagonal height taps; direct reach <=2.33 texels; synthetic field proves no seams.
+// Invariants: 4 axial plus 4 diagonal height taps; direct reach <=2.33 texels; F3 draws no seam conclusions.
 
 //#include "material-common.wgsl"
 

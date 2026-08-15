@@ -5,12 +5,15 @@ import { createSyntheticDisplayChain } from './render/display-chain.js';
 import { loadTwoChartSphereFixture } from './render/fixture-mesh.js';
 import { loadGoldLutTexture } from './render/gold-lut-texture.js';
 import { createMaterialUniformWriter } from './render/material-uniforms.js';
+import { loadMeshAssetGeometry } from './render/mesh-geometry.js';
 import { createSurfaceRenderer } from './render/renderer.js';
+import { createSurfaceFieldProvider } from './render/surface-field.js';
 import { SURFACE_PARAM_CONTROLS } from './render/surface-params.js';
 import { createSyntheticFieldProvider } from './shared/field-provider.js';
 import { createParams } from './shared/params.js';
 
 const canvas = document.querySelector('#lookSurface');
+const realMeshRequested = new URLSearchParams(location.search).get('mesh') === '1';
 const look = {
   device: null,
   registry: null,
@@ -18,6 +21,9 @@ const look = {
   uncapturedErrors: [],
   renderTestFrame: null,
   scanForNonFinite: null,
+  meshMode: realMeshRequested ? 'mesh1' : 'fixture',
+  meshStats: null,
+  fieldStats: null,
   ready: null,
 };
 window.__v2 = { look };
@@ -47,11 +53,15 @@ async function initialize() {
     else console.warn(`[${message.shader}] ${message.message}`);
   };
 
-  const fieldProvider = createSyntheticFieldProvider(look.device, look.registry, { size: 256 });
   const [mesh, goldLut] = await Promise.all([
-    loadTwoChartSphereFixture({ device: look.device, registry: look.registry }),
+    realMeshRequested
+      ? loadMeshAssetGeometry({ device: look.device, registry: look.registry })
+      : loadTwoChartSphereFixture({ device: look.device, registry: look.registry }),
     loadGoldLutTexture({ device: look.device, registry: look.registry }),
   ]);
+  const fieldProvider = realMeshRequested
+    ? createSurfaceFieldProvider(look.device, look.registry, mesh.asset, { size: 256 })
+    : createSyntheticFieldProvider(look.device, look.registry, { size: 256 });
   const displayChain = await createSyntheticDisplayChain({
     device: look.device,
     registry: look.registry,
@@ -88,6 +98,22 @@ async function initialize() {
     return renderer.readTestStats();
   };
   look.scanForNonFinite = () => displayChain.scanForNonFinite();
+  look.meshStats = Object.freeze({
+    name: mesh.name,
+    vertexCount: mesh.vertexCount,
+    triangleCount: mesh.triangleCount,
+    indexCount: mesh.indexCount,
+    indexFormat: mesh.indexBinding.format,
+  });
+  look.fieldStats = Object.freeze({
+    mode: fieldProvider.mode ?? 'uv-synthetic',
+    paintedTexelCount: fieldProvider.paintedTexelCount ?? fieldProvider.size * fieldProvider.size,
+    size: fieldProvider.size,
+  });
+  document.querySelector('#scopeBanner').hidden = !realMeshRequested;
+  document.querySelector('h1').textContent = realMeshRequested
+    ? 'Real-mesh material look'
+    : 'Fixture material look';
   document.querySelector('#status').textContent = `${mesh.name} · ${displayChain.displayFormat} display · orbit enabled`;
   startAnimation({ fieldProvider, displayChain, renderer });
   return look;

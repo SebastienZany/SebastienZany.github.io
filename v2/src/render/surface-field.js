@@ -10,7 +10,12 @@ export const SURFACE_FIELD_CONSTANTS = Object.freeze({
   zFrequencyScale: 1.18,
 });
 
-export function surfaceFieldValueAtWorld(worldX, worldY, worldZ, frequencyPerWorld = 11) {
+export function surfaceFieldValueAtWorld(
+  worldX,
+  worldY,
+  worldZ,
+  frequencyPerWorld = SURFACE_FIELD_CONSTANTS.frequencyPerWorld,
+) {
   const constants = SURFACE_FIELD_CONSTANTS;
   const value = constants.baseValue
     + constants.xAmplitude * Math.sin(worldX * frequencyPerWorld)

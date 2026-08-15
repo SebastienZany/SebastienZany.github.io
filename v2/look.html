@@ -28,6 +28,12 @@
       }
       h1 { margin: 0 0 2px; font: 600 15px/1.2 system-ui, sans-serif; }
       p { margin: 0 0 10px; color: #9fb8b0; }
+      #scopeBanner {
+        padding: 7px 8px;
+        border-left: 2px solid #b99958;
+        color: #dfc993;
+        background: #2a210f99;
+      }
       #controls { display: grid; gap: 7px; }
       .number-control {
         display: grid;
@@ -61,10 +67,11 @@
     </style>
   </head>
   <body>
-    <canvas id="lookSurface" aria-label="Slime and gold material fixture"></canvas>
+    <canvas id="lookSurface" aria-label="Slime and gold material surface"></canvas>
     <aside>
       <h1>Fixture material look</h1>
       <p id="status">Starting WebGPU…</p>
+      <p id="scopeBanner" role="note" hidden>original UVs + synthetic field ⇒ seams will be visible and that is CORRECT here — F4 owns seam-correct display on the repacked atlas.</p>
       <section id="controls" aria-label="Surface parameters"></section>
       <div id="errors" hidden></div>
     </aside>
