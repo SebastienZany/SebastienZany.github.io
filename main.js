@@ -15826,6 +15826,15 @@ async function onLoad(gltf) {
     // recorded frame at the wrong dt changes the physics, not just the pacing.
     // A recording therefore has to carry the dt of every frame it captured.
     getFrameTiming: () => ({ rawDt: lastRawDt, clamp: FRAME_DT_CLAMP }),
+    // Where an oat placed at `uv` would put its story callout on screen. The
+    // callout is anchored to the oat's projected position, so a recording script
+    // that wants readable text has to know, before placing, whether the box will
+    // land over the creature or over empty space.
+    uvToWorld: (uv, target) => uvToWorld(uv, target ?? new THREE.Vector3()),
+    projectWorldToScreen: (worldPoint, w, h) => {
+      const r = projectWorldToScreen(worldPoint, w, h);
+      return { x: r.x, y: r.y, z: r.z, inClip: r.inClip };
+    },
     // Resolved pause state. A paused frame still advances oat decay, seeding and
     // the display chain and still writes oatRT/densityRT — it only skips
     // simulate() — so this is "do not advance the field", not "freeze the world".

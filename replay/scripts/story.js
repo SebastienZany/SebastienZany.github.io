@@ -56,6 +56,21 @@ const MIN_UV_GAP = 0.053;
 const MIN_SCORE = 0.004;
 const CANDIDATES = 32;       // strongest-first retries per placement
 
+// Keep the food on the UPPER CENTRAL BODY — the mantle — rather than out on the
+// arms. Two reasons, both about legibility: a tentacle crossing in front hides
+// the oat's own glow marker, and the callout is anchored to the oat's projected
+// position, so an oat on a low or outlying arm drags its text box down into the
+// busiest part of the silhouette.
+//
+// Expressed in world space against the mesh bounds, so it survives camera
+// motion: HEIGHT_MIN is a fraction of the mesh's vertical extent measured from
+// the bottom, RADIUS_MAX a fraction of its horizontal half-extent from the
+// centre axis. Both relax if nothing qualifies, so a placement is never lost
+// outright — it just prefers the mantle.
+const HEIGHT_MIN = 0.58;
+const RADIUS_MAX = 0.42;
+const RELAX_STEPS = [0, 0.12, 0.26, 0.45];
+
 /** IEEE 754 half -> Number. renderSampleViewRT is RGBA16F. */
 function halfToFloat(h) {
   const sign = (h & 0x8000) ? -1 : 1;
@@ -85,6 +100,7 @@ export default function story(api, { W = 1280, H = 720 } = {}) {
 
   let halfBuf = null;
   let floatBuf = null;
+  let bounds = null;
   const diag = [];
 
   function candidatesOnSlime(a) {
@@ -112,7 +128,22 @@ export default function story(api, { W = 1280, H = 720 } = {}) {
       }
     }
 
-    const out = [];
+    // Mesh bounds, for the mantle test below. Computed once — the mesh does not
+    // move, only the camera does.
+    if (!bounds && a.mesh && a.THREE) {
+      const box = new a.THREE.Box3().setFromObject(a.mesh);
+      const centre = box.getCenter(new a.THREE.Vector3());
+      const sizeV = box.getSize(new a.THREE.Vector3());
+      bounds = {
+        minY: box.min.y,
+        spanY: Math.max(1e-6, sizeV.y),
+        cx: centre.x,
+        cz: centre.z,
+        halfSpan: Math.max(1e-6, Math.max(sizeV.x, sizeV.z) * 0.5),
+      };
+    }
+
+    const raw = [];
     let windowMax = 0;
     for (let j = 0; j < win; j += STRIDE) {
       for (let i = 0; i < win; i += STRIDE) {
@@ -128,11 +159,41 @@ export default function story(api, { W = 1280, H = 720 } = {}) {
           const dv = v - o.uv.y;
           if (du * du + dv * dv < MIN_UV_GAP * MIN_UV_GAP) { ok = false; break; }
         }
-        if (ok) out.push({ u, v, val });
+        if (!ok) continue;
+
+        // Where on the animal is this? height 0 = bottom of the mesh, 1 = top;
+        // radius 0 = on the centre axis, 1 = out at the widest arm.
+        let height = null;
+        let radius = null;
+        if (bounds && a.uvToWorld) {
+          try {
+            const w = a.uvToWorld({ x: u, y: v });
+            height = (w.y - bounds.minY) / bounds.spanY;
+            radius = Math.hypot(w.x - bounds.cx, w.z - bounds.cz) / bounds.halfSpan;
+          } catch { height = null; radius = null; }
+        }
+        raw.push({ u, v, val, height, radius });
       }
     }
-    out.sort((p, q) => q.val - p.val);
-    diag.push({ found: out.length, best: out[0] ? +out[0].val.toFixed(4) : null, windowMax: +windowMax.toFixed(4) });
+
+    // Prefer the mantle, relaxing only as far as needed to find anything.
+    let out = [];
+    let usedRelax = null;
+    for (const relax of RELAX_STEPS) {
+      out = raw.filter((cand) => cand.height == null || cand.radius == null
+        || (cand.height >= HEIGHT_MIN - relax && cand.radius <= RADIUS_MAX + relax));
+      if (out.length) { usedRelax = relax; break; }
+    }
+    if (!out.length) { out = raw; usedRelax = 'none'; }
+
+    // Among qualifying spots, highest on the body wins — that is the clearest
+    // sky for the text box — with slime strength as the tie-break.
+    out.sort((p, q) => ((q.height ?? 0) - (p.height ?? 0)) || (q.val - p.val));
+    diag.push({
+      raw: raw.length, kept: out.length, relax: usedRelax,
+      best: out[0] ? { val: +out[0].val.toFixed(4), h: out[0].height == null ? null : +out[0].height.toFixed(2), r: out[0].radius == null ? null : +out[0].radius.toFixed(2) } : null,
+      windowMax: +windowMax.toFixed(4),
+    });
     return out.slice(0, CANDIDATES);
   }
 
