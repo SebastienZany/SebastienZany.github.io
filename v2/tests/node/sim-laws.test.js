@@ -3,6 +3,7 @@ import test from 'node:test';
 import { createParams } from '../../src/shared/params.js';
 import {
   createPopulationControllerState,
+  resetPopulationController,
   updatePopulationController,
 } from '../../src/sim/controller.js';
 import { rationedOatFood, resolveFoodDelta } from '../../src/sim/delta-oracle.js';
@@ -35,29 +36,41 @@ test('oat rationing follows local reserve load and can be disabled', () => {
 
 test('population controller honors sample timing, log command, EMA, deadband, and bounds', () => {
   const params = createParams({
-    usePopulationControl: true,
+    usePopulationControl: false,
     populationTarget: 1000,
     oatSupplyRate: 0.14,
     populationControlPeriodMs: 1200,
   });
-  const state = createPopulationControllerState(params);
-  const first = updatePopulationController(params, state, { now: 0, visibleAgents: 1000 });
+  let clockTime = 37.25;
+  const clock = { now: () => clockTime };
+  assert.throws(() => createPopulationControllerState(params), /requires an injected clock/);
+  const state = createPopulationControllerState(params, { clock });
+  assert.equal(state.lastSampleTime, 37.25);
+  params.usePopulationControl = true;
+  clockTime = 100;
+  resetPopulationController(params, state, { clock });
+  assert.equal(state.lastSampleTime, 100);
+  const first = updatePopulationController(params, state, { clock, visibleAgents: 1000 });
   assert.equal(first.samples.length, 0);
   assert.equal(params.oatSupplyRate, 0.14);
-  updatePopulationController(params, state, { now: 600, visibleAgents: 1200 });
-  assert.equal(state.lastSampleTime, 0);
-  const second = updatePopulationController(params, state, { now: 1200, visibleAgents: 1200 });
+  clockTime = 700;
+  updatePopulationController(params, state, { clock, visibleAgents: 1200 });
+  assert.equal(state.lastSampleTime, 100);
+  clockTime = 1300;
+  const second = updatePopulationController(params, state, { clock, visibleAgents: 1200 });
   assert.equal(second.samples.length, 1);
   assert.ok(second.growthRate > 0);
   assert.ok(second.commandedGrowthRate < 0);
   assert.ok(params.oatSupplyRate < 0.14);
   const growthBefore = second.growthRate;
-  const third = updatePopulationController(params, state, { now: 2400, visibleAgents: 1200 });
+  clockTime = 2500;
+  const third = updatePopulationController(params, state, { clock, visibleAgents: 1200 });
   assert.ok(third.growthRate < growthBefore);
   assert.ok(third.growthRate > 0);
 
   params.populationTarget = 1190;
-  const deadbanded = updatePopulationController(params, state, { now: 3600, visibleAgents: 1200 });
+  clockTime = 3700;
+  const deadbanded = updatePopulationController(params, state, { clock, visibleAgents: 1200 });
   assert.equal(Math.abs(deadbanded.commandedGrowthRate), 0);
   assert.ok(params.oatSupplyRate >= params.populationOatSupplyMin);
   assert.ok(params.oatSupplyRate <= params.populationOatSupplyMax);
@@ -70,9 +83,12 @@ test('secondary actuator is stateful and only engages at the low supply bound', 
     oatSupplyRate: 0.001,
     populationUseSecondaryActuator: true,
   });
-  const state = createPopulationControllerState(params);
-  updatePopulationController(params, state, { now: 0, visibleAgents: 1500 });
-  updatePopulationController(params, state, { now: 1200, visibleAgents: 1700 });
+  let clockTime = 0;
+  const clock = { now: () => clockTime };
+  const state = createPopulationControllerState(params, { clock });
+  updatePopulationController(params, state, { clock, visibleAgents: 1500 });
+  clockTime = 1200;
+  updatePopulationController(params, state, { clock, visibleAgents: 1700 });
   assert.equal(state.saturatedLow, true);
   assert.ok(state.secondarySeverity > 0);
   assert.ok(params.burnRate > state.baseBurnRate);

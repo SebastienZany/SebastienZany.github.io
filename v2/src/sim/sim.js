@@ -1,6 +1,7 @@
 import { withGpuErrorScope } from '../gpu/device.js';
 import { GpuRegistry } from '../gpu/registry.js';
 import { createParams } from '../shared/params.js';
+import { gameClock } from '../shared/clock.js';
 import { createSimulationBindings } from './bindings.js';
 import {
   AGENT_BYTES,
@@ -48,6 +49,7 @@ export async function createFlatTorusSimulation({
   dev = true,
   onGpuError,
   onCompilationMessage,
+  clock = gameClock,
 } = {}) {
   validateDimensions(fieldSize, capacity, seedCount);
   if (!device?.queue) throw new TypeError('createFlatTorusSimulation requires a GPUDevice');
@@ -76,12 +78,15 @@ export async function createFlatTorusSimulation({
           target.burnRate = controllerState.baseBurnRate;
           target.reproThreshold = controllerState.baseReproThreshold;
         }
-        resetPopulationController(target, controllerState, { preserveBase: wasEnabled && !target[name] });
+        resetPopulationController(target, controllerState, {
+          clock: controllerClock,
+          preserveBase: wasEnabled && !target[name],
+        });
         return true;
       }
       target[name] = value;
       if (controllerState && (name === 'burnRate' || name === 'reproThreshold')) {
-        resetPopulationController(target, controllerState);
+        resetPopulationController(target, controllerState, { clock: controllerClock });
       }
       return true;
     },
@@ -97,8 +102,12 @@ export async function createFlatTorusSimulation({
   let currentRandomSeed = randomSeed >>> 0;
   let handOutCursor = 0;
   let destroyed = false;
-  controllerState = createPopulationControllerState(params);
-  resetPopulationController(rawParams, controllerState);
+  // Controller epoch is captured after async GPU setup and before seed-state upload.
+  // Fixed-tick mode injects its deterministic step clock; parity mode injects the app clock.
+  const controllerClock = {
+    now: () => fixedTick ? stepIndex * 16.6667 : clock.now(),
+  };
+  controllerState = createPopulationControllerState(params, { clock: controllerClock });
   const timebase = createSimulationTimebase({ fixedTick });
   const compatibility = { manifestRootHash, fieldSize, capacity };
   const zeroField = new Float32Array(fieldSize * fieldSize);
@@ -291,7 +300,7 @@ export async function createFlatTorusSimulation({
     currentSeedCount = nextSeedCount;
     currentRandomSeed = nextRandomSeed >>> 0;
     resetSeedState(currentSeedCount, currentRandomSeed, initialFood);
-    resetPopulationController(params, controllerState);
+    resetPopulationController(params, controllerState, { clock: controllerClock });
   }
 
   function setOats(nextOats) {
@@ -304,8 +313,11 @@ export async function createFlatTorusSimulation({
 
   async function samplePopulation(now, { force = false } = {}) {
     const visibleAgents = await count();
-    const sampleTime = fixedTick ? stepIndex * 16.6667 : now; // main.js:18633 step unit
-    return updatePopulationController(rawParams, controllerState, { now: sampleTime, visibleAgents, force });
+    const explicitTime = Number(now);
+    const sampleClock = !fixedTick && Number.isFinite(explicitTime)
+      ? { now: () => explicitTime }
+      : controllerClock;
+    return updatePopulationController(rawParams, controllerState, { clock: sampleClock, visibleAgents, force });
   }
 
   function uploadParameters(dt) {

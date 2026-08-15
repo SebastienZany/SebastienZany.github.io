@@ -1,16 +1,15 @@
 import { BASE_POPULATION_CONTROL_VALUES } from '../shared/params.js';
-import { gameClock } from '../shared/clock.js';
 
 const SAMPLE_LIMIT = 240;
 const SUPPLY_EPSILON = 1e-6;
 const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
 const finite = (value, fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 
-export function createPopulationControllerState(params) {
-  return {
+export function createPopulationControllerState(params, { clock } = {}) {
+  const state = {
     enabled: false,
     target: BASE_POPULATION_CONTROL_VALUES.populationTarget,
-    lastSampleTime: null,
+    lastSampleTime: 0,
     lastCount: null,
     growthRate: 0,
     commandedGrowthRate: 0,
@@ -23,16 +22,20 @@ export function createPopulationControllerState(params) {
     baseReproThreshold: params.reproThreshold,
     samples: [],
   };
+  resetPopulationController(params, state, { clock });
+  return state;
 }
 
-export function resetPopulationController(params, state, { preserveBase = false } = {}) {
+export function resetPopulationController(params, state, { clock, preserveBase = false } = {}) {
   if (!preserveBase) {
     state.baseBurnRate = params.burnRate;
     state.baseReproThreshold = params.reproThreshold;
   }
   state.enabled = Boolean(params.usePopulationControl);
   state.target = populationTarget(params);
-  state.lastSampleTime = null;
+  // The reset call is the controller epoch: one read from the injected clock,
+  // before any population readback can complete or sampling period can elapse.
+  state.lastSampleTime = readClock(clock);
   state.lastCount = null;
   state.growthRate = 0;
   state.commandedGrowthRate = 0;
@@ -47,21 +50,20 @@ export function resetPopulationController(params, state, { preserveBase = false 
 
 /** Fresh semantic transcription of main.js:19371–19492. */
 export function updatePopulationController(params, state, {
-  now,
+  clock,
   visibleAgents,
   force = false,
 } = {}) {
   if (!params.usePopulationControl) return clonePopulationControllerState(state);
 
-  const sampleTime = Number.isFinite(Number(now))
-    ? Number(now)
-    : gameClock.now();
+  const sampleTime = readClock(clock);
   const target = populationTarget(params);
   const periodMs = Math.max(1, finite(
     params.populationControlPeriodMs,
     BASE_POPULATION_CONTROL_VALUES.populationControlPeriodMs,
   ));
-  if (state.lastSampleTime !== null && !force && sampleTime - state.lastSampleTime < periodMs) {
+  if (state.lastSampleTime !== null && state.lastCount !== null
+      && !force && sampleTime - state.lastSampleTime < periodMs) {
     return clonePopulationControllerState(state);
   }
 
@@ -175,6 +177,15 @@ function oatSupplyBounds(params) {
     min: minimum,
     max: Math.max(minimum, finite(params.populationOatSupplyMax, BASE_POPULATION_CONTROL_VALUES.populationOatSupplyMax)),
   };
+}
+
+function readClock(clock) {
+  if (!clock || typeof clock.now !== 'function') {
+    throw new TypeError('population controller requires an injected clock');
+  }
+  const time = Number(clock.now());
+  if (!Number.isFinite(time)) throw new RangeError('population controller clock must return a finite time');
+  return time;
 }
 
 function recordSample(state, time, agents) {

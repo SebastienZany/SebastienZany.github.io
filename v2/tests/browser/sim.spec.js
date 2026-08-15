@@ -428,9 +428,15 @@ test('half-texel crowd probe follows nearest density sensing, not bilinear inter
 });
 
 test('population target step follows the ported timing, EMA, log-supply, and secondary law', async ({ page }) => {
-  await openSim(page, 'field=64&cap=2000&seed=0&paused=1');
+  await openSim(page, 'field=64&cap=2000&seed=0&paused=1&testclock=1');
   const primary = await page.evaluate(async () => {
     const sim = window.__v2.sim;
+    const clock = window.__v2.testClock;
+    const sampleAt = async (timeMs) => {
+      clock.set(timeMs);
+      return sim.samplePopulation();
+    };
+    clock.set(0);
     Object.assign(sim.params, {
       usePopulationControl: true,
       populationTarget: 1000,
@@ -444,16 +450,16 @@ test('population target step follows the ported timing, EMA, log-supply, and sec
       })),
     });
     await setCount(1000);
-    await sim.samplePopulation(0);
+    await sampleAt(0);
     sim.params.populationTarget = 800;
-    await sim.samplePopulation(600);
+    await sampleAt(600);
     const skipped = sim.controllerState();
-    const first = await sim.samplePopulation(1200);
+    const first = await sampleAt(1200);
     await setCount(1100);
-    const second = await sim.samplePopulation(2400);
-    const third = await sim.samplePopulation(3600);
+    const second = await sampleAt(2400);
+    const third = await sampleAt(3600);
     await setCount(808);
-    const insideTolerance = await sim.samplePopulation(4800);
+    const insideTolerance = await sampleAt(4800);
     return { skipped, first, second, third, insideTolerance, supplyBeforeTolerance: third.lastOatSupplyRate };
   });
   expect(primary.skipped.lastSampleTime).toBe(0);
@@ -465,9 +471,15 @@ test('population target step follows the ported timing, EMA, log-supply, and sec
   expect(Math.abs(primary.insideTolerance.commandedGrowthRate)).toBe(0);
   expect(primary.insideTolerance.target).toBe(800);
 
-  await openSim(page, 'field=64&cap=2000&seed=0&paused=1');
+  await openSim(page, 'field=64&cap=2000&seed=0&paused=1&testclock=1');
   const secondary = await page.evaluate(async () => {
     const sim = window.__v2.sim;
+    const clock = window.__v2.testClock;
+    const sampleAt = async (timeMs) => {
+      clock.set(timeMs);
+      return sim.samplePopulation();
+    };
+    clock.set(0);
     Object.assign(sim.params, {
       usePopulationControl: true,
       populationTarget: 1000,
@@ -481,9 +493,9 @@ test('population target step follows the ported timing, EMA, log-supply, and sec
       })),
     });
     await setCount(1500);
-    await sim.samplePopulation(0);
+    await sampleAt(0);
     await setCount(1700);
-    const state = await sim.samplePopulation(1200);
+    const state = await sampleAt(1200);
     return { state, burnRate: sim.params.burnRate, reproThreshold: sim.params.reproThreshold };
   });
   expect(secondary.state.saturatedLow).toBe(true);

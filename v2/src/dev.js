@@ -1,9 +1,14 @@
 import { acquireDevice } from './gpu/device.js';
 import { GpuRegistry } from './gpu/registry.js';
 import { createField2dRenderer } from './render/field2d.js';
+import { createClock } from './shared/clock.js';
 import { createFlatTorusSimulation } from './sim/sim.js';
 
 const query = new URLSearchParams(location.search);
+let testClockSourceMs = 0;
+const injectedTestClock = query.get('testclock') === '1'
+  ? createClock({ read: () => testClockSourceMs })
+  : null;
 const DEV_OATS = Object.freeze([
   { uvPos: [0.5, 0.5], radiusUv: 0.02 },
   { uvPos: [0.25, 0.30], radiusUv: 0.014 },
@@ -18,6 +23,14 @@ const state = {
   renderer: null,
   uncapturedErrors: [],
   paused: query.get('paused') === '1',
+  testClock: injectedTestClock ? {
+    now: () => injectedTestClock.now(),
+    set(timeMs) {
+      if (!Number.isFinite(timeMs)) throw new RangeError('test clock time must be finite');
+      testClockSourceMs = timeMs;
+      return injectedTestClock.now();
+    },
+  } : null,
   ready: null,
 };
 window.__v2 = state;
@@ -58,6 +71,7 @@ async function initialize() {
     params: target === null ? {} : { usePopulationControl: true, populationTarget: target },
     onGpuError: ({ label, message }) => showError(`${label}: ${message}`),
     onCompilationMessage: (message) => console.warn(`[${message.shader}] ${message.message}`),
+    clock: injectedTestClock ?? undefined,
   });
   state.renderer = await createField2dRenderer({
     device: state.device,
@@ -93,7 +107,7 @@ function startLoop() {
       lastCountAt = time;
       state.sim.count().then((count) => {
         document.querySelector('#agents').textContent = count.toLocaleString();
-        if (state.sim.params.usePopulationControl) return state.sim.samplePopulation(time);
+        if (!state.paused && state.sim.params.usePopulationControl) return state.sim.samplePopulation();
         return null;
       }).catch((error) => showError(error.message)).finally(() => { countBusy = false; });
     }
