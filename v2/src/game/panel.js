@@ -255,7 +255,15 @@ function makeHelpTip(document, control) {
 function makeCameraReadout(document) {
   const readout = element(document, 'section', 'camera-readout', { 'aria-label': 'Camera pose' });
   const grid = element(document, 'dl', 'camera-grid');
-  for (const [name, label] of [['azimuthDeg', 'Azimuth'], ['elevationDeg', 'Elevation'], ['polarDeg', 'Polar'], ['distance', 'Distance'], ['fovDeg', 'FOV'], ['target', 'Target']]) {
+  const fields = [
+    ['azimuthDeg', 'Azimuth'],
+    ['elevationDeg', 'Elevation'],
+    ['polarDeg', 'Polar'],
+    ['distance', 'Distance'],
+    ['fovDeg', 'FOV'],
+    ['target', 'Target'],
+  ];
+  for (const [name, label] of fields) {
     const item = element(document, 'div');
     const term = element(document, 'dt');
     term.textContent = label;

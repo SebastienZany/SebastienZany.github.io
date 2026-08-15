@@ -5,10 +5,25 @@ import { PARAMETER_DEFINITIONS } from '../shared/params.js';
 const GROUP_PARAMETER_NAMES = Object.freeze([
   ['agents', 'Agents', ['uptakeRate', 'depositRate', 'burnRate', 'reproThreshold', 'stepSize']],
   ['steering', 'Steering', ['foodWeight', 'crowdWeight', 'crowdExponent', 'densityBlur', 'densityTarget', 'minMoveScale']],
-  ['field', 'Field', ['fieldDecay', 'simulationSteps', 'foodClamp', 'oatPower', 'oatSupplyRate', 'useOatRationing']],
-  ['population', 'Population', ['usePopulationControl', 'populationTarget', 'populationLambda', 'populationSupplyLogGain', 'populationOatSupplyMin', 'populationOatSupplyMax', 'populationUseSecondaryActuator']],
-  ['surface', 'Surface', ['smoothFieldDisplay', 'spatialSmoothing', 'temporalSmoothing', 'surfaceHeight', 'surfaceBump', 'iridescenceStrength', 'slimeBaseColor', 'iridescenceMinThickness', 'iridescenceThickness', 'filmThicknessCurve', 'filmFollowsSlimeHeight', 'useGoldWaferFilm', 'useGoldWaferBody', 'goldBodyFade', 'goldBodyRoughness', 'goldBodyReflectivity', 'goldBodyColor', 'lightBrightness', 'useIcosaFaceLights']],
-  ['stories', 'Story labels', ['storyBoxesEnabled', 'observationTailLength', 'observationStrokeOpacity', 'observationCornerRadius', 'observationEdgeFeather', 'observationBlurRadius', 'observationTintColor', 'observationTintOpacity', 'observationSlimeTriggerThreshold']],
+  ['field', 'Field', [
+    'fieldDecay', 'simulationSteps', 'foodClamp', 'oatPower', 'oatSupplyRate', 'useOatRationing',
+  ]],
+  ['population', 'Population', [
+    'usePopulationControl', 'populationTarget', 'populationLambda', 'populationSupplyLogGain',
+    'populationOatSupplyMin', 'populationOatSupplyMax', 'populationUseSecondaryActuator',
+  ]],
+  ['surface', 'Surface', [
+    'smoothFieldDisplay', 'spatialSmoothing', 'temporalSmoothing', 'surfaceHeight', 'surfaceBump',
+    'iridescenceStrength', 'slimeBaseColor', 'iridescenceMinThickness', 'iridescenceThickness',
+    'filmThicknessCurve', 'filmFollowsSlimeHeight', 'useGoldWaferFilm', 'useGoldWaferBody',
+    'goldBodyFade', 'goldBodyRoughness', 'goldBodyReflectivity', 'goldBodyColor', 'lightBrightness',
+    'useIcosaFaceLights',
+  ]],
+  ['stories', 'Story labels', [
+    'storyBoxesEnabled', 'observationTailLength', 'observationStrokeOpacity',
+    'observationCornerRadius', 'observationEdgeFeather', 'observationBlurRadius',
+    'observationTintColor', 'observationTintOpacity', 'observationSlimeTriggerThreshold',
+  ]],
   ['visibility', 'Visibility', ['endingTimeLimitEnabled', 'showOats', 'showAgentDots', 'meshOutlineEnabled', 'showWireframe']],
   ['debug', 'Debug', ['useSeamStitching', 'useIslandMasking', 'useHeadingRotation', 'useOpticalZoom', 'statsReadbackEnabled', 'debugView']],
 ]);

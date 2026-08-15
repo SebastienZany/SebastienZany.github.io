@@ -7,10 +7,25 @@ import { PARAMETER_DEFINITIONS, SIMULATION_PRESETS, createParams } from '../../s
 const CHECKLIST_GROUPS = Object.freeze({
   agents: ['uptakeRate', 'depositRate', 'burnRate', 'reproThreshold', 'stepSize'],
   steering: ['foodWeight', 'crowdWeight', 'crowdExponent', 'densityBlur', 'densityTarget', 'minMoveScale'],
-  field: ['fieldDecay', 'simulationSteps', 'foodClamp', 'oatPower', 'oatSupplyRate', 'useOatRationing'],
-  population: ['usePopulationControl', 'populationTarget', 'populationLambda', 'populationSupplyLogGain', 'populationOatSupplyMin', 'populationOatSupplyMax', 'populationUseSecondaryActuator'],
-  surface: ['smoothFieldDisplay', 'spatialSmoothing', 'temporalSmoothing', 'surfaceHeight', 'surfaceBump', 'iridescenceStrength', 'slimeBaseColor', 'iridescenceMinThickness', 'iridescenceThickness', 'filmThicknessCurve', 'filmFollowsSlimeHeight', 'useGoldWaferFilm', 'useGoldWaferBody', 'goldBodyFade', 'goldBodyRoughness', 'goldBodyReflectivity', 'goldBodyColor', 'lightBrightness', 'useIcosaFaceLights'],
-  stories: ['storyBoxesEnabled', 'observationTailLength', 'observationStrokeOpacity', 'observationCornerRadius', 'observationEdgeFeather', 'observationBlurRadius', 'observationTintColor', 'observationTintOpacity', 'observationSlimeTriggerThreshold'],
+  field: [
+    'fieldDecay', 'simulationSteps', 'foodClamp', 'oatPower', 'oatSupplyRate', 'useOatRationing',
+  ],
+  population: [
+    'usePopulationControl', 'populationTarget', 'populationLambda', 'populationSupplyLogGain',
+    'populationOatSupplyMin', 'populationOatSupplyMax', 'populationUseSecondaryActuator',
+  ],
+  surface: [
+    'smoothFieldDisplay', 'spatialSmoothing', 'temporalSmoothing', 'surfaceHeight', 'surfaceBump',
+    'iridescenceStrength', 'slimeBaseColor', 'iridescenceMinThickness', 'iridescenceThickness',
+    'filmThicknessCurve', 'filmFollowsSlimeHeight', 'useGoldWaferFilm', 'useGoldWaferBody',
+    'goldBodyFade', 'goldBodyRoughness', 'goldBodyReflectivity', 'goldBodyColor', 'lightBrightness',
+    'useIcosaFaceLights',
+  ],
+  stories: [
+    'storyBoxesEnabled', 'observationTailLength', 'observationStrokeOpacity',
+    'observationCornerRadius', 'observationEdgeFeather', 'observationBlurRadius',
+    'observationTintColor', 'observationTintOpacity', 'observationSlimeTriggerThreshold',
+  ],
   visibility: ['endingTimeLimitEnabled', 'showOats', 'showAgentDots', 'meshOutlineEnabled', 'showWireframe'],
   debug: ['useSeamStitching', 'useIslandMasking', 'useHeadingRotation', 'useOpticalZoom', 'statsReadbackEnabled', 'debugView'],
 });
