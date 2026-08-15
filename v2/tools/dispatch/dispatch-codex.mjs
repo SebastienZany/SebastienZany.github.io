@@ -16,13 +16,12 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const WORKTREE = args.worktree ? resolve(args.worktree) : resolve(here, '../../..'); // repo worktree root (override with --worktree for parallel streams)
-const LOG_DIR = resolve(here, 'dispatch-logs');
-mkdirSync(LOG_DIR, { recursive: true });
-
 const args = Object.fromEntries(
   process.argv.slice(2).map((a, i, arr) => (a.startsWith('--') ? [a.slice(2), arr[i + 1] ?? true] : null)).filter(Boolean),
 );
+const WORKTREE = args.worktree ? resolve(args.worktree) : resolve(here, '../../..'); // repo worktree root (override with --worktree for parallel streams)
+const LOG_DIR = resolve(here, 'dispatch-logs');
+mkdirSync(LOG_DIR, { recursive: true });
 const label = args.label ?? 'run';
 const stamp = new Date().toISOString().replace(/[:.]/g, '-');
 const logPath = `${LOG_DIR}/${label}-${stamp}.jsonl`;
