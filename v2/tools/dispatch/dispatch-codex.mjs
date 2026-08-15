@@ -140,5 +140,7 @@ async function main() {
 
 main().catch((e) => {
   console.error('DISPATCH ERROR:', e?.stack ?? e);
+  // Crash rows keep the watchdog honest: a log with no ledger row means "still running".
+  appendFileSync(`${LOG_DIR}/ledger.ndjson`, JSON.stringify({ ts: new Date().toISOString(), label, crashed: String(e?.message ?? e).slice(0, 300), log: logPath }) + '\n');
   process.exit(1);
 });
