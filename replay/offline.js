@@ -9,7 +9,7 @@
 // main.js is not modified. The whole thing rides on the audit finding that rAF
 // and performance.now() are the only wall-clock sources.
 
-import { installClock, enterOffline, armOffline, exitOffline, step, clock } from './clock.js';
+import { installClock, enterOffline, armOffline, exitOffline, step, onFrame, clock } from './clock.js';
 import { createMp4Encoder, bitrateFor, pickAvcCodec } from './encode.js';
 import { createRecorder, createPlayer } from './recorder.js';
 import { createAudioRecorder, renderSessionAudio, installAudioProbe, describeAudioEvents } from './audio.js';
@@ -237,6 +237,238 @@ async function probeGrowth({ preset = 'original-defaults', chunk = 1200, chunks 
 }
 
 /**
+ * Is the simulation frame-rate independent?
+ *
+ * simulate() mixes two kinds of operation:
+ *   per-DT   updateAgents(now, dt), applyAgentFoodDeltas(dt)   — metabolism
+ *   per-CALL diffuseField() [applies params.fieldDecay], renderOats(),
+ *            renderDepositDensity(), equalizeField(), clipCanonicalField()
+ *
+ * So the ratio of food evaporation to agent metabolism is a function of the
+ * TICK RATE, not just of elapsed simulated time. Live play at ~30fps runs half
+ * as many calls per dt-unit as an offline render stepping at 60Hz.
+ *
+ * This sweep holds BOTH total dt-units and total virtual milliseconds constant
+ * (so oat decay is identical) and varies only the step size. Any spread in the
+ * agent counts is per-call coupling, measured rather than argued.
+ */
+async function dtSweep({ seed = 0xBEEF, virtualMs = 30000, steps = [16.6667, 33.3333, 50] } = {}) {
+  const c = api();
+  const out = [];
+  for (const dtMs of steps) {
+    const n = Math.round(virtualMs / dtMs);
+    await armOffline();
+    let row;
+    try {
+      c.seedSimRng(seed);
+      c.resetSimulation({ resetOats: true, spawnAgents: true });
+      c.params.statsReadbackEnabled = true;
+      const start = c.refreshRuntimeReadbackStats().visibleAgents;
+      const curve = [];
+      for (let i = 0; i < n; i++) {
+        step(dtMs);
+        if ((i + 1) % Math.round(n / 6) === 0) {
+          curve.push(c.refreshRuntimeReadbackStats().visibleAgents);
+        }
+      }
+      row = {
+        dtMs: +dtMs.toFixed(3),
+        rawDt: +(dtMs / 16.6667).toFixed(3),
+        calls: n,
+        dtUnits: +(n * (dtMs / 16.6667)).toFixed(0),
+        virtualMs: Math.round(n * dtMs),
+        start,
+        end: c.refreshRuntimeReadbackStats().visibleAgents,
+        curve,
+      };
+    } finally { exitOffline(); }
+    out.push(row);
+    await new Promise((r) => setTimeout(r, 0));
+  }
+  return { seed, virtualMs, rows: out };
+}
+
+/**
+ * Ground truth: what does the UNMODIFIED live game actually do?
+ *
+ * No armOffline, no resetSimulation, no seeded RNG — main.js has already booted
+ * itself exactly as it does for a player (resetOats:true, spawnAgents:false,
+ * started=true), and the clock stays in LIVE mode so performance.now() is real
+ * wall time and rawDt reflects genuine frame pacing. The only thing done here is
+ * what a player does: start the world.
+ *
+ * Runs on the clock shim's MessageChannel pump, so it works in a hidden tab
+ * where rAF never fires.
+ */
+async function liveRun({ seconds = 90, sampleEvery = 10, skipIntro = true, offlineDt = 0, yieldEvery = 0, jitter = 0, warmMs = 8000 } = {}) {
+  const c = api();
+  c.params.statsReadbackEnabled = true;
+
+  let frames = 0;
+  const unhook = onFrame(() => { frames++; });
+  const curve = [];
+  const t0 = clock.realNow();
+  // Read the food field in a window around the initial oat — where the agents
+  // actually are. This distinguishes "the oat is weak" from "the field is not
+  // holding the food the oat supplies".
+  const FW = 160;
+  const fieldBuf = new Float32Array(FW * FW * 4);
+  const readFieldNearOat = () => {
+    const o = c.oats[0];
+    if (!o?.uv) return null;
+    const size = c.fieldRT.read.width;
+    const x = Math.max(0, Math.min(size - FW, Math.round(o.uv.x * size) - FW / 2));
+    const y = Math.max(0, Math.min(size - FW, Math.round(o.uv.y * size) - FW / 2));
+    try {
+      c.renderer.readRenderTargetPixels(c.fieldRT.read, x, y, FW, FW, fieldBuf);
+    } catch { return null; }
+    let sum = 0, peak = 0;
+    for (let i = 0; i < fieldBuf.length; i += 4) {
+      const v = fieldBuf[i];
+      if (v > 0) { sum += v; if (v > peak) peak = v; }
+    }
+    return { sum: +sum.toFixed(1), peak: +peak.toFixed(4) };
+  };
+
+  const sample = (elapsed) => {
+    const o = c.oats[0] ?? null;
+    const f = readFieldNearOat();
+    curve.push({
+      t: +elapsed.toFixed(1),
+      frames,
+      agents: c.refreshRuntimeReadbackStats().visibleAgents,
+      oats: c.oats.length,
+      // The food source itself, so a starving colony can be traced to its cause
+      // rather than guessed at: is the oat weak, or is the field not holding food?
+      now: Math.round(performance.now()),
+      fieldSum: f?.sum ?? null,
+      fieldPeak: f?.peak ?? null,
+      oatPower: o ? +Number(o.power).toFixed(4) : null,
+      decayStartedAt: o?.foodDecayStartedAt != null ? Math.round(o.foodDecayStartedAt) : null,
+      decayElapsedMs: o?.foodDecayStartedAt != null ? Math.round(performance.now() - o.foodDecayStartedAt) : null,
+    });
+  };
+
+  // Controlled initial condition. Boot leaves the world with the initial oat and
+  // NO agents, and how long it then sits before seeding depends on how long boot
+  // happened to take — which varied run to run and silently confounded earlier
+  // comparisons (one run seeded into an empty field, another into 5s of charge).
+  // So the warm-up is now explicit and identical in both modes.
+  const warmThenSeed = async () => {
+    if (offlineDt > 0) await armOffline();
+    if (warmMs > 0) {
+      if (offlineDt > 0) {
+        for (let i = 0; i < Math.round(warmMs / offlineDt); i++) step(offlineDt);
+      } else {
+        const until = clock.realNow() + warmMs;
+        while (clock.realNow() < until) await new Promise((r) => setTimeout(r, 50));
+      }
+    }
+    sample(0);
+    if (skipIntro) {
+      c.skipIntroSequence();
+      c.replayInitialAgentSeed({ playSound: false });
+    }
+  };
+
+  try {
+    await warmThenSeed();
+    if (offlineDt > 0) {
+      try {
+        const total = Math.round((seconds * 1000) / offlineDt);
+        const every = Math.round((sampleEvery * 1000) / offlineDt);
+        for (let i = 0; i < total; i++) {
+          // jitter perturbs only the REGULARITY of virtual time, not its rate.
+          // dt 1.0->3.0 was already shown to barely move the population, so a
+          // few percent of jitter is a negligible physics change — but it fully
+          // decorrelates hash(n) = fract(sin(n*127.1 + u_time*41.7)*K), which a
+          // perfectly uniform dt samples on a ~5-frame cycle.
+          step(jitter > 0 ? offlineDt * (1 + (Math.random() - 0.5) * 2 * jitter) : offlineDt);
+          // Draining to a macrotask each step makes the GPU pipeline behave as
+          // it does live (fences complete, readbacks settle) while time stays
+          // virtual — separating "tight synchronous loop" from "virtual clock".
+          if (yieldEvery > 0 && i % yieldEvery === 0) await new Promise((r) => setTimeout(r, 0));
+          if (i % every === 0) sample((i * offlineDt) / 1000);
+        }
+      } finally { exitOffline(); }
+    } else {
+      const seedAt = clock.realNow();
+      let nextAt = sampleEvery;
+      while ((clock.realNow() - seedAt) / 1000 < seconds) {
+        await new Promise((r) => setTimeout(r, 100));
+        const elapsed = (clock.realNow() - seedAt) / 1000;
+        if (elapsed >= nextAt) { nextAt += sampleEvery; sample(elapsed); }
+      }
+    }
+  } finally { unhook?.(); }
+
+  const wallSec = (clock.realNow() - t0) / 1000;
+  return {
+    mode: offlineDt > 0 ? `offline dt=${offlineDt}ms` : 'live',
+    seconds,
+    frames,
+    measuredFps: +(frames / wallSec).toFixed(1),
+    impliedRawDt: offlineDt > 0 ? +(offlineDt / 16.6667).toFixed(2)
+      : +Math.min(2.2, (wallSec * 1000) / frames / 16.6667).toFixed(2),
+    params: { oatSupplyRate: c.params.oatSupplyRate, useOatRationing: c.params.useOatRationing, fieldDecay: c.params.fieldDecay },
+    curve,
+  };
+}
+
+/**
+ * Cold start vs charged field.
+ *
+ * Real boot is resetSimulation({resetOats:true, spawnAgents:FALSE}) — the world
+ * starts with the initial oat and ZERO agents, and stays that way through the
+ * whole intro (INTRO_OAT_SEQUENCE_MS = 10s) while the oat pumps food into
+ * fieldRT. Agents are only seeded afterwards, into an already-rich field.
+ *
+ * The recorder instead spawned 4096 agents at tick 0 into the field that
+ * resetSimulation had just cleared. Rationing scales uptake by local density,
+ * and 4096 agents in one Gaussian blob of sigma=0.45*oatRadius is the densest
+ * the field ever gets — so they ration each other down to nothing before the
+ * oat has deposited anything to eat.
+ *
+ * Sweeps the charge time to show the effect size.
+ */
+async function chargeSweep({ seed = 0xBEEF, warmMs = [0, 2500, 5000, 10000], runMs = 30000 } = {}) {
+  const c = api();
+  const dtMs = 1000 / 60;
+  const out = [];
+  for (const warm of warmMs) {
+    await armOffline();
+    let row;
+    try {
+      c.seedSimRng(seed);
+      // Boot exactly as main.js does: oat present, no agents.
+      c.resetSimulation({ resetOats: true, spawnAgents: false });
+      c.params.statsReadbackEnabled = true;
+      for (let i = 0; i < Math.round(warm / dtMs); i++) step(dtMs);
+      // Seed exactly as the intro does: progressive reveal over
+      // INITIAL_AGENT_SEED_DURATION_MS, driven by updateInitialAgentSeeding(now)
+      // inside the frame loop — not an instant initAgents() dump.
+      c.replayInitialAgentSeed({ playSound: false });
+      const seeded = c.refreshRuntimeReadbackStats().visibleAgents;
+      const n = Math.round(runMs / dtMs);
+      const curve = [];
+      for (let i = 0; i < n; i++) {
+        step(dtMs);
+        if ((i + 1) % Math.round(n / 6) === 0) curve.push(c.refreshRuntimeReadbackStats().visibleAgents);
+      }
+      row = {
+        warmMs: warm,
+        seeded,
+        end: c.refreshRuntimeReadbackStats().visibleAgents,
+        curve,
+      };
+    } finally { exitOffline(); }
+    out.push(row);
+    await new Promise((r) => setTimeout(r, 0));
+  }
+  return { seed, runMs, rows: out };
+}
+
+/**
  * M1 determinism gate.
  *
  * Seed, reset, grow N ticks, hash. Twice. Identical hashes mean the simulation
@@ -390,10 +622,24 @@ async function gpuDeterminismTest({ ticks = 200, runs = 3, growFirst = 600, onRu
  */
 async function recordSession({ ticks = 900, seed = 0xC0FFEE, player = null, name = 'session.cvr' } = {}) {
   const rec = createRecorder({ api, clock, buildStamp: document.querySelector('meta[name=build]')?.content ?? null });
+
+  // Arm the virtual clock BEFORE rec.start(), and let it continue from real
+  // time rather than jumping to an arbitrary origin.
+  //
+  // rec.start() calls resetSimulation -> addInitialOat -> startOatFoodDecay,
+  // which stamps oat.foodDecayStartedAt with performance.now(). If that stamp
+  // is taken on the real clock and the session then runs on a virtual clock
+  // starting somewhere else, updateOatFoodDecay measures a bogus elapsed.
+  //
+  // Measured with the old ordering (stamp at real 12088, clock jumped to
+  // 100000): the initial oat read as ~88s into its 90s decay from tick 0, so it
+  // sat at the 1/3 floor multiplier for the whole recording and the colony
+  // starved — 4096 agents down to 647. Arming first makes elapsed start at 0,
+  // which is what a player sees.
+  await armOffline();
+
   const header = rec.start({ seed });
   log('recording started', header.rngSeed);
-
-  await armOffline({ startMs: 100000 });
   try {
     for (let t = 0; t < ticks; t++) {
       if (player) player(t, api());
@@ -455,6 +701,9 @@ async function replayToVideo({
     throw new Error(`canvas is ${canvas.width}x${canvas.height}, expected ${width}x${height}`);
   }
 
+  // Arm before begin() for the same reason recordSession does: begin() resets
+  // the simulation, which stamps oat food decay off performance.now().
+  await armOffline();
   player.begin();
 
   // The audio track must be DECLARED before output.start() — Mediabunny refuses
@@ -474,7 +723,6 @@ async function replayToVideo({
     fps, bpp, withAudio,
   });
   await enc.start();
-  await armOffline({ startMs: 100000 });
 
   const arec = withAudio ? createAudioRecorder({ api, simHz: recording.simHz }) : null;
   arec?.hook();
@@ -585,7 +833,7 @@ async function snapshot(name = 'snapshot.png', { width = 640, height = 360 } = {
   return save;
 }
 
-window.__replay = { renderVideo, benchmarkTick, setRenderSize, growColony, snapshot, probeGrowth, determinismTest, gpuDeterminismTest, recordSession, replayToVideo, sampleStats, clock, waitFor, api };
+window.__replay = { renderVideo, benchmarkTick, setRenderSize, growColony, snapshot, probeGrowth, dtSweep, chargeSweep, liveRun, determinismTest, gpuDeterminismTest, recordSession, replayToVideo, sampleStats, clock, waitFor, api };
 log('offline harness ready; waiting for __cuttle');
 
 const postStatus = (status) => {
@@ -667,6 +915,34 @@ if (qs.get('auto') === '1') {
           body: JSON.stringify({ tag, seed: num('seed', 12345), ticks: num('ticks', 400), hash: result.results[0] }, null, 2),
         });
       }
+      await postStatus({ phase: 'done', result });
+
+    } else if (qs.get('live') === '1') {
+      const result = await liveRun({
+        seconds: num('secs', 90),
+        sampleEvery: num('every', 10),
+        skipIntro: qs.get('intro') !== '1',
+        offlineDt: num('odt', 0),
+        yieldEvery: num('yield', 0),
+        jitter: num('jitter', 0),
+        warmMs: num('warm', 8000),
+      });
+      await postStatus({ phase: 'done', result });
+
+    } else if (qs.get('charge') === '1') {
+      const result = await chargeSweep({
+        seed: num('seed', 0xBEEF),
+        warmMs: (qs.get('warm') || '0,2500,5000,10000').split(',').map(Number),
+        runMs: num('runms', 30000),
+      });
+      await postStatus({ phase: 'done', result });
+
+    } else if (qs.get('dtsweep') === '1') {
+      const result = await dtSweep({
+        seed: num('seed', 0xBEEF),
+        virtualMs: num('vms', 30000),
+        steps: (qs.get('steps') || '16.6667,33.3333,50').split(',').map(Number),
+      });
       await postStatus({ phase: 'done', result });
 
     } else if (qs.get('probe') === '1') {

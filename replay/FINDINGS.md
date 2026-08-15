@@ -101,16 +101,47 @@ population grew — the agent-count cost scaling the plan predicted.
    into a `Float32Array`; the driver rejects it with
    `readPixels: type HALF_FLOAT but ArrayBufferView not Uint16Array`. The metric
    has never worked.
-3. **The default preset starves the colony.** From a fresh seed the population
-   *shrinks* (4096 → 3138) and produces no visible growth.
-   `original-defaults` saturates to `AGENT_CAPACITY` (589,824) within 1500
-   ticks — the "tends to run away" note is exact. There is no preset between
-   "dies" and "saturates" that was tried here.
+3. **The population declines toward a single-oat equilibrium — and this is the
+   game's own behaviour, not a harness artifact.** CORRECTED: an earlier version
+   of this note called it "the default preset starves the colony", inferred from
+   a `growFast` probe. That probe was invalid — `growFast` hardcodes
+   `simulate(t, 1.0)` and never calls `updateOatFoodDecay`, so it measures a food
+   regime that does not exist in the real loop.
+
+   Measured properly, with the harness entirely out of the loop (plain boot, live
+   clock, one oat, no reset, polled directly): 3703 → 960 → 885 → 771 → 661 → 558.
+   The offline render reaches the same equilibrium (~900 with one oat). One oat
+   sustains roughly 900–1000 agents at the shipped `default-current` preset
+   (`oatSupplyRate 0.14`, rationing on), and the initial 4096-agent seed is well
+   above that, so it thins to the carrying capacity. Feeding the colony more oats
+   raises it; that is what a player does and what a recorded session should show.
+
+   `original-defaults` does saturate to `AGENT_CAPACITY` (589,824) within 1500
+   ticks — its "tends to run away" note is exact, and it should not be used for
+   showcase renders.
 4. **Progressive agent seeding never reveals.** `revealSlotCount` stays 0
    through `beginInitialAgentSeeding`, so the production seeding path appears not
    to inject agents; only the instant path
-   (`resetSimulation({ spawnAgents: true })` → `initAgents`) works. Worth a
-   closer look — it may be specific to the offline harness.
+   (`resetSimulation({ spawnAgents: true })` → `initAgents`) works. Confirmed on a
+   plain `?dev` boot with no harness job running: `getInitialAgentSeedState()`
+   reports `revealSlotCount: 0, visibleCount: 0` while the agent counter reads
+   3,703 — so the colony arrives by some other path and the reveal is dead code.
+   Not harness-specific.
+
+6. **The simulation is frame-rate dependent.** `simulate()` mixes per-`dt`
+   metabolism (`updateAgents`, `applyAgentFoodDeltas`) with per-CALL field
+   physics: `diffuseField()` applies `params.fieldDecay = 0.991` multiplicatively
+   with no `dt` term (main.js:2565). So food remaining after N calls is
+   `decay^N`, and the ratio of evaporation to metabolism is set by the frame
+   rate rather than by simulated time. Measured live at 32.5 vs 39.7 fps: the
+   colony held 4096 for 54s vs 21s. This matters for the 60fps work — raising the
+   frame rate changes the population dynamics, not just the smoothness.
+
+7. **The recorder's tick↔dt contract is wrong.** `record-boot.js` records one
+   tick per live frame, but replay steps each tick at `dt = 1.0`. A live frame at
+   30fps carries `rawDt = 2.0`, so replaying a 30fps session simulates half the
+   sim-time the player actually saw. Fix: record per-frame `rawDt` and replay
+   with it.
 5. **A hidden tab never fires rAF**, so boot stalls forever at shader prewarm.
    `replay/clock.js` works around it with a `MessageChannel` pump. This also
    affects any real background render.
