@@ -28,6 +28,7 @@ test('closed fixture raster emits resolved walk stencils with authoritative taps
     raster.gutter.census.exactBilinear + raster.gutter.census.nonnegativeMoment + raster.gutter.census.degraded,
     raster.gutter.recordCount,
   );
+  assert.ok(raster.gutter.walkEndpointUv.every(Number.isFinite));
   const graph = buildBlockGraph(mesh, repack, raster, 16);
   assert.ok(graph.nodeCount >= 4);
   assert.ok([...dijkstraBlockGraph(graph, 0)].every(Number.isFinite));

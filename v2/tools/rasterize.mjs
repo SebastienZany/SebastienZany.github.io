@@ -29,6 +29,7 @@ export function rasterizeAtlas(splitMesh, repack) {
   const quantizedWeights = new Uint16Array(gutterCount * 4);
   const stencilClass = new Uint8Array(gutterCount);
   const walkTriangles = new Uint32Array(gutterCount);
+  const walkEndpointUv = new Float32Array(gutterCount * 2);
   const walkHopCounts = new Uint16Array(gutterCount);
   const walkChartCrossings = new Uint16Array(gutterCount);
   const census = { exactBilinear: 0, nonnegativeMoment: 0, degraded: 0, signedDegraded: 0, maxPositionErrorTexels: 0, degradedTexels: [] };
@@ -77,6 +78,7 @@ export function rasterizeAtlas(splitMesh, repack) {
         weights.set(stencil.weights, recordIndex * 4);
         stencilClass[recordIndex] = STENCIL_CLASSES[stencil.stencilClass];
         walkTriangles[recordIndex] = endpoint.triangleIndex;
+        walkEndpointUv.set(endpoint.uvPos, recordIndex * 2);
         walkHopCounts[recordIndex] = Math.min(0xffff, endpoint.triangleHopCount);
         walkChartCrossings[recordIndex] = Math.min(0xffff, endpoint.chartCrossingCount);
         ownership[texelIndex] = recordIndex + GUTTER_RECORD_OFFSET;
@@ -105,6 +107,7 @@ export function rasterizeAtlas(splitMesh, repack) {
       partialQuantizedWeights: quantizedWeights,
       stencilClass,
       walkTriangles,
+      walkEndpointUv,
       walkHopCounts,
       walkChartCrossings,
       recordCount: gutterCount,
