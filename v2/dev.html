@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="color-scheme" content="dark">
+    <title>v2 development harness</title>
+    <style>
+      :root { color-scheme: dark; background: rgb(1, 2, 1); color: #dce7e4; font: 14px/1.4 ui-monospace, monospace; }
+      body { margin: 0; overflow: hidden; }
+      canvas { width: 100vw; height: 100vh; display: block; }
+      aside { position: fixed; top: 12px; left: 12px; padding: 10px 12px; border: 1px solid #35443f; border-radius: 7px; background: #07100ed9; }
+      p { margin: 0; }
+      #errors { margin-top: 8px; max-width: min(700px, 80vw); color: #ff9b8e; }
+    </style>
+  </head>
+  <body>
+    <canvas id="surface" aria-label="v2 WebGPU development surface"></canvas>
+    <aside>
+      <p id="status">Starting WebGPU…</p>
+      <p>FPS <span id="fps">—</span></p>
+      <section id="errors" hidden><strong>GPU errors</strong><ul></ul></section>
+    </aside>
+    <script type="module" src="src/gpu/dev.js"></script>
+  </body>
+</html>
+

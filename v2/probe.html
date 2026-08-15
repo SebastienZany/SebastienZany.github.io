@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="color-scheme" content="dark">
+    <title>v2 WebGPU capability probe</title>
+    <style>
+      :root { color-scheme: dark; font: 15px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; background: #07090a; color: #dce7e4; }
+      body { margin: 0 auto; max-width: 1000px; padding: max(20px, env(safe-area-inset-top)) 18px max(40px, env(safe-area-inset-bottom)); }
+      h1, h2 { font-family: system-ui, sans-serif; letter-spacing: .01em; }
+      section { margin: 20px 0; padding: 16px; border: 1px solid #26332f; border-radius: 10px; background: #0c1110; }
+      button, select { min-height: 42px; padding: 7px 10px; font: inherit; }
+      .controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+      label { display: grid; gap: 4px; }
+      ul { list-style: none; margin: 0; padding: 0; }
+      #checks li { display: grid; grid-template-columns: 5em minmax(12em, 1fr) 2fr; gap: 10px; padding: 8px 0; border-bottom: 1px solid #1c2623; }
+      [data-status="PASS"] strong { color: #62e6a7; }
+      [data-status="FAIL"] strong, #failure-panel { color: #ff9b8e; }
+      small { overflow-wrap: anywhere; color: #a7b8b3; }
+      pre { max-height: 440px; overflow: auto; padding: 12px; background: #050706; border-radius: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
+      @media (max-width: 680px) { #checks li { grid-template-columns: 4.5em 1fr; } #checks small { grid-column: 1 / -1; } }
+    </style>
+  </head>
+  <body>
+    <h1>v2 WebGPU capability probe</h1>
+    <p>Every check and failure is written here. The 60-second workload is the manual device protocol; automated tests use five seconds.</p>
+
+    <section>
+      <h2>Live checks</h2>
+      <ul id="checks" aria-live="polite"></ul>
+    </section>
+
+    <section>
+      <h2>Workload rehearsal</h2>
+      <div class="controls">
+        <label>Target size
+          <select id="target-size"><option value="1024">1024 mobile</option><option value="1536">1536 desktop</option></select>
+        </label>
+        <label>Duration
+          <select id="duration"><option value="5000">5 seconds (test)</option><option value="60000" selected>60 seconds (device protocol)</option></select>
+        </label>
+        <button id="run-workload" type="button">Run workload</button>
+      </div>
+      <p id="workload-status" aria-live="polite">Not started.</p>
+    </section>
+
+    <section id="failure-panel" hidden>
+      <h2>Page failures</h2>
+      <ul id="page-failures"></ul>
+    </section>
+
+    <section><h2>Environment</h2><pre id="environment"></pre></section>
+    <section><h2>Adapter</h2><pre id="adapter"></pre></section>
+    <section>
+      <h2>JSON report</h2>
+      <button id="copy-json" type="button">Copy JSON</button> <span id="copy-status" aria-live="polite"></span>
+      <pre id="report-json"></pre>
+    </section>
+    <script type="module" src="src/gpu/probe/probe.js"></script>
+  </body>
+</html>
+
