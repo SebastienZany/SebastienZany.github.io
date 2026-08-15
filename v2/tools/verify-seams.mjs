@@ -9,6 +9,7 @@ import { buildBoundaryFrameIndex } from './boundary-index.mjs';
 import { verifyC1Reconstruction } from './c1-verification.mjs';
 import { measureCornerContinuity } from './corner-verification.mjs';
 import { verifyDiffusionMass } from './diffusion-verification.mjs';
+import { verifyImpulseSpread } from './impulse-verification.mjs';
 import { fixtureBakeMesh } from './fixture-pipeline.mjs';
 import { buildFixtureSet } from './fixtures.mjs';
 import { rasterizeAtlas } from './rasterize.mjs';
@@ -26,6 +27,7 @@ import {
 } from './seam-verification.mjs';
 import { buildDirectionalFrames } from './seams.mjs';
 import { splitChartLocalSlits } from './slit-split.mjs';
+import { verifySeamConditionedTransport } from './transport-verification.mjs';
 
 const v2Root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const MESH_PATH = resolve(v2Root, 'assets/mesh-1.bin');
@@ -70,7 +72,12 @@ export async function verifySeams({ quiet = false } = {}) {
     try {
       const metrics = verifyOneTarget(splitMesh, target, 0x5000 + target.fieldSize);
       const failureFile = await writeTransportFailures(target.fieldSize, metrics.transport);
-      context.targets.push({ fieldSize: target.fieldSize, failureFile, ...compactMetrics(metrics) });
+      const conditionedFailureFile = await writeTransportFailures(
+        target.fieldSize,
+        metrics.conditionedTransport,
+        'conditioned-transport-failures',
+      );
+      context.targets.push({ fieldSize: target.fieldSize, failureFile, conditionedFailureFile, ...compactMetrics(metrics) });
       applyCoreGates(metrics, `real@${target.fieldSize}`, context.failures, false);
       if (metrics.stencils.signedCount) {
         context.failures.push(
@@ -108,9 +115,13 @@ function verifyOneTarget(mesh, target, seed) {
   const c1 = verifyC1Reconstruction(mesh, repack, raster, frames);
   const corners = measureCornerContinuity(mesh, repack, raster);
   const diffusion = target.role === 'fixture' ? null : verifyDiffusionMass(repack, raster, boundary, 100);
+  const impulse = verifyImpulseSpread(mesh, repack, raster, target.role === 'fixture' ? 2 : 8, 4);
   const transport = measureRandomTransport(repack, raster, boundary, frames, TRANSPORT_SAMPLES, seed ^ 0xa63_17e5);
+  const conditionedTransport = target.role === 'fixture' ? null : verifySeamConditionedTransport(
+    mesh, repack, raster, boundary, frames, TRANSPORT_SAMPLES, seed ^ 0x7a6_5eab,
+  );
   const corruption = verifyCorruptedDonorIsDetected(mesh, repack, raster);
-  return { repack, raster, frames, boundary, graph, coverage, stencils, transpose, smooth, sharp, affine, c1, corners, diffusion, transport, corruption };
+  return { repack, raster, frames, boundary, graph, coverage, stencils, transpose, smooth, sharp, affine, c1, corners, diffusion, impulse, transport, conditionedTransport, corruption };
 }
 
 function applyCoreGates(metrics, label, failures, fixture) {
@@ -134,6 +145,20 @@ function applyCoreGates(metrics, label, failures, fixture) {
     failures.push(`${label}: per-seam-band signed flux reaches ${metrics.diffusion.maximumRelativeBandFlux}`);
   }
   if (metrics.diffusion && !metrics.diffusion.wrongTapDetected) failures.push(`${label}: wrong diffusion tap did not fail the flux detector`);
+  if (metrics.impulse.traceViolations || metrics.impulse.ellipticityViolations) {
+    failures.push(
+      `${label}: impulse spread has ${metrics.impulse.traceViolations} speed and `
+      + `${metrics.impulse.ellipticityViolations} ellipticity violations`,
+    );
+  }
+  if (metrics.conditionedTransport) {
+    for (const [name, count] of [
+      ['resolver failures', metrics.conditionedTransport.resolverFailures],
+      ['position failures', metrics.conditionedTransport.positionViolations],
+      ['heading failures', metrics.conditionedTransport.headingViolations],
+      ['cross-back failures', metrics.conditionedTransport.crossBackViolations],
+    ]) if (count) failures.push(`${label}: conditioned transport has ${count} ${name}`);
+  }
   if (metrics.c1.smooth.interiorValueViolations || metrics.c1.smooth.interiorGradientViolations) {
     failures.push(
       `${label}: seam-interior C1 smooth gate has ${metrics.c1.smooth.interiorValueViolations} value and `
@@ -166,7 +191,11 @@ function compactMetrics(metrics) {
     c1: metrics.c1,
     corners: metrics.corners,
     diffusion: metrics.diffusion,
+    impulse: metrics.impulse,
     transport: { ...metrics.transport, failureTexels: undefined },
+    conditionedTransport: metrics.conditionedTransport
+      ? { ...metrics.conditionedTransport, failureTexels: undefined }
+      : null,
     frameOverflow: metrics.boundary.overflowCount,
     maximumFrameCandidates: maximum(metrics.boundary.candidateCounts),
     multipleFrameCandidates: countWhere(metrics.boundary.candidateCounts, (value) => value > 1),
@@ -232,34 +261,44 @@ function realTargetReport(row) {
 | Measured corner value-error radius / C1 gradient-violation radius | ${row.corners.maxErrorRadiusTexels.toFixed(4)} / ${row.c1.smooth.maxCornerGradientViolationRadiusTexels.toFixed(4)} texels |
 | 100-step mass drift / worst local seam-band flux | ${scientific(row.diffusion.maximumRelativeMassDrift)} / ${scientific(row.diffusion.maximumRelativeBandFlux)} |
 | Ledger residual / wrong-tap max band delta / detected | ${scientific(row.diffusion.maximumLedgerResidual)} / ${scientific(row.diffusion.wrongTapMaximumRelativeBandDelta)} / ${row.diffusion.wrongTapDetected ? 'yes' : 'NO'} |
+| Impulses / spread-speed / ellipticity violations | ${row.impulse.sampleCount} / ${row.impulse.traceViolations} / ${row.impulse.ellipticityViolations} |
+| Worst impulse trace / ellipticity mismatch | ${percent(row.impulse.maximumTraceMismatch)} / ${percent(row.impulse.maximumEllipticityMismatch)} |
 | Random transport samples / seam resolves / failures | ${formatInteger(row.transport.sampleCount)} / ${formatInteger(row.transport.seamCount)} / ${formatInteger(row.transport.conservativeFailureCount)} |
 | Cross-backs >¼ / worst | ${formatInteger(row.transport.crossBackOverQuarterTexel)} / ${row.transport.maxCrossBackErrorTexels.toFixed(5)} texels |
+| Conditioned walks / eligible frames / resolver failures | ${formatInteger(row.conditionedTransport.sampleCount)} / ${formatInteger(row.conditionedTransport.eligibleFrameCount)} / ${formatInteger(row.conditionedTransport.resolverFailures)} |
+| Conditioned position / heading / cross-back failures | ${formatInteger(row.conditionedTransport.positionViolations)} / ${formatInteger(row.conditionedTransport.headingViolations)} / ${formatInteger(row.conditionedTransport.crossBackViolations)} |
+| Conditioned worst position / heading / cross-back | ${row.conditionedTransport.maxPositionErrorTexels.toFixed(5)} texels / ${row.conditionedTransport.maxHeadingErrorDegrees.toFixed(5)}° / ${row.conditionedTransport.maxCrossBackErrorTexels.toFixed(5)} texels |
 | Frame cap overflow / maximum candidates | ${formatInteger(row.frameOverflow)} / ${row.maximumFrameCandidates} |
 | Texels with >1 nearby seam curve (proxy, not multi-hop incidence) | ${formatInteger(row.multipleFrameCandidates)} |
 | Block graph nodes / directed edges | ${formatInteger(row.blockNodes)} / ${formatInteger(row.blockEdges)} |
 
 Every conservative-failure texel from this run is listed in \`${row.failureFile}\`.
+Every failed geometrically conditioned walk is listed in \`${row.conditionedFailureFile}\`.
 
 Worst cone corners:
 
 | Charts | Defect | Cross-bisector excess | Donor error | Error radius | World position |
 |---:|---:|---:|---:|---:|---|
 ${row.corners.worst.slice(0, 10).map((corner) => `| ${corner.chartCount} | ${corner.defectRadians.toFixed(5)} | ${scientific(corner.maxCrossBisectorExcess)} | ${scientific(corner.maxDonorValueError)} | ${corner.maxErrorRadiusTexels.toFixed(3)} | ${corner.worldPos.map((value) => value.toFixed(6)).join(', ')} |`).join('\n')}
+
+Worst signed diffusion bands:
+
+| Seam-curve group | Relative flux | Signed world-area flux |
+|---:|---:|---:|
+${row.diffusion.worstGroups.slice(0, 10).map((group) => `| ${group.groupId} | ${scientific(group.relativeFlux)} | ${scientific(group.signedFlux)} |`).join('\n')}
 `;
 }
 
 function pendingInvariantList() {
   return [
-    'Transport sampling conditioned on true geometric seam crossings, including world-heading continuity and resolver cross-back (the current random endpoint probe is diagnostic only).',
-    'Impulse-spread second-moment comparison against seamless controls, banded by chart scale.',
     'Block-graph distance error against exact mesh geodesics and interpolated block-boundary continuity.',
     'Exact multi-hop sensing incidence along sensor-disc chords (nearby-frame multiplicity is reported only as a proxy).',
     'Deployed-data quantized transpose/conservation proof, blocked by the missing signed donor encoding.',
   ];
 }
 
-async function writeTransportFailures(fieldSize, transport) {
-  const name = `atlas-${fieldSize}.transport-failures.csv.gz`;
+async function writeTransportFailures(fieldSize, transport, suffix = 'transport-failures') {
+  const name = `atlas-${fieldSize}.${suffix}.csv.gz`;
   const rows = ['texelIndex,x,y', ...Array.from(transport.failureTexels, (texel) => (
     `${texel},${texel % fieldSize},${Math.floor(texel / fieldSize)}`
   ))];
@@ -272,6 +311,7 @@ async function writeTransportFailures(fieldSize, transport) {
 function maximum(values) { let result = 0; for (const value of values) result = Math.max(result, value); return result; }
 function countWhere(values, predicate) { let result = 0; for (const value of values) if (predicate(value)) result += 1; return result; }
 function scientific(value) { return value.toExponential(4); }
+function percent(value) { return `${(value * 100).toFixed(2)}%`; }
 function formatInteger(value) { return value.toLocaleString('en-US'); }
 function announce(quiet, message) { if (!quiet) console.log(message); }
 
