@@ -2,6 +2,7 @@ import { test as base, expect } from '@playwright/test';
 
 export const test = base.extend({
   hardwareAdapter: [async ({ page }, use, testInfo) => {
+    await page.goto('/v2/index.html'); // localhost is a secure context; about:blank is not a useful GPU fixture origin.
     const identity = await page.evaluate(async () => {
       if (!navigator.gpu) return null;
       const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
@@ -31,4 +32,3 @@ export const test = base.extend({
 });
 
 export { expect } from '@playwright/test';
-
