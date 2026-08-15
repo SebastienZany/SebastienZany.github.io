@@ -1,5 +1,38 @@
 # Blockers
 
+## M1 — slit branch/loop counts describe the wrong component graph
+
+Observed 2026-08-15 by the fresh M1 topology implementation against
+`luyvwj-fwgyww.glb`. The required primary counts reproduce exactly: 1,233 charts, 30,034 seam
+pairs, 3,592 same-chart slit pairs, 570 endpoint-only slit groups, and 630 chart-local slit
+components.
+
+The brief then requires each of the 630 chart-local components to carry branch and closed-loop
+metadata, with 19 components expected to branch and 5 expected to be closed loops. Those two
+expected counts belong to the earlier 570-component graph, before the required chart-local
+split:
+
+| Graph | Components | Multi-chart groups | Branching components | Branch vertices | Closed loops |
+|---|---:|---:|---:|---:|---:|
+| Physical endpoints only | 570 | 53 | 19 | 21 | 5 |
+| Physical endpoint + `chartOf` | 630 | 0 | 18 | 19 | 0 |
+
+The independent audit recorded in `reviews/mesh-audit-results.md` verifies the 570 endpoint-only
+count but does not contain the later branch/loop or 630-component checks. Recomputing the global
+graph also reproduces review #3's otherwise-unpublished diagnostics exactly (53 groups span
+charts, 19 branch, 5 loop), which identifies the graph mismatch rather than a pairing error.
+
+Impact: M1 can classify all seam pairs and emit the 630 chart-local work units, but cannot both
+record chart-local topology and assert the brief's 19/5 counts. More importantly, M2 says closed
+chart-local loops need a seed cut; the measured chart-local graph has no loops, while the five
+global loops cross chart boundaries and become open paths after partitioning. Choosing the wrong
+graph would change splitter behavior.
+
+Resolution needed: amend M1/M2 to distinguish the diagnostic global endpoint groups
+(570 / 53 multi-chart / 19 branching / 5 loops) from splitter work units
+(630 / 18 branching / 19 branch vertices / 0 closed loops), or specify a different graph whose
+membership and degree rules reproduce 630 together with 19/5.
+
 ## M0 — mandated Node test directory command
 
 Observed 2026-08-15 on the acceptance machine with Node v24.13.0 and again through npm with

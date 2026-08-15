@@ -1,5 +1,11 @@
 export const SURFACE_WORLD_SIZE = 9.6;
 
+export {
+  buildChartSegmentation,
+  countSubTexelCharts,
+  extractSeamEdges,
+} from './mesh-topology.mjs';
+
 // Legacy anchor main.js:15294: downstream camera, audio, and oat units assume this exact frame.
 export function normalizeGeometry(sourcePositions) {
   validateTriples(sourcePositions, 'positions');
