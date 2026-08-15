@@ -19,15 +19,18 @@ export const DEFAULT_ATLAS_TARGETS = Object.freeze([
     fieldSize: 1536,
     gutterTexels: DESKTOP_GUTTER_TEXELS,
     directTapClampTexels: DESKTOP_GUTTER_TEXELS - 1,
-    densityScale: 1,
+    // Post-split conservative demand is 98.12% at s=1. The explicit s=.9 lever measures
+    // 84.18% and changes regular-chart world texel width by 11.1%, inside M2's ~15% gate.
+    densityScale: 0.9,
     role: 'desktop',
   }),
   Object.freeze({
     fieldSize: 1024,
     gutterTexels: MOBILE_GUTTER_TEXELS,
     directTapClampTexels: MOBILE_GUTTER_TEXELS - 1,
-    // Review #5 measured this combined mobile lever before the required slit split.
-    densityScale: 0.9,
+    // Post-split conservative demand is 92.88% at s=.9. The measured s=.83 lever packs at
+    // 83.43%, satisfying the preset <=85% combined-lever policy without moving to 1280.
+    densityScale: 0.83,
     role: 'mobile',
   }),
 ]);
