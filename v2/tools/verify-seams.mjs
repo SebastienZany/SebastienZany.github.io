@@ -1,0 +1,243 @@
+import { readFile, writeFile } from 'node:fs/promises';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { gzipSync } from 'node:zlib';
+import { parseMeshAsset } from '../src/atlas/asset.js';
+import { DEFAULT_ATLAS_TARGETS, MAX_SECTION_BYTES } from './atlas-constants.mjs';
+import { buildBlockGraph } from './block-graph.mjs';
+import { buildBoundaryFrameIndex } from './boundary-index.mjs';
+import { fixtureBakeMesh } from './fixture-pipeline.mjs';
+import { buildFixtureSet } from './fixtures.mjs';
+import { rasterizeAtlas } from './rasterize.mjs';
+import { repackAtlasWithTarget } from './repack.mjs';
+import {
+  measureAffineWalkBands,
+  measureRandomTransport,
+  measureWalkReconstruction,
+  sharpWorldField,
+  smoothWorldField,
+  verifyCorruptedDonorIsDetected,
+  verifyCoverage,
+  verifyStencilTable,
+  verifyTransposeIdentity,
+} from './seam-verification.mjs';
+import { buildDirectionalFrames } from './seams.mjs';
+import { splitChartLocalSlits } from './slit-split.mjs';
+
+const v2Root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const MESH_PATH = resolve(v2Root, 'assets/mesh-1.bin');
+const REPORT_PATH = resolve(v2Root, 'assets/verify-seams-report.md');
+const COVERAGE_SAMPLES = 100_000;
+const TRANSPORT_SAMPLES = 100_000;
+// Exact-bilinear stencils must reproduce their endpoint's first moment to the brief's ¼-texel bar.
+const EXACT_STENCIL_MOMENT_TEXELS = 0.25;
+// The numerical inner-product proof sums roughly one million terms; 2e-12 relative retains
+// several orders of margin over observed f64 accumulation noise without hiding a wrong tap.
+const TRANSPOSE_RELATIVE_EPSILON = 2e-12;
+
+export class SeamVerificationBlockedError extends Error {}
+
+export async function verifySeams({ quiet = false } = {}) {
+  const sourceMesh = parseMeshAsset(await readFile(MESH_PATH));
+  const splitMesh = splitChartLocalSlits(sourceMesh);
+  const context = { fixtures: [], targets: [], failures: [], pending: pendingInvariantList() };
+  announce(quiet, 'verifying analytic fixtures at both required field sizes');
+
+  for (const target of DEFAULT_ATLAS_TARGETS) {
+    for (const [name, fixture] of Object.entries(buildFixtureSet())) {
+      try {
+        const fixtureTarget = { ...target, densityScale: 0.3, role: 'fixture' };
+        const metrics = verifyOneTarget(
+          splitChartLocalSlits(fixtureBakeMesh(fixture)),
+          fixtureTarget,
+          0x2000 + target.fieldSize + context.fixtures.length,
+        );
+        context.fixtures.push({ name, fieldSize: target.fieldSize, ...compactMetrics(metrics) });
+        applyCoreGates(metrics, `${name}@${target.fieldSize}`, context.failures, true);
+      } catch (error) {
+        context.failures.push(`${name}@${target.fieldSize}: ${error.message}`);
+      }
+      globalThis.gc?.();
+    }
+  }
+  await writeFile(REPORT_PATH, buildReport(context));
+
+  for (const target of DEFAULT_ATLAS_TARGETS) {
+    announce(quiet, `${target.fieldSize}: verifying real coverage, donors, affine bands, and transport`);
+    try {
+      const metrics = verifyOneTarget(splitMesh, target, 0x5000 + target.fieldSize);
+      const failureFile = await writeTransportFailures(target.fieldSize, metrics.transport);
+      context.targets.push({ fieldSize: target.fieldSize, failureFile, ...compactMetrics(metrics) });
+      applyCoreGates(metrics, `real@${target.fieldSize}`, context.failures, false);
+      if (metrics.stencils.signedCount) {
+        context.failures.push(
+          `real@${target.fieldSize}: ${metrics.stencils.signedCount.toLocaleString('en-US')} signed donor records have no u16 encoding`,
+        );
+      }
+    } catch (error) {
+      context.failures.push(`real@${target.fieldSize}: ${error.message}`);
+    }
+    await writeFile(REPORT_PATH, buildReport(context));
+    globalThis.gc?.();
+  }
+
+  await writeFile(REPORT_PATH, buildReport(context));
+  if (context.failures.length || context.pending.length) {
+    throw new SeamVerificationBlockedError(
+      `seam verification incomplete: ${context.failures.length} failed/blocking gates and ${context.pending.length} pending invariant groups; see assets/verify-seams-report.md`,
+    );
+  }
+  return context;
+}
+
+function verifyOneTarget(mesh, target, seed) {
+  const repack = repackAtlasWithTarget(mesh, target);
+  const frames = buildDirectionalFrames(mesh, repack);
+  const raster = rasterizeAtlas(mesh, repack);
+  const boundary = buildBoundaryFrameIndex(mesh, repack, frames, raster.authoritativeOwner);
+  const graph = buildBlockGraph(mesh, repack, raster);
+  const coverage = verifyCoverage(mesh, repack, raster, COVERAGE_SAMPLES, seed);
+  const stencils = verifyStencilTable(mesh, repack, raster);
+  const transpose = verifyTransposeIdentity(raster);
+  const smooth = measureWalkReconstruction(mesh, repack, raster, smoothWorldField);
+  const sharp = measureWalkReconstruction(mesh, repack, raster, sharpWorldField);
+  const affine = measureAffineWalkBands(mesh, repack, frames, raster.surfaceTopology);
+  const transport = measureRandomTransport(repack, raster, boundary, frames, TRANSPORT_SAMPLES, seed ^ 0xa63_17e5);
+  const corruption = verifyCorruptedDonorIsDetected(mesh, repack, raster);
+  return { repack, raster, frames, boundary, graph, coverage, stencils, transpose, smooth, sharp, affine, transport, corruption };
+}
+
+function applyCoreGates(metrics, label, failures, fixture) {
+  if (metrics.raster.gutter.deadCount !== 0) failures.push(`${label}: ${metrics.raster.gutter.deadCount} dead gutters`);
+  if (metrics.stencils.maxMomentErrorByClass[0] > EXACT_STENCIL_MOMENT_TEXELS) {
+    failures.push(`${label}: exact stencil moment error ${metrics.stencils.maxMomentErrorByClass[0]} texels`);
+  }
+  if (metrics.transpose.relativeError > TRANSPOSE_RELATIVE_EPSILON) {
+    failures.push(`${label}: transpose relative error ${metrics.transpose.relativeError}`);
+  }
+  const smoothFilledMaximum = Math.max(...metrics.smooth.bands.map(({ maxValueError }) => maxValueError));
+  const sharpFilledMaximum = Math.max(...metrics.sharp.bands.map(({ maxValueError }) => maxValueError));
+  if (metrics.smooth.disabledMaxValueError <= smoothFilledMaximum) failures.push(`${label}: smooth no-fill negative control did not fail`);
+  if (metrics.sharp.disabledMaxValueError <= sharpFilledMaximum) failures.push(`${label}: sharp no-fill negative control did not fail`);
+  if (!metrics.corruption.rejected) failures.push(`${label}: corrupted donor injection passed`);
+  if (fixture) {
+    const maximumAffine = Math.max(...metrics.affine.map(({ maxAffineErrorTexels }) => maxAffineErrorTexels));
+    if (maximumAffine > EXACT_STENCIL_MOMENT_TEXELS) failures.push(`${label}: fixture hinge affine error ${maximumAffine} texels`);
+  }
+}
+
+function compactMetrics(metrics) {
+  return {
+    fieldSize: metrics.repack.fieldSize,
+    gutterTexels: metrics.repack.target.gutterTexels,
+    charts: metrics.repack.chartTable.length,
+    seams: metrics.frames.frameCount / 2,
+    demandRatio: metrics.repack.stats.measuredDemandRatio,
+    clearance: metrics.repack.clearance.minimumChebyshevDistance,
+    coverage: metrics.coverage,
+    stencils: metrics.stencils,
+    transpose: metrics.transpose,
+    smooth: metrics.smooth,
+    sharp: metrics.sharp,
+    affine: metrics.affine,
+    transport: { ...metrics.transport, failureTexels: undefined },
+    frameOverflow: metrics.boundary.overflowCount,
+    maximumFrameCandidates: maximum(metrics.boundary.candidateCounts),
+    multipleFrameCandidates: countWhere(metrics.boundary.candidateCounts, (value) => value > 1),
+    blockNodes: metrics.graph.nodeCount,
+    blockEdges: metrics.graph.targets.length,
+  };
+}
+
+function buildReport(context) {
+  const fixtureRows = context.fixtures.map((row) => `| ${row.name} | ${row.fieldSize} | ${row.charts} | ${row.stencils.recordCount} | ${row.stencils.signedCount} | ${scientific(row.transpose.relativeError)} | ${row.transport.seamCount} | ${row.transport.conservativeFailureCount} |`).join('\n');
+  return `# M2 seam invariant report
+
+CPU output of \`npm run verify:seams\`. Status: **${context.failures.length || context.pending.length ? 'not green' : 'green'}**.
+The exact-bilinear ¼-texel bar is applied only to that class. Moment/degraded records retain
+their own measured bands, as required by the brief.
+
+## Fixture matrix
+
+| Fixture | Size | Charts | Gutters | Signed degraded | Transpose rel. error | Seam walks | Conservative failures |
+|---|---:|---:|---:|---:|---:|---:|---:|
+${fixtureRows || '| _in progress_ | | | | | | | |'}
+
+${context.targets.map(realTargetReport).join('\n')}
+
+## Failed or blocking gates
+
+${context.failures.length ? context.failures.map((failure) => `- ${failure}`).join('\n') : '_None._'}
+
+## Invariant groups not yet established
+
+${context.pending.length ? context.pending.map((entry) => `- ${entry}`).join('\n') : '_None._'}
+
+The missing groups are reported as missing—not skipped or inferred from adjacent tests. Browser/GPU
+work is outside this CPU milestone and is not attempted by this command.
+`;
+}
+
+function realTargetReport(row) {
+  const smooth = row.smooth.bands; const sharp = row.sharp.bands;
+  return `## Real atlas ${row.fieldSize}
+
+| Invariant | Measurement |
+|---|---:|
+| Coverage samples / wrong chart | ${formatInteger(row.coverage.sampleCount)} / ${row.coverage.wrongChartSamples} |
+| Authoritative texels missing/wrong triangle | ${row.coverage.missingTriangleTexels} / ${row.coverage.wrongTriangleChartTexels} |
+| Clearance measured / required | ${row.clearance} / ${row.gutterTexels * 2 + 1} |
+| Gutter records / signed degraded | ${formatInteger(row.stencils.recordCount)} / ${formatInteger(row.stencils.signedCount)} |
+| Exact/moment/degraded moment max | ${row.stencils.maxMomentErrorByClass.map((value) => value.toFixed(6)).join(' / ')} texels |
+| Weight-sum max / absolute-weight max | ${scientific(row.stencils.maxWeightSumError)} / ${row.stencils.maxAbsoluteWeight.toFixed(6)} |
+| Transpose identity relative error | ${scientific(row.transpose.relativeError)} |
+| Smooth value max exact/moment/degraded | ${smooth.map(({ maxValueError }) => scientific(maxValueError)).join(' / ')} |
+| Sharp value max exact/moment/degraded | ${sharp.map(({ maxValueError }) => scientific(maxValueError)).join(' / ')} |
+| Smooth/sharp no-fill negative-control max | ${scientific(row.smooth.disabledMaxValueError)} / ${scientific(row.sharp.disabledMaxValueError)} |
+| Affine max by distance | ${row.affine.map(({ distanceTexels, maxAffineErrorTexels }) => `${distanceTexels}: ${maxAffineErrorTexels.toFixed(4)}`).join('; ')} texels |
+| Legacy max by distance | ${row.affine.map(({ distanceTexels, maxLegacyErrorTexels }) => `${distanceTexels}: ${maxLegacyErrorTexels.toFixed(4)}`).join('; ')} texels |
+| Random transport samples / seam resolves / failures | ${formatInteger(row.transport.sampleCount)} / ${formatInteger(row.transport.seamCount)} / ${formatInteger(row.transport.conservativeFailureCount)} |
+| Cross-backs >¼ / worst | ${formatInteger(row.transport.crossBackOverQuarterTexel)} / ${row.transport.maxCrossBackErrorTexels.toFixed(5)} texels |
+| Frame cap overflow / maximum candidates | ${formatInteger(row.frameOverflow)} / ${row.maximumFrameCandidates} |
+| Texels with >1 nearby seam curve (proxy, not multi-hop incidence) | ${formatInteger(row.multipleFrameCandidates)} |
+| Block graph nodes / directed edges | ${formatInteger(row.blockNodes)} / ${formatInteger(row.blockEdges)} |
+
+Every conservative-failure texel from this run is listed in \`${row.failureFile}\`.
+`;
+}
+
+function pendingInvariantList() {
+  return [
+    'Formal C1 value/gradient comparison against a per-side seamless reconstruction at the direct-tap clamp, including the pointwise sharp-front gate.',
+    'Transport sampling conditioned on true geometric seam crossings, including world-heading continuity and resolver cross-back (the current random endpoint probe is diagnostic only).',
+    'Per-edge-local cone-corner cross-bisector jump and gradient-error-radius distribution on every real ≥3-chart corner.',
+    '100-step real-atlas per-seam-band signed diffusion flux bounds and real-table wrong-diffusion-tap sensitivity.',
+    'Impulse-spread second-moment comparison against seamless controls, banded by chart scale.',
+    'Block-graph distance error against exact mesh geodesics and interpolated block-boundary continuity.',
+    'Exact multi-hop sensing incidence along sensor-disc chords (nearby-frame multiplicity is reported only as a proxy).',
+    'Deployed-data quantized transpose/conservation proof, blocked by the missing signed donor encoding.',
+  ];
+}
+
+async function writeTransportFailures(fieldSize, transport) {
+  const name = `atlas-${fieldSize}.transport-failures.csv.gz`;
+  const rows = ['texelIndex,x,y', ...Array.from(transport.failureTexels, (texel) => (
+    `${texel},${texel % fieldSize},${Math.floor(texel / fieldSize)}`
+  ))];
+  const bytes = gzipSync(`${rows.join('\n')}\n`, { level: 9, mtime: 0 });
+  if (bytes.byteLength >= MAX_SECTION_BYTES) throw new Error(`${name} exceeds 95 MB`);
+  await writeFile(resolve(v2Root, 'assets', name), bytes);
+  return name;
+}
+
+function maximum(values) { let result = 0; for (const value of values) result = Math.max(result, value); return result; }
+function countWhere(values, predicate) { let result = 0; for (const value of values) if (predicate(value)) result += 1; return result; }
+function scientific(value) { return value.toExponential(4); }
+function formatInteger(value) { return value.toLocaleString('en-US'); }
+function announce(quiet, message) { if (!quiet) console.log(message); }
+
+const isMain = process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
+if (isMain) verifySeams().catch((error) => {
+  console.error(error.message);
+  process.exitCode = 1;
+});

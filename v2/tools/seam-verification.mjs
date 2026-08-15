@@ -1,9 +1,12 @@
-import { fillGutters, transposeInnerProducts } from '../src/atlas/fill.js';
+import { fillGutters, resolveAtlasStep, transposeInnerProducts } from '../src/atlas/fill.js';
 import { GUTTER_RECORD_OFFSET, WEIGHT_QUANTIZATION_SUM } from './atlas-constants.mjs';
 import { applyFrame } from './seams.mjs';
 import { walkSurfaceOffset } from './surface-walk.mjs';
 
 const NO_TRIANGLE = 0xffffffff;
+// Four stored f32 weights can accumulate four half-ulp input errors plus addition rounding.
+// This bound is about four Number.EPSILON-at-f32 precision; u16 deployment still sums exactly.
+const FLOAT32_WEIGHT_SUM_EPSILON = 4 * 2 ** -23;
 
 export function verifyCoverage(mesh, repack, raster, sampleCount = 100_000, seed = 0x5ea_2ba5) {
   const areas = triangleAreas(mesh);
@@ -42,6 +45,7 @@ export function verifyStencilTable(mesh, repack, raster) {
   const { gutter } = raster;
   let signedCount = 0; let nonnegativeQuantizedCount = 0;
   let maxWeightSumError = 0; let maxAbsoluteWeight = 0; let maxEndpointMomentErrorTexels = 0;
+  const maxMomentErrorByClass = [0, 0, 0];
   for (let record = 0; record < gutter.recordCount; record += 1) {
     const texel = gutter.coords[record];
     if (raster.ownership[texel] !== record + GUTTER_RECORD_OFFSET) {
@@ -63,7 +67,12 @@ export function verifyStencilTable(mesh, repack, raster) {
     maxWeightSumError = Math.max(maxWeightSumError, Math.abs(sum - 1));
     const targetX = gutter.walkEndpointUv[record * 2] * repack.fieldSize;
     const targetY = gutter.walkEndpointUv[record * 2 + 1] * repack.fieldSize;
-    maxEndpointMomentErrorTexels = Math.max(maxEndpointMomentErrorTexels, Math.hypot(momentX - targetX, momentY - targetY));
+    const momentError = Math.hypot(momentX - targetX, momentY - targetY);
+    maxEndpointMomentErrorTexels = Math.max(maxEndpointMomentErrorTexels, momentError);
+    maxMomentErrorByClass[gutter.stencilClass[record]] = Math.max(
+      maxMomentErrorByClass[gutter.stencilClass[record]],
+      momentError,
+    );
     if (hasNegative) signedCount += 1;
     else {
       nonnegativeQuantizedCount += 1;
@@ -72,7 +81,7 @@ export function verifyStencilTable(mesh, repack, raster) {
       if (quantizedSum !== WEIGHT_QUANTIZATION_SUM) throw new Error(`stencil: record ${record} quantized sum is ${quantizedSum}`);
     }
   }
-  if (maxWeightSumError > 1e-7) throw new Error(`stencil: weight sum error ${maxWeightSumError}`);
+  if (maxWeightSumError > FLOAT32_WEIGHT_SUM_EPSILON) throw new Error(`stencil: weight sum error ${maxWeightSumError}`);
   if (maxAbsoluteWeight > 2 + 1e-7) throw new Error(`stencil: bounded weight gate failed at ${maxAbsoluteWeight}`);
   if (signedCount !== gutter.census.signedDegraded) throw new Error('stencil: signed census mismatch');
   return {
@@ -82,6 +91,7 @@ export function verifyStencilTable(mesh, repack, raster) {
     maxWeightSumError,
     maxAbsoluteWeight,
     maxEndpointMomentErrorTexels,
+    maxMomentErrorByClass,
   };
 }
 
@@ -106,7 +116,6 @@ export function measureWalkReconstruction(mesh, repack, raster, fieldFunction = 
     if (raster.authoritativeOwner[texel]) source[texel] = fieldFunction(raster.worldPos.subarray(texel * 3, texel * 3 + 3));
   }
   const filled = fillGutters(source, raster.gutter);
-  const disabled = fillGutters(source, raster.gutter, { disabled: true });
   const bands = Array.from({ length: 3 }, () => ({ count: 0, maxValueError: 0, sumSquaredValueError: 0, maxPositionErrorTexels: 0 }));
   let disabledMaxValueError = 0;
   for (let record = 0; record < raster.gutter.recordCount; record += 1) {
@@ -117,7 +126,7 @@ export function measureWalkReconstruction(mesh, repack, raster, fieldFunction = 
     const reference = fieldFunction(trueWorld);
     const texel = raster.gutter.coords[record];
     const valueError = Math.abs(filled[texel] - reference);
-    const disabledError = Math.abs(disabled[texel] - reference);
+    const disabledError = Math.abs(reference); // Authoritative-only source leaves every gutter at zero.
     const positionErrorWorld = distance3(raster.worldPos.subarray(texel * 3, texel * 3 + 3), trueWorld);
     const chartId = mesh.triangleChartIds[triangle];
     const characteristicTexelWorld = Math.sqrt(repack.chartTable[chartId - 1].worldAreaPerTexel);
@@ -188,6 +197,69 @@ export function verifyCorruptedDonorIsDetected(mesh, repack, raster) {
   raster.gutter.tapIndices[offset] = original;
   if (!rejected) throw new Error('fault injection: corrupted donor passed the stencil verifier');
   return { record, rejected };
+}
+
+export function measureRandomTransport(repack, raster, boundaryIndex, frameTable, sampleCount = 100_000, seed = 0xa63_17e5) {
+  const authoritativeTexels = [];
+  for (let texel = 0; texel < raster.authoritativeOwner.length; texel += 1) {
+    if (raster.authoritativeOwner[texel]) authoritativeTexels.push(texel);
+  }
+  const random = mulberry32(seed);
+  // main.js and the extracted control contract span 0.0004 default through 0.003 maximum UV.
+  // Sampling that legal range is essential: a default-only probe produced zero fixture seams.
+  const minimumStepUv = 0.0004 * repack.target.densityScale;
+  const maximumStepUv = 0.003 * repack.target.densityScale;
+  let sameChartCount = 0; let seamCount = 0; let conservativeFailureCount = 0;
+  let crossBackOverQuarterTexel = 0; let maxCrossBackErrorTexels = 0;
+  const failureTexels = new Set();
+  for (let sample = 0; sample < sampleCount; sample += 1) {
+    const texel = authoritativeTexels[Math.floor(random() * authoritativeTexels.length)];
+    const baseUv = [(texel % repack.fieldSize + 0.5) / repack.fieldSize, (Math.floor(texel / repack.fieldSize) + 0.5) / repack.fieldSize];
+    const angle = random() * Math.PI * 2; const heading = [Math.cos(angle), Math.sin(angle)];
+    const stepUv = minimumStepUv + random() * (maximumStepUv - minimumStepUv);
+    const candidateUv = baseUv.map((value, axis) => value + heading[axis] * stepUv);
+    const result = resolveAtlasStep({
+      baseUv,
+      candidateUv,
+      heading,
+      fieldSize: repack.fieldSize,
+      authoritativeOwner: raster.authoritativeOwner,
+      boundaryIndex,
+      frameTable,
+    });
+    if (!result.valid) {
+      conservativeFailureCount += 1; failureTexels.add(texel); continue;
+    }
+    if (!result.frameId) { sameChartCount += 1; continue; }
+    seamCount += 1;
+    const forwardFrame = frameTable.frames[result.frameId - 1];
+    // Trace the same physical segment backward. A normalized destination heading generally has
+    // a different UV magnitude under shear, so subtracting the source step would not be an inverse.
+    const backCandidate = applyFrame(forwardFrame, baseUv);
+    const back = resolveAtlasStep({
+      baseUv: result.uv,
+      candidateUv: backCandidate,
+      heading: result.heading.map((value) => -value),
+      fieldSize: repack.fieldSize,
+      authoritativeOwner: raster.authoritativeOwner,
+      boundaryIndex,
+      frameTable,
+    });
+    if (!back.valid) continue;
+    const error = distance2(back.uv, baseUv) * repack.fieldSize;
+    maxCrossBackErrorTexels = Math.max(maxCrossBackErrorTexels, error);
+    if (error > 0.25) crossBackOverQuarterTexel += 1;
+  }
+  return {
+    sampleCount,
+    sameChartCount,
+    seamCount,
+    conservativeFailureCount,
+    conservativeFailureRate: conservativeFailureCount / sampleCount,
+    failureTexels: Uint32Array.from([...failureTexels].sort((left, right) => left - right)),
+    crossBackOverQuarterTexel,
+    maxCrossBackErrorTexels,
+  };
 }
 
 export function smoothWorldField([x, y, z]) {

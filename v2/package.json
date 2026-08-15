@@ -6,6 +6,7 @@
     "bake": "node --expose-gc --max-old-space-size=8192 tools/bake.mjs",
     "bake:mesh": "node tools/bake-mesh.mjs",
     "fixtures": "node tools/fixtures.mjs",
+    "verify:seams": "node --expose-gc --max-old-space-size=8192 tools/verify-seams.mjs",
     "test": "npm run test:node && npm run test:gpu",
     "test:node": "node --test tests/node/*.test.js",
     "test:gpu": "playwright test",
