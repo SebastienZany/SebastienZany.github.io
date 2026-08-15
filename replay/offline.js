@@ -207,6 +207,67 @@ async function probeGrowth({ preset = 'original-defaults', chunk = 1200, chunks 
   return { preset, log };
 }
 
+/**
+ * M1 determinism gate.
+ *
+ * Seed, reset, grow N ticks, hash. Twice. Identical hashes mean the simulation
+ * is a pure function of (seed, tick count) on this machine; a mismatch means
+ * something is still reading wall time or unseeded randomness.
+ *
+ * This is the in-process form, which the plan notes is the WEAKER of the two —
+ * it shares warmed module state and so cannot catch initialisation-order bugs.
+ * A cold-reload comparison is the real gate; this one is the fast smoke test.
+ */
+async function determinismTest({
+  seed = 12345, ticks = 400, runs = 2, virtualClock = true, clockOrigin = 100000,
+  isolate = false, onRun = null,
+} = {}) {
+  const c = api();
+  const results = [];
+
+  // Isolate the couplings the plan flagged as sim-affecting-but-not-obvious.
+  // storyBoxes gates triggerOatObservation, whose async GPU readback decides
+  // which frame decay starts on -> oatRT -> the field. The two controller flags
+  // let measured frame rate write sim params.
+  if (isolate) {
+    c.params.storyBoxesEnabled = false;
+    c.params.statsReadbackEnabled = false;
+    c.params.usePopulationControl = false;
+  }
+
+  for (let r = 0; r < runs; r++) {
+    c.seedSimRng(seed);
+    c.resetSimulation({ resetOats: true, spawnAgents: true });
+
+    if (virtualClock) {
+      // Step through the shimmed clock with a FIXED origin, so u_time —
+      // and therefore the GPU agent hash at main.js:3042 — replays identically.
+      // growFast() cannot do this: it seeds its own `t` from performance.now(),
+      // which is real time in live mode and differs every run.
+      await armOffline({ startMs: clockOrigin });
+      try {
+        for (let i = 0; i < ticks; i++) step(1000 / 60);
+      } finally { exitOffline(); }
+    } else {
+      c.growFast(ticks);
+    }
+
+    const h = c.hashSimState();
+    results.push(h);
+    if (onRun) await onRun(r, h);
+    await new Promise((res) => setTimeout(res, 0));
+  }
+  const first = results[0];
+  const identical = results.every(
+    (h) => h.field === first.field && h.agents === first.agents && h.rng === first.rng,
+  );
+  return {
+    seed, ticks, runs, identical, results,
+    virtualClock, isolate,
+    verdict: identical ? 'DETERMINISTIC (in-process)' : 'DIVERGED',
+  };
+}
+
 /** Coarse read of how much slime actually exists, so growth is measurable. */
 function sampleStats() {
   const c = api();
@@ -233,7 +294,7 @@ async function snapshot(name = 'snapshot.png', { width = 640, height = 360 } = {
   return save;
 }
 
-window.__replay = { renderVideo, benchmarkTick, setRenderSize, growColony, snapshot, probeGrowth, sampleStats, clock, waitFor, api };
+window.__replay = { renderVideo, benchmarkTick, setRenderSize, growColony, snapshot, probeGrowth, determinismTest, sampleStats, clock, waitFor, api };
 log('offline harness ready; waiting for __cuttle');
 
 const postStatus = (status) => {
@@ -260,7 +321,30 @@ if (qs.get('auto') === '1') {
   try {
     await postStatus({ phase: 'ready' });
 
-    if (qs.get('probe') === '1') {
+    if (qs.get('determinism') === '1') {
+      const result = await determinismTest({
+        seed: num('seed', 12345),
+        ticks: num('ticks', 400),
+        runs: num('runs', 2),
+        virtualClock: qs.get('vclock') !== '0',
+        isolate: qs.get('isolate') === '1',
+        onRun: (r, h) => postStatus({ phase: 'determinism', run: r, hash: h }),
+      });
+      // Cold-reload comparison: one run per page load, hash written to its own
+      // file. This is the REAL gate — an in-process repeat shares warmed module
+      // state (agentSeedRT, sequence timestamps, counters resetSimulation does
+      // not restore) and so cannot distinguish contamination from true
+      // nondeterminism.
+      const tag = qs.get('tag');
+      if (tag) {
+        await fetch(`/__save?name=hash-${encodeURIComponent(tag)}.json`, {
+          method: 'POST',
+          body: JSON.stringify({ tag, seed: num('seed', 12345), ticks: num('ticks', 400), hash: result.results[0] }, null, 2),
+        });
+      }
+      await postStatus({ phase: 'done', result });
+
+    } else if (qs.get('probe') === '1') {
       // Growth probe: characterise a preset, then leave a still to eyeball.
       const result = await probeGrowth({
         preset: qs.get('preset') || 'original-defaults',

@@ -15788,6 +15788,33 @@ async function onLoad(gltf) {
       skipIntroSequence();
       replayInitialAgentSeed({ playSound: false });
     },
+    seedSimRng,
+    getSimRngState,
+    // Determinism probe: hash the authoritative simulation state. Covers more
+    // than fieldRT alone, because a divergence can exist in the agent buffer a
+    // while before it shows up in the field.
+    hashSimState: () => {
+      const fnv = (arr) => {
+        let h = 0x811c9dc5;
+        const view = new Uint32Array(arr.buffer, arr.byteOffset, arr.length);
+        for (let i = 0; i < view.length; i++) {
+          h ^= view[i];
+          h = Math.imul(h, 0x01000193) >>> 0;
+        }
+        return h >>> 0;
+      };
+      const field = readRTPixelsAsFloat(fieldRT.read, FIELD_SIZE, FIELD_SIZE);
+      const agents = readRTPixelsAsFloat(agentRT.read, AGENT_SIDE, AGENT_SIDE);
+      let fieldSum = 0;
+      for (let i = 0; i < field.length; i += 4) fieldSum += field[i];
+      return {
+        field: fnv(field),
+        agents: fnv(agents),
+        fieldSum: +fieldSum.toFixed(6),
+        rng: getSimRngState(),
+        allocFrame: agentAllocationFrame,
+      };
+    },
     saveState: saveDevState,
     loadState: loadDevState,
     ptexAdjacency: () => ptexAdjacencyDiagnostics,
@@ -17291,6 +17318,29 @@ function clearAgentRT(rt) {
   renderer.setRenderTarget(null);
 }
 
+// Seeded PRNG for the simulation stream (mulberry32). The initial agent cloud is
+// the only CPU-side randomness the simulation consumes, so seeding it is what
+// makes a run reproducible from a recording header.
+//
+// Deliberately a SEPARATE stream from visual and audio randomness: the visual
+// marker jitter fires on rejected clicks, at a rate that depends on how the
+// player misclicks, and sharing a generator would let a stray click shift the
+// agent cloud on the next reset.
+let simRngState = 0x9e3779b9;
+function seedSimRng(seed) {
+  simRngState = (seed >>> 0) || 0x9e3779b9;
+}
+function simRandom() {
+  simRngState = (simRngState + 0x6d2b79f5) | 0;
+  let t = simRngState;
+  t = Math.imul(t ^ (t >>> 15), t | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+function getSimRngState() {
+  return simRngState >>> 0;
+}
+
 function createAgentInitialData() {
   const data = new Float32Array(AGENT_CAPACITY * 4);
   const liveAgentIndices = [];
@@ -17339,8 +17389,8 @@ function createAgentInitialData() {
   }
 
   function sampleStandardNormalPair() {
-    const u1 = Math.max(Number.EPSILON, Math.random());
-    const u2 = Math.random();
+    const u1 = Math.max(Number.EPSILON, simRandom());
+    const u2 = simRandom();
     const radius = Math.sqrt(-2 * Math.log(u1));
     const angle = Math.PI * 2 * u2;
     return {
@@ -17363,8 +17413,8 @@ function createAgentInitialData() {
         };
         const status = validateSpawnUv(uv, expectedChart);
         if (status === 'valid') {
-          const angle = Math.random() * Math.PI * 2;
-          const reserve = 1.0 + Math.random() * 0.45;
+          const angle = simRandom() * Math.PI * 2;
+          const reserve = 1.0 + simRandom() * 0.45;
           placed = acceptAgent(i, uv, angle, reserve);
           if (placed) {
             diagnostics.localAccepted++;
@@ -17380,8 +17430,8 @@ function createAgentInitialData() {
     }
 
     if (!placed && oat) {
-      const angle = Math.random() * Math.PI * 2;
-      const reserve = 1.0 + Math.random() * 0.45;
+      const angle = simRandom() * Math.PI * 2;
+      const reserve = 1.0 + simRandom() * 0.45;
       placed = acceptAgent(i, { x: oat.uv.x, y: oat.uv.y }, angle, reserve);
       if (placed) {
         diagnostics.deterministicFallbackAccepted++;
@@ -17391,19 +17441,19 @@ function createAgentInitialData() {
 
     for (let attempt = 0; !oat && !placed && attempt < AGENT_INIT_GLOBAL_RETRIES; attempt++) {
       diagnostics.globalRetryAttempts++;
-      const uv = { x: Math.random(), y: Math.random() };
+      const uv = { x: simRandom(), y: simRandom() };
       if (validateSpawnUv(uv) !== 'valid') continue;
-      const angle = Math.random() * Math.PI * 2;
-      const reserve = 1.0 + Math.random() * 0.45;
+      const angle = simRandom() * Math.PI * 2;
+      const reserve = 1.0 + simRandom() * 0.45;
       placed = acceptAgent(i, uv, angle, reserve);
       if (placed) diagnostics.globalAccepted++;
     }
 
     if (!oat && !placed && spawnTexels.length > 0) {
-      const texel = spawnTexels[(i * 1103515245 + Math.floor(Math.random() * spawnTexels.length)) % spawnTexels.length];
+      const texel = spawnTexels[(i * 1103515245 + Math.floor(simRandom() * spawnTexels.length)) % spawnTexels.length];
       const uv = uvFromTexelIndex(texel);
-      const angle = Math.random() * Math.PI * 2;
-      const reserve = 1.0 + Math.random() * 0.45;
+      const angle = simRandom() * Math.PI * 2;
+      const reserve = 1.0 + simRandom() * 0.45;
       placed = acceptAgent(i, uv, angle, reserve);
       if (placed) diagnostics.deterministicFallbackAccepted++;
     }
