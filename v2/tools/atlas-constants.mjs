@@ -1,0 +1,46 @@
+import { MAX_KERNEL_FOOTPRINT } from '../src/shared/params.js';
+
+// One direct sample may reach the declared radius and bilinear may consume the next texel.
+export const DESKTOP_GUTTER_TEXELS = Math.max(
+  ...Object.values(MAX_KERNEL_FOOTPRINT).map((kernel) => kernel.requiredGutterTexels),
+);
+export const MOBILE_GUTTER_TEXELS = 3;
+export const MIN_CHART_TEXELS = 4;
+export const MAX_FRAME_LIST_LENGTH = 4;
+export const MAX_PACKING_DEMAND = 0.85;
+export const MAX_SECTION_BYTES = 95 * 1024 * 1024;
+export const ATLAS_SCHEMA_VERSION = 2;
+export const GUTTER_RECORD_OFFSET = 2 ** 16;
+export const WEIGHT_QUANTIZATION_SUM = 65_535;
+export const BLOCK_TEXELS = 32;
+
+export const DEFAULT_ATLAS_TARGETS = Object.freeze([
+  Object.freeze({
+    fieldSize: 1536,
+    gutterTexels: DESKTOP_GUTTER_TEXELS,
+    directTapClampTexels: DESKTOP_GUTTER_TEXELS - 1,
+    densityScale: 1,
+    role: 'desktop',
+  }),
+  Object.freeze({
+    fieldSize: 1024,
+    gutterTexels: MOBILE_GUTTER_TEXELS,
+    directTapClampTexels: MOBILE_GUTTER_TEXELS - 1,
+    // Review #5 measured this combined mobile lever before the required slit split.
+    densityScale: 0.9,
+    role: 'mobile',
+  }),
+]);
+
+export function atlasTarget(fieldSize, overrides = {}) {
+  const baseline = DEFAULT_ATLAS_TARGETS.find((target) => target.fieldSize === fieldSize);
+  if (!baseline) throw new RangeError(`atlas: unsupported target ${fieldSize}`);
+  const target = { ...baseline, ...overrides, fieldSize };
+  if (!Number.isInteger(target.gutterTexels) || target.gutterTexels < 1) {
+    throw new RangeError('atlas: gutter must be a positive integer');
+  }
+  if (!(target.densityScale > 0 && target.densityScale <= 1)) {
+    throw new RangeError('atlas: density scale must be in (0, 1]');
+  }
+  return target;
+}
