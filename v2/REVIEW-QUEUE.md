@@ -30,6 +30,14 @@
 
 ## Resolved
 
+- **M3 accepted** (gate 2026-08-15): flat-torus sim fully green — 38/38 node + 17/17 GPU
+  (determinism/snapshot double-run held). Two gate fix-cycles, both instructive: WGSL
+  operator-mixing + reserved-keyword compile errors (unfindable in Codex's sandbox; now in the
+  dispatcher preamble), and the depletion test resolved the RIGHT way — semantics verified
+  term-for-term against the anchors (observed matched the anchored recurrence to 7 digits), the
+  scenario re-derived analytically, assertion untouched. Growth screenshot:
+  `v2/reference/m3-growth-400steps.png` (445k agents, 112 fps).
+
 - **M0 accepted** (gate review 2026-08-15, bound to the merge SHA recorded in git): 11 Codex
   commits + 2 gate amendments (test-glob spec fix; Chrome probe results from Claude's shell —
   Codex's sandbox cannot launch Chrome, so GPU suites are gate-run by Claude as standing
