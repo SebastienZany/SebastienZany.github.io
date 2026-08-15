@@ -8,6 +8,20 @@
 const WORLD_LINEAR_SCALE = 4;
 const DEFAULT_OAT_POWER = 1.55;
 
+// Runtime constants are values, not transplanted code. Keeping them beside the
+// extracted parameter table prevents GPU modules from growing private tunings.
+export const SIMULATION_CONSTANTS = Object.freeze({
+  worldLinearScale: WORLD_LINEAR_SCALE, // main.js:158
+  frameDtClamp: 2.2, // main.js:276
+  maxSimulationSteps: 8, // main.js:277
+  depositPointSizeWorld: 2.8, // main.js:293
+  densityMass: 0.032, // main.js:294
+  maxDensityReserveMass: 64, // main.js:295
+  defaultOatRadius: 0.08 / WORLD_LINEAR_SCALE, // main.js:174
+  maxOats: 64, // main.js:2282
+  splatReferenceFieldSize: 1536, // main.js:769
+});
+
 export const PARAM_EXTRACTION_ANCHORS = Object.freeze({
   smoothFieldDisplayDefault: 'main.js:123',
   worldLinearScale: 'main.js:158',
