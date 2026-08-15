@@ -37,6 +37,9 @@ Working directory is the repo worktree root. Standing rules (non-negotiable):
 - Commit on the current branch in small steps with clear messages.
 - If reality contradicts the brief, STOP that thread of work and write v2/BLOCKERS.md with the
   specifics; finish what is unaffected.
+- WGSL you write cannot be compile-checked in your sandbox. Known trap: WGSL REJECTS
+  unparenthesized mixing of bitwise and arithmetic operators (a ^ b * c is a compile error) —
+  parenthesize, and grep your WGSL for such mixes before finishing.
 - Run the node test suite yourself; the browser/GPU suite CANNOT launch Chrome inside your
   sandbox — do not retry it; mark those acceptance items 'skipped (gate-run by Claude)' and move on.
 - Finish by running the runnable acceptance commands yourself and reporting honestly.`;
