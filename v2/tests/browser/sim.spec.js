@@ -219,7 +219,14 @@ test('field decay is analytic and final-agent exposure measurably depletes food'
   await openSim(page, 'field=64&cap=64&seed=0&paused=1');
   const result = await page.evaluate(async () => {
     const sim = window.__v2.sim;
-    Object.assign(sim.params, { fieldDiffusion: 0, fieldDecay: 0.99 });
+    Object.assign(sim.params, {
+      fieldDiffusion: 0,
+      fieldDecay: 0.99,
+      uptakeRate: 0.09,
+      depositRate: 0.005,
+      deltaScale: 1.35,
+      foodClamp: 0.5,
+    });
     await sim.debugReplaceState({ field: new Float32Array(64 * 64).fill(0.4) });
     for (let index = 0; index < 10; index += 1) sim.step(1);
     const decayed = (await sim.readField())[0];
@@ -234,6 +241,11 @@ test('field decay is analytic and final-agent exposure measurably depletes food'
       uvPos: [32.5 / 64, 32.5 / 64], heading: 0, reserve: 2,
       idLo: index + 1, idHi: 9, flags: 0,
     }));
+    // The final-agent credit leaves the summed reserve above the anchored cap of 64, so
+    // exposure = 64 * 1.35 * dt = 86.4. With dt=1, the anchored delta recurrence is
+    // F[n+1] = 0.99 * F[n] * exp(-0.09 * 86.4) + 0.005 * 86.4.
+    // After eight steps it predicts 0.43218 versus the decay-only control's 0.46137: a
+    // 0.02919 margin, comfortably above the unchanged 0.01 assertion and readback noise.
     Object.assign(sim.params, { stepSize: 0, wander: 0, sensorDistance: 0, reproThreshold: 4.5, maxReserve: 4.2 });
     await sim.debugReplaceState({ agents, field: patch });
     for (let index = 0; index < 8; index += 1) sim.step(1);
