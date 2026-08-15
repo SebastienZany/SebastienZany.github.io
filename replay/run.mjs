@@ -47,6 +47,9 @@ const BASE = process.env.REPLAY_BASE ?? 'http://localhost:8140';
 const job = process.argv[2] ?? 'live=1&secs=60&every=10';
 const headed = process.argv.includes('--headed');
 const timeoutMs = Number(process.env.REPLAY_TIMEOUT_MS ?? 30 * 60 * 1000);
+const shotAtFrame = process.env.SHOT_AT_FRAME ? Number(process.env.SHOT_AT_FRAME) : null;
+const shotPath = process.env.SHOT_PATH ?? 'replay/out/live-dom.png';
+let shotTaken = false;
 
 const url = `${BASE}/?render&dev&auto=1&${job}`;
 console.log(`[run] ${url}`);
@@ -90,8 +93,17 @@ for (;;) {
   const detail = status?.frame != null ? ` ${status.frame}/${status.total ?? '?'}` : '';
   const line = `${phase}${detail}`;
   if (line !== last) { console.log(`[run] ${Math.round((Date.now() - t0) / 1000)}s  ${line}`); last = line; }
+  // Grab Chrome's OWN rendering of the page mid-render, so the hand-written
+  // Canvas2D callout can be diffed against the real DOM one it is imitating.
+  // The GL canvas is offscreen-sized while the DOM lays out at the css size, so
+  // the screenshot shows the genuine article at layout scale.
+  if (shotAtFrame != null && !shotTaken && (status?.frame ?? -1) >= shotAtFrame) {
+    shotTaken = true;
+    await page.screenshot({ path: shotPath }).catch((e) => console.log('  ! shot failed', String(e)));
+    console.log(`[run] screenshot of live DOM at frame ${status.frame} -> ${shotPath}`);
+  }
   if (phase === 'done' || phase === 'error') break;
-  await page.waitForTimeout(2000);
+  await page.waitForTimeout(shotAtFrame != null ? 150 : 2000);
 }
 
 // Confirm the initial oat came from the raycast, not the fallback. A run where

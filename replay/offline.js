@@ -824,16 +824,36 @@ async function replayToVideo({
   // applies field decay and diffusion once per CALL while metabolism scales with
   // dt. So walk the recorded dt stream and give each tick back the dt it had.
   //
-  // Cumulative rather than per-frame arithmetic so the schedule cannot drift
-  // over thousands of frames.
-  const TICK_MS = 1000 / 60;                    // one dt unit, in ms
-  const cumMs = new Float64Array(total + 1);    // simulated ms before tick i
-  for (let i = 0; i < total; i++) cumMs[i + 1] = cumMs[i] + player.dtAt(i) * TICK_MS;
-  const simDurationMs = cumMs[total];
+  // Accumulate in INTEGER milli-ticks, not floating milliseconds.
+  //
+  // The obvious form — cumMs[i+1] = cumMs[i] + dt*16.6667, cutoff = i*1000/fps —
+  // compares an accumulated float SUM against a float PRODUCT. They drift apart
+  // by ~1e-9 relative, which is enough to land a frame on the wrong side of the
+  // comparison: that frame consumes zero ticks and is a duplicate of the last
+  // one, and the next consumes two and jumps. Measured on a 60fps render that
+  // should have been exactly 1 tick per frame: 1074 of 3603 frames were
+  // byte-identical duplicates (mpdecimate), so the film ran at ~42 effective fps
+  // with an irregular cadence. That is what read as choppy text — the motion
+  // itself was linear, it was being SAMPLED unevenly.
+  //
+  // dt is quantised to 3dp by the recorder, so dt*1000 is an exact integer and
+  // the running total is exact to 2^53. 60000/fps is likewise exact for every
+  // standard rate (60->1000, 30->2000, 24->2500), so the comparison is integer
+  // against integer and cannot drift. The 0.5 tolerance only absorbs a
+  // non-integral 60000/fps at an unusual frame rate.
+  const TICK_MS = 1000 / 60;                      // one dt unit, in ms
+  const MILLI = 1000;                             // milli-ticks per tick
+  const cumT = new Float64Array(total + 1);       // integer milli-ticks before tick i
+  for (let i = 0; i < total; i++) {
+    cumT[i + 1] = cumT[i] + Math.round(player.dtAt(i) * MILLI);
+  }
+  const totalMilliTicks = cumT[total];
+  const simDurationMs = (totalMilliTicks / MILLI) * TICK_MS;
   const outDurationMs = simDurationMs / speed;
-  const frames = Math.max(1, Math.ceil((outDurationMs / 1000) * fps));
-  // Simulated-time cutoff for output frame i, in the recording's own timebase.
-  const targetMs = (i) => Math.min(simDurationMs, (i * 1000 * speed) / fps);
+  const frames = Math.max(1, Math.round((outDurationMs / 1000) * fps));
+  // Cutoff for output frame i, in the same integer milli-tick domain.
+  const perFrameMilliTicks = (60 * MILLI * speed) / fps;
+  const targetT = (i) => Math.min(totalMilliTicks, i * perFrameMilliTicks + 0.5);
   log(
     `schedule: ${total} ticks = ${(simDurationMs / 1000).toFixed(2)}s simulated ` +
     `(mean dt ${(simDurationMs / TICK_MS / Math.max(1, total)).toFixed(3)}), ` +
@@ -899,8 +919,8 @@ async function replayToVideo({
       // Advance until this frame's simulated-time cutoff, applying EVERY
       // intervening tick at the dt it was recorded with. May consume zero ticks
       // (slow motion) or several (time-lapse, or a stretch of slow live frames).
-      const cutoff = targetMs(f + 1);
-      while (cursor < total && cumMs[cursor + 1] <= cutoff) {
+      const cutoff = targetT(f + 1);
+      while (cursor < total && cumT[cursor + 1] <= cutoff) {
         player.applyTick(cursor);
         arec?.sample(cursor);      // absolute tick, not an index within the frame
         step(player.dtAt(cursor) * TICK_MS);
@@ -941,7 +961,7 @@ async function replayToVideo({
         // Ticks are not uniform in time — each carries the dt of the live frame
         // it came from — so a cue's media time is its cumulative simulated time,
         // not tick/simHz. Same schedule the video frames use.
-        tickToSec: (tick) => cumMs[Math.min(Math.max(0, tick), total)] / 1000,
+        tickToSec: (tick) => (cumT[Math.min(Math.max(0, tick), total)] / MILLI) * TICK_MS / 1000,
         sampleRate: 48000,
         durationSeconds: frames / fps,   // match the video exactly
       });

@@ -1006,6 +1006,9 @@ export async function createOverlayCompositor({
     // Sampling one callout keeps this cheap enough to leave on.
     if (trace && trace.length < TRACE_MAX) {
       trace.push({
+        // Key by callout. Without this the trace interleaves every visible box
+        // and a switch between two of them reads as a timeline reset.
+        id: observation?.stableId ?? observation?.id ?? oatIndexOf(observation),
         f: paintedFrames,
         vms: Math.round(virtualMs),
         el: elapsedMs == null ? null : Math.round(elapsedMs),
@@ -1246,6 +1249,12 @@ export async function createOverlayCompositor({
   let paintedFrames = 0;
   const TRACE_MAX = 4000;
   let trace = [];
+  /** Identify which oat a callout belongs to, for the motion trace. */
+  function oatIndexOf(observation) {
+    const oats = api()?.oats ?? [];
+    for (let i = 0; i < oats.length; i++) if (oats[i]?.observation === observation) return i;
+    return -1;
+  }
 
   function noteFailure(err) {
     failures++;
