@@ -4,7 +4,6 @@ import {
   COMPRESSOR_CONTROLS,
   COMPRESSOR_DEFAULTS,
   ENV_LOOP,
-  ONE_SHOT_POLICY,
   TUMBLE_LOOP,
   TUMBLE_SPATIAL,
 } from './clips.js';
@@ -272,7 +271,7 @@ export function createAudioEngine({
       record.gain.gain.setValueAtTime(fadeOutSeconds > 0 ? record.gain.gain.value : AUDIO_NUMERICS.silenceGain, nowSeconds);
       if (fadeOutSeconds > 0) record.gain.gain.linearRampToValueAtTime(AUDIO_NUMERICS.silenceGain, nowSeconds + fadeOutSeconds);
       try {
-        record.source.stop(nowSeconds + fadeOutSeconds + ONE_SHOT_POLICY.sourceStopTailSeconds);
+        record.source.stop(nowSeconds + fadeOutSeconds + AUDIO_NUMERICS.manualStopTailSeconds);
       } catch {
         removeLoopSource(records, record);
       }

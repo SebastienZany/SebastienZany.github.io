@@ -14,6 +14,7 @@ export const AUDIO_NUMERICS = Object.freeze({
   silenceGain: 0.0001,
   minimumSegmentSeconds: 0.001,
   minimumDistanceWorld: 0.001,
+  manualStopTailSeconds: 0.02,
   legacyAnchor: 'main.js:9026-9057,9132-9147,9271-9285,9392-9410',
 });
 
