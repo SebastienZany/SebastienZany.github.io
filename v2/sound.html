@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>v2 sound check</title>
+  <style>
+    :root { color-scheme: dark; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    body { margin: 0; padding: 24px; color: #e8e4dc; background: #11110f; }
+    main { max-width: 1120px; margin: 0 auto; }
+    h1 { margin: 0 0 8px; font: 500 clamp(24px, 4vw, 42px)/1.1 Georgia, serif; }
+    p { color: #aaa69e; }
+    table { width: 100%; border-collapse: collapse; background: #191916; }
+    th, td { padding: 10px 8px; border-bottom: 1px solid #34332d; text-align: left; }
+    th { color: #bbb6aa; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
+    button, input { accent-color: #d4bc73; }
+    button { min-width: 62px; padding: 7px 10px; color: inherit; background: #2a2924; border: 1px solid #514e44; border-radius: 3px; }
+    button:hover { background: #37352e; }
+    input[type="range"] { width: min(190px, 18vw); }
+    input[type="number"] { width: 64px; padding: 5px; color: inherit; background: #10100e; border: 1px solid #514e44; }
+    output { display: inline-block; min-width: 56px; color: #d4bc73; }
+    fieldset { margin: 24px 0 0; padding: 16px; border: 1px solid #514e44; }
+    .compressor-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; margin-top: 14px; }
+    .compressor-grid label { display: grid; grid-template-columns: 1fr auto; gap: 6px; }
+    #status { min-height: 1.4em; color: #d4bc73; }
+    @media (max-width: 800px) {
+      body { padding: 14px; }
+      table, tbody, tr, td { display: block; }
+      thead { display: none; }
+      tr { padding: 12px; border-bottom: 1px solid #514e44; }
+      td { display: grid; grid-template-columns: 92px 1fr; border: 0; padding: 5px 0; }
+      td::before { content: attr(data-label); color: #8d897f; }
+      input[type="range"] { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>v2 sound check</h1>
+    <p>Real sound-pack files, the production audio graph, and the parity clip limits.</p>
+    <p id="status" role="status">Ready. Audio remains locked until a control is pressed.</p>
+    <table aria-label="Sound clips">
+      <thead>
+        <tr><th>Clip</th><th>Transport</th><th>Volume</th><th>Loop</th><th>Fade in</th><th>Fade out</th></tr>
+      </thead>
+      <tbody id="clips"></tbody>
+    </table>
+    <fieldset>
+      <legend>Master compressor</legend>
+      <label><input id="compressor-enabled" type="checkbox"> Enabled (off by default)</label>
+      <div class="compressor-grid" id="compressor-controls"></div>
+    </fieldset>
+  </main>
+
+  <script type="module">
+    import { CLIPS, COMPRESSOR_CONTROLS, COMPRESSOR_DEFAULTS } from './src/audio/clips.js';
+    import { createAudioEngine } from './src/audio/engine.js';
+
+    const engine = createAudioEngine();
+    const status = document.querySelector('#status');
+    const clipRows = new Map();
+
+    function showStatus(message, error = null) {
+      status.textContent = error ? `${message}: ${error.message}` : message;
+      status.style.color = error ? '#ef8f82' : '#d4bc73';
+    }
+
+    function fileName(path) {
+      return path.split('/').pop();
+    }
+
+    function makeNumberInput(clip, kind, value) {
+      const input = document.createElement('input');
+      input.type = 'number';
+      input.min = '0';
+      input.max = '30';
+      input.step = '0.01';
+      input.value = value.toFixed(2);
+      input.dataset[`${kind}Id`] = clip.id;
+      input.setAttribute('aria-label', `${fileName(clip.path)} ${kind === 'fadeIn' ? 'fade in' : 'fade out'} seconds`);
+      input.addEventListener('change', () => {
+        const next = kind === 'fadeIn'
+          ? engine.setClipFadeIn(clip.id, input.value)
+          : engine.setClipFadeOut(clip.id, input.value);
+        input.value = next.toFixed(2);
+      });
+      return input;
+    }
+
+    async function playClip(clip) {
+      const settings = engine.getClipSettings(clip.id);
+      if (clip.id === 'env' && settings.loop) await engine.startEnv();
+      else if (clip.id === 'slime-tumble') await engine.startTumble({ fadeInSeconds: settings.fadeInSeconds });
+      else await engine.playOneShot(clip, { audition: true });
+      showStatus(`Playing ${fileName(clip.path)}`);
+      renderTransportState();
+    }
+
+    function stopClip(clip) {
+      if (clip.id === 'env') engine.stopEnv();
+      else if (clip.id === 'slime-tumble') engine.stopTumble();
+      engine.stopOneShots(clip.id);
+      showStatus(`Stopping ${fileName(clip.path)}`);
+      renderTransportState();
+    }
+
+    function renderTransportState() {
+      const state = engine.getState();
+      for (const [clipId, controls] of clipRows) {
+        const oneShotActive = state.activeOneShots.some((voice) => voice.clipId === clipId && !voice.stopping);
+        const active = clipId === 'env'
+          ? state.env.running
+          : clipId === 'slime-tumble' ? state.tumble.running : oneShotActive;
+        controls.play.setAttribute('aria-pressed', String(active));
+        controls.play.textContent = active ? 'Playing' : 'Play';
+      }
+    }
+
+    for (const clip of CLIPS) {
+      const settings = engine.getClipSettings(clip.id);
+      const row = document.createElement('tr');
+      row.dataset.clipId = clip.id;
+
+      const nameCell = document.createElement('td');
+      nameCell.dataset.label = 'Clip';
+      nameCell.textContent = fileName(clip.path);
+      nameCell.title = clip.fallbackPath ? `${clip.path} → ${clip.fallbackPath}` : clip.path;
+
+      const transportCell = document.createElement('td');
+      transportCell.dataset.label = 'Transport';
+      const play = document.createElement('button');
+      play.type = 'button';
+      play.textContent = 'Play';
+      play.dataset.playClip = clip.id;
+      const stop = document.createElement('button');
+      stop.type = 'button';
+      stop.textContent = 'Stop';
+      stop.dataset.stopClip = clip.id;
+      play.addEventListener('click', () => {
+        play.disabled = true;
+        playClip(clip).catch((error) => showStatus(`Could not play ${fileName(clip.path)}`, error)).finally(() => {
+          play.disabled = false;
+          renderTransportState();
+        });
+      });
+      stop.addEventListener('click', () => stopClip(clip));
+      transportCell.append(play, ' ', stop);
+
+      const volumeCell = document.createElement('td');
+      volumeCell.dataset.label = 'Volume';
+      const volume = document.createElement('input');
+      volume.type = 'range';
+      volume.min = '0';
+      volume.max = String(settings.maximumVolume);
+      volume.step = '0.01';
+      volume.value = String(settings.volume);
+      volume.dataset.volumeClip = clip.id;
+      volume.setAttribute('aria-label', `${fileName(clip.path)} volume`);
+      const volumeOutput = document.createElement('output');
+      volumeOutput.textContent = `${Math.round(settings.volume * 100)}%`;
+      volume.addEventListener('input', () => {
+        const next = engine.setClipVolume(clip.id, volume.value);
+        volumeOutput.textContent = `${Math.round(next * 100)}%`;
+      });
+      volumeCell.append(volume, volumeOutput);
+
+      const loopCell = document.createElement('td');
+      loopCell.dataset.label = 'Loop';
+      const loop = document.createElement('input');
+      loop.type = 'checkbox';
+      loop.checked = settings.loop;
+      loop.dataset.loopClip = clip.id;
+      loop.setAttribute('aria-label', `${fileName(clip.path)} loop`);
+      loop.addEventListener('change', () => engine.setClipLoop(clip.id, loop.checked));
+      loopCell.append(loop);
+
+      const fadeInCell = document.createElement('td');
+      fadeInCell.dataset.label = 'Fade in (s)';
+      fadeInCell.append(makeNumberInput(clip, 'fadeIn', settings.fadeInSeconds));
+      const fadeOutCell = document.createElement('td');
+      fadeOutCell.dataset.label = 'Fade out (s)';
+      fadeOutCell.append(makeNumberInput(clip, 'fadeOut', settings.fadeOutSeconds));
+
+      row.append(nameCell, transportCell, volumeCell, loopCell, fadeInCell, fadeOutCell);
+      document.querySelector('#clips').append(row);
+      clipRows.set(clip.id, { play, stop });
+    }
+
+    const compressorEnabled = document.querySelector('#compressor-enabled');
+    compressorEnabled.checked = COMPRESSOR_DEFAULTS.enabled;
+    compressorEnabled.addEventListener('change', () => {
+      engine.setCompressorEnabled(compressorEnabled.checked);
+      showStatus(`Compressor ${compressorEnabled.checked ? 'enabled' : 'disabled'}`);
+    });
+
+    for (const control of COMPRESSOR_CONTROLS) {
+      const label = document.createElement('label');
+      const name = document.createElement('span');
+      name.textContent = control.key;
+      const input = document.createElement('input');
+      input.type = 'range';
+      input.min = String(control.min);
+      input.max = String(control.max);
+      input.step = String(control.step);
+      input.value = String(COMPRESSOR_DEFAULTS[control.key]);
+      input.dataset.compressorParam = control.key;
+      const output = document.createElement('output');
+      const renderValue = (value) => `${Number(value).toFixed(control.digits)}${control.suffix}`;
+      output.textContent = renderValue(input.value);
+      input.addEventListener('input', () => {
+        output.textContent = renderValue(engine.setCompressorParam(control.key, input.value));
+      });
+      label.append(name, output, input);
+      document.querySelector('#compressor-controls').append(label);
+    }
+
+    window.__v2 ??= {};
+    window.__v2.audio = Object.freeze({
+      engine,
+      clips: CLIPS,
+      getState: engine.getState,
+      ready: true,
+    });
+    engine.schedulePreload();
+  </script>
+</body>
+</html>
