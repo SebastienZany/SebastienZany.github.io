@@ -6,6 +6,24 @@
 
 ## Open
 
+- **[PIPELINE PAUSED — Codex usage cap]** hit ~06:00 after ~15 dispatches at max/xhigh; resets
+  **Aug 21** (or purchase credits at chatgpt.com/codex/settings/usage). Your decision menu:
+  (a) wait for reset; (b) buy credits and Claude resumes the loop as-is; (c) Claude implements
+  the M2 fixes directly on Anthropic tokens (the trade the Codex split existed to avoid — your
+  call); (d) hybrid: Claude does M2's fix (the one red package), Codex takes the rest post-reset.
+- **[M2 status — red, honestly]** The seam bake built its entire measurement machinery and
+  reported three blockers instead of shipping green: (1) signed donor weights unrepresentable in
+  the specced u16 (RESOLVED: signed q14, queued); (2) **C1 gate fails on real seam interiors**
+  (83 gradient/19 value at 1536) and >99.8% of seam paths are "corner-zone" because boundary
+  edges (~1.5 texels) are shorter than the gutter — per-texel-independent walk donors are
+  incoherent between neighbors; (3) local seam-band flux up to 229% of band mass under a tiny
+  global drift — same incoherence expressed as diffusion non-reciprocity. Claude's queued
+  resolution: **coherent extension** (march gutter rows outward, each donor seeded from its
+  already-resolved neighbor) + bisector blending; threshold relaxation stays forbidden; if a
+  rebuilt construction still fails, a reviewed bump-tap-scale error model is the honest endpoint
+  (your decision at that point). Work preserved on branch `v2/track-a` (pushed).
+
+
 - **[F3] The real cuttlefish renders** (SHA-bound c3dccba): `/v2/look.html` now loads MESH1 —
   iridescent film, bump, tentacles, painted world-continuous field. Claude's eye: big step;
   overexposed at defaults (white-pearl blowout — Slime base / film range / brightness want your
