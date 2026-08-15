@@ -1,5 +1,30 @@
 # Blockers
 
+## M2 — degraded donor weights cannot be represented by the mandated record
+
+Observed 2026-08-15 while specifying the M2 gutter-table encoder. The brief requires degraded
+stencils to relax nonnegativity and use bounded weights `|w| <= 2`, but mandates each tap weight
+as `u16` and requires the quantized weights to sum to 65,535. Interpreting the stored value as
+`q / 65535`, as that exact-sum rule requires, can represent only `[0, 1]`; it cannot represent a
+negative extrapolation weight. A signed fixed-point representation could encode the degraded
+case, but would need a different scale and exact-sum target (for example, signed q15 summing to
+32,767), which contradicts the specified deployed layout.
+
+The same section asks the transpose test to scatter a unit through the adjoint and gather it back
+with the stencil as a unit-valued round trip. For a nontrivial bilinear stencil this produces
+`sum(w_i^2)`, not 1 (four equal weights produce 0.25), so that assertion cannot hold even before
+quantization. The valid adjoint test is the inner-product identity
+`dot(G x, y) == dot(x, G^T y)`; conservation is separately established by `sum(w_i) == 1`.
+
+Impact: exact geodesic walks, floating-point stencil construction, nonnegative u16 stencils, and
+the CPU gather/scatter oracle are unaffected. Emitting the required degraded records and writing
+the requested deployed-data test are stopped rather than silently changing the format or
+weakening the assertion.
+
+Resolution needed: choose a signed deployed weight encoding and its exact-sum rule (or prohibit
+negative deployed weights), and replace “scatter then gather equals one” with the transpose
+inner-product identity plus a separate conservation assertion.
+
 ## M1 — slit branch/loop counts describe the wrong component graph
 
 Observed 2026-08-15 by the fresh M1 topology implementation against
