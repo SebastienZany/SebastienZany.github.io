@@ -11,10 +11,9 @@ fn main(@builtin(global_invocation_id) invocation: vec3u) {
   var sum = 0.0;
   for (var offsetY = -1; offsetY <= 1; offsetY += 1) {
     for (var offsetX = -1; offsetX <= 1; offsetX += 1) {
-      let sourcePos = clamp(vec2i(invocation.xy) + vec2i(offsetX, offsetY), vec2i(0), vec2i(dimensions) - 1);
+      let sourcePos = clamp(vec2i(invocation.xy) + vec2i(offsetX, offsetY), vec2i(0), vec2i(dimensions) - vec2i(1));
       sum += textureLoad(sourceField, sourcePos, 0).x;
     }
   }
   textureStore(outputField, invocation.xy, vec4f(sum / 9.0, 0.0, 0.0, 0.0));
 }
-

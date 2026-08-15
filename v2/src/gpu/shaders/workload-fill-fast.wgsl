@@ -2,7 +2,7 @@
 // Input/output: read_write r32float field; input: 28-byte records (dst, four donors, weights).
 // Units: linear texel indices and unorm16 weights.
 // Invariant: every donor index designates an authoritative texel, so reads cannot race writes.
-enable readonly_and_readwrite_storage_textures;
+requires readonly_and_readwrite_storage_textures;
 
 @group(0) @binding(0) var field: texture_storage_2d<r32float, read_write>;
 @group(0) @binding(1) var<storage, read> records: array<u32>;

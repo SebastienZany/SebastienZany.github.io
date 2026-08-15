@@ -323,9 +323,9 @@ export const SLIDER_PARAM_BINDINGS = Object.freeze({
 // GUTTER = ceil(max sample reach + bilinear support) = ceil(2.33 + 1) = 4.
 // Iterated kernels never increase their single-pass footprint; gutters are refilled between passes.
 export const MAX_KERNEL_FOOTPRINT = Object.freeze({
-  bumpTaps: Object.freeze({ maxSampleReachTexels: 2.33, bilinearSupportTexels: 1, requiredGutterTexels: 4 }),
-  blurPass: Object.freeze({ maxSampleReachTexels: 1, bilinearSupportTexels: 0, requiredGutterTexels: 1 }),
-  bilinearSample: Object.freeze({ maxSampleReachTexels: 0, bilinearSupportTexels: 1, requiredGutterTexels: 1 }),
+  bumpTaps: Object.freeze({ maxSampleReachTexels: 2.33, bilinearSupportTexels: 1, maxFootprintWidthTexels: 7, requiredGutterTexels: 4 }),
+  blurPass: Object.freeze({ maxSampleReachTexels: 1, bilinearSupportTexels: 0, maxFootprintWidthTexels: 3, requiredGutterTexels: 1 }),
+  bilinearSample: Object.freeze({ maxSampleReachTexels: 0, bilinearSupportTexels: 1, maxFootprintWidthTexels: 2, requiredGutterTexels: 1 }),
 });
 
 export function createParams(overrides = {}) {
