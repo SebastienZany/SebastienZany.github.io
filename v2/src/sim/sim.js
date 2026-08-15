@@ -288,7 +288,8 @@ export async function createFlatTorusSimulation({
 
   async function samplePopulation(now, { force = false } = {}) {
     const visibleAgents = await count();
-    return updatePopulationController(params, controllerState, { now, visibleAgents, force });
+    const sampleTime = fixedTick ? stepIndex * 16.6667 : now; // main.js:18633 step unit
+    return updatePopulationController(params, controllerState, { now: sampleTime, visibleAgents, force });
   }
 
   function uploadParameters(dt) {

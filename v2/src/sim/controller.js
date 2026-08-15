@@ -1,4 +1,5 @@
 import { BASE_POPULATION_CONTROL_VALUES } from '../shared/params.js';
+import { gameClock } from '../shared/clock.js';
 
 const SAMPLE_LIMIT = 240;
 const SUPPLY_EPSILON = 1e-6;
@@ -52,7 +53,9 @@ export function updatePopulationController(params, state, {
 } = {}) {
   if (!params.usePopulationControl) return clonePopulationControllerState(state);
 
-  const sampleTime = finite(now, 0);
+  const sampleTime = Number.isFinite(Number(now))
+    ? Number(now)
+    : gameClock.now();
   const target = populationTarget(params);
   const periodMs = Math.max(1, finite(
     params.populationControlPeriodMs,

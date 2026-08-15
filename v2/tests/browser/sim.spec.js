@@ -64,6 +64,17 @@ test('indirect and capacity dispatch have the same below-capacity state set', as
   });
   const capacity = await page.evaluate(() => window.__v2.sim.hashState());
   expect(capacity).toBe(indirect);
+
+  const permutation = await page.evaluate(async () => {
+    const sim = window.__v2.sim;
+    const agents = await sim.readAgents();
+    const field = await sim.readField();
+    await sim.debugReplaceState({ agents, field });
+    const forward = await sim.hashState();
+    await sim.debugReplaceState({ agents: agents.reverse(), field });
+    return { forward, reverse: await sim.hashState() };
+  });
+  expect(permutation.reverse).toBe(permutation.forward);
 });
 
 test('legacy wall-clock and fixed-tick variants are deterministic when elapsed time is pinned', async ({ page }) => {
@@ -497,19 +508,20 @@ test('NaN scan stays zero and the population can grow then saturate safely', asy
 });
 
 test('performance sample is recorded without becoming a gate', async ({ page }, testInfo) => {
-  await openSim(page, 'field=256&cap=100000&seed=4000&rng=1&paused=1');
+  const measuredSteps = 20;
+  await openSim(page, 'field=1536&cap=500000&seed=60000&rng=1&paused=1');
   const started = performance.now();
-  await page.evaluate(async () => {
-    for (let index = 0; index < 100; index += 1) window.__v2.sim.step(1);
+  await page.evaluate(async (steps) => {
+    for (let index = 0; index < steps; index += 1) window.__v2.sim.step(1);
     await window.__v2.sim.hashState();
-  });
-  const msPerStep = (performance.now() - started) / 100;
+  }, measuredSteps);
+  const msPerStep = (performance.now() - started) / measuredSteps;
   const record = {
     recordedAt: new Date().toISOString(),
     milestone: 'M3',
-    fieldSize: 256,
-    capacity: 100000,
-    seedCount: 4000,
+    fieldSize: 1536,
+    capacity: 500000,
+    seedCount: 60000,
     msPerStep,
     adapter: testInfo.annotations.find(({ type }) => type === 'adapter')?.description ?? 'unknown',
     informational: true,

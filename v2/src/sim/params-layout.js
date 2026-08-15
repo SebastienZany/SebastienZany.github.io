@@ -1,4 +1,10 @@
-import { ATOMIC_FIXED_POINT_SCALE, DENSITY_MASS, MAX_DENSITY_RESERVE_MASS } from './constants.js';
+import {
+  ATOMIC_FIXED_POINT_SCALE,
+  DENSITY_MASS,
+  MAX_DENSITY_RESERVE_MASS,
+  SPLAT_REFERENCE_FIELD_SIZE,
+  WORLD_LINEAR_SCALE,
+} from './constants.js';
 
 export const PARAM_SLOT = Object.freeze({
   frame: 0,
@@ -39,7 +45,8 @@ export const PARAM_PACKING_TABLE = Object.freeze([
 ]);
 
 export function crowdKernelSettings(densityBlur, fieldSize) {
-  const pointSizeTexels = Math.max(1, (densityBlur / 4) * (fieldSize / 1536)); // main.js:769–773
+  const pointSizeTexels = Math.max(1,
+    (densityBlur / WORLD_LINEAR_SCALE) * (fieldSize / SPLAT_REFERENCE_FIELD_SIZE)); // main.js:769–773
   if (pointSizeTexels <= 1) {
     return { pointSizeTexels, radiusTexels: 0.5, kernelMass: 1, blurIterations: 0, blurAlpha: 0 };
   }
