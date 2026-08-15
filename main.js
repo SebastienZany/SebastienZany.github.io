@@ -15655,6 +15655,16 @@ async function onLoad(gltf) {
     setAllOatObservationText,
     observationPlaceholderText: OBSERVATION_PLACEHOLDER_TEXT,
     loggedClicks,
+    // Replay writes the resolved tuple straight in, bypassing
+    // updateMouseRepelFromEvent's BVH raycast and its 45ms wall-clock throttle.
+    // This is the only per-frame input that reaches the simulation shader
+    // (pulled by setAgentUpdateUniforms), so it must be replayed exactly.
+    setMouseRepelState: ({ active = false, uv = null, chartId = 0 } = {}) => {
+      mouseRepelState.active = !!active;
+      if (uv) mouseRepelState.uv.set(uv.x, uv.y);
+      mouseRepelState.chartId = chartId;
+      return true;
+    },
     getMouseRepelState: () => ({
       active: mouseRepelState.active,
       uv: { x: mouseRepelState.uv.x, y: mouseRepelState.uv.y },
@@ -15790,6 +15800,14 @@ async function onLoad(gltf) {
     },
     seedSimRng,
     getSimRngState,
+    // agentAllocationFrame seeds lastAgentAllocationOffset, which is a uniform
+    // on the agent compaction pass — so it decides where each agent lands in
+    // agentRT, and therefore the order the density splats are additively
+    // blended in. Float addition is not associative, so restoring simulation
+    // state without also restoring this counter produces a different field.
+    // It has to be part of any snapshot or recording header.
+    getAgentAllocationFrame: () => agentAllocationFrame,
+    setAgentAllocationFrame: (v) => { agentAllocationFrame = (v >>> 0); },
     // Determinism probe: hash the authoritative simulation state. Covers more
     // than fieldRT alone, because a divergence can exist in the agent buffer a
     // while before it shows up in the field.

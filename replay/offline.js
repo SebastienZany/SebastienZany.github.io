@@ -11,6 +11,7 @@
 
 import { installClock, enterOffline, armOffline, exitOffline, step, clock } from './clock.js';
 import { createMp4Encoder, bitrateFor, pickAvcCodec } from './encode.js';
+import { createRecorder, createPlayer } from './recorder.js';
 
 installClock();
 
@@ -268,6 +269,181 @@ async function determinismTest({
   };
 }
 
+/**
+ * Isolate GPU nondeterminism from CPU-side state contamination.
+ *
+ * Last night's gate compared runs that each went through resetSimulation +
+ * re-seeding, so a mismatch could have come from either the GPU or from state
+ * resetSimulation does not restore. This test removes that ambiguity: snapshot
+ * the exact float buffers once, then repeatedly restore THAT SAME state and run
+ * N ticks. Every run starts from bit-identical input, so any difference in the
+ * output is the GPU alone.
+ *
+ * If this comes back identical, the simulation is reproducible given exact
+ * initial state, and the replay design is viable — the problem was never the
+ * GPU, only how faithfully the starting state is reconstructed.
+ */
+async function gpuDeterminismTest({ ticks = 200, runs = 3, growFirst = 600, onRun = null } = {}) {
+  const c = api();
+  c.params.storyBoxesEnabled = false;
+  c.params.statsReadbackEnabled = false;
+  c.params.usePopulationControl = false;
+
+  c.seedSimRng(12345);
+  c.resetSimulation({ resetOats: true, spawnAgents: true });
+  if (growFirst > 0) c.growFast(growFirst);
+  await c.saveState('gpuprobe');
+  const allocAtSnapshot = c.getAgentAllocationFrame();
+
+  const results = [];
+
+  // Enter offline mode ONCE and hold it for the whole test.
+  //
+  // Doing it per-run is a trap: exitOffline() resumes the live loop, and both
+  // the async loadState (IndexedDB) and armOffline's own polling then let an
+  // arbitrary number of LIVE sim ticks execute after the restore but before
+  // controlled stepping begins. That is nondeterministic by construction and
+  // looks exactly like GPU nondeterminism. The tell was allocFrame advancing by
+  // 219/231/238/249/256 between runs that each stepped exactly 200 ticks.
+  //
+  // While offline, rAF callbacks are captured rather than scheduled, so nothing
+  // simulates except step().
+  await armOffline({ startMs: 100000 });
+  try {
+    for (let r = 0; r < runs; r++) {
+      const loaded = await c.loadState('gpuprobe');
+      if (loaded?.error) throw new Error(`loadState failed: ${loaded.error}`);
+      // Restore the allocation counter too. loadState only uploads fieldRT and
+      // agentRT; this counter decides agent slot packing and therefore splat
+      // blend order, so leaving it advancing changes the result from identical
+      // input.
+      c.setAgentAllocationFrame(allocAtSnapshot);
+      const restored = c.hashSimState();
+
+      for (let i = 0; i < ticks; i++) step(1000 / 60);
+
+      const after = c.hashSimState();
+      const row = { run: r, restored, after };
+      results.push(row);
+      if (onRun) await onRun(row);
+    }
+  } finally { exitOffline(); }
+
+  const restoreIdentical = results.every(
+    (x) => x.restored.field === results[0].restored.field && x.restored.agents === results[0].restored.agents,
+  );
+  const afterIdentical = results.every(
+    (x) => x.after.field === results[0].after.field && x.after.agents === results[0].after.agents,
+  );
+  const sums = results.map((x) => x.after.fieldSum);
+  const spread = Math.max(...sums) - Math.min(...sums);
+
+  return {
+    ticks, runs, growFirst,
+    restoreIdentical,      // did loadState actually give us the same starting point?
+    afterIdentical,        // is the GPU deterministic from identical input?
+    fieldSums: sums,
+    spreadPercent: +((spread / Math.max(...sums)) * 100).toFixed(5),
+    verdict: !restoreIdentical
+      ? 'INCONCLUSIVE — restore is not bit-identical'
+      : afterIdentical
+        ? 'GPU IS DETERMINISTIC from identical state'
+        : 'GPU IS NONDETERMINISTIC from identical state',
+    results,
+  };
+}
+
+/**
+ * Record a session.
+ *
+ * `player` is a fn(tick, api) that stands in for a human: it drives the camera
+ * and places oats. Whatever it does is captured as resolved intents, so replay
+ * consumes the recording alone and never re-runs the player.
+ */
+async function recordSession({ ticks = 900, seed = 0xC0FFEE, player = null, name = 'session.cvr' } = {}) {
+  const rec = createRecorder({ api, clock, buildStamp: document.querySelector('meta[name=build]')?.content ?? null });
+  const header = rec.start({ seed });
+  log('recording started', header.rngSeed);
+
+  await armOffline({ startMs: 100000 });
+  try {
+    for (let t = 0; t < ticks; t++) {
+      if (player) player(t, api());
+      rec.sample();               // capture resolved state for THIS tick
+      step(1000 / 60);
+    }
+  } finally { exitOffline(); }
+
+  const recording = rec.stop();
+  const json = JSON.stringify(recording);
+  const save = await fetch(`/__save?name=${encodeURIComponent(name)}`, { method: 'POST', body: json })
+    .then((r) => r.json());
+
+  return {
+    name, save,
+    totalTicks: recording.totalTicks,
+    bytes: json.length,
+    kbPerMinute: +((json.length / 1024) / (recording.totalTicks / 60 / 60)).toFixed(1),
+    ...rec.stats(),
+  };
+}
+
+/** Load a recording and render it to MP4. */
+async function replayToVideo({
+  file = 'session.cvr', width = 1280, height = 720, fps = 30,
+  name = 'replay.mp4', bpp = 0.12, onProgress = null,
+} = {}) {
+  const recording = await fetch(`/replay/out/${file}`).then((r) => r.json());
+  const p = createPlayer({ api, recording });
+
+  const total = recording.totalTicks;
+  const ticksPerFrame = Math.max(1, Math.round(recording.simHz / fps));
+  const frames = Math.ceil(total / ticksPerFrame);
+
+  const canvas = document.getElementById('sim');
+  setRenderSize(width, height);
+  if (canvas.width !== width || canvas.height !== height) {
+    throw new Error(`canvas is ${canvas.width}x${canvas.height}, expected ${width}x${height}`);
+  }
+
+  p.begin();
+
+  const enc = await createMp4Encoder({ canvas, fps, bpp });
+  await enc.start();
+  await armOffline({ startMs: 100000 });
+
+  const timings = [];
+  try {
+    for (let f = 0; f < frames; f++) {
+      const t0 = clock.realNow();
+      for (let k = 0; k < ticksPerFrame; k++) {
+        p.applyTick(f * ticksPerFrame + k);
+        step(1000 / 60);
+      }
+      await enc.addFrame(f);
+      timings.push(clock.realNow() - t0);
+      if (onProgress && f % 10 === 0) await onProgress(f, frames);
+    }
+  } finally { exitOffline(); }
+
+  const buf = await enc.finalize();
+  const save = await fetch(`/__save?name=${encodeURIComponent(name)}`, { method: 'POST', body: buf })
+    .then((r) => r.json());
+
+  const warm = timings.slice(20);
+  return {
+    source: file, frames, width, height, fps, ticksPerFrame,
+    recordedTicks: total,
+    bytes: buf.byteLength,
+    meanMsPerFrame: +(warm.reduce((a, b) => a + b, 0) / Math.max(1, warm.length)).toFixed(2),
+    totalSeconds: +(timings.reduce((a, b) => a + b, 0) / 1000).toFixed(1),
+    // Non-empty means the replay's world drifted enough to change an outcome —
+    // the loud-failure signal the plan asked for.
+    mismatches: p.mismatches,
+    save,
+  };
+}
+
 /** Coarse read of how much slime actually exists, so growth is measurable. */
 function sampleStats() {
   const c = api();
@@ -294,7 +470,7 @@ async function snapshot(name = 'snapshot.png', { width = 640, height = 360 } = {
   return save;
 }
 
-window.__replay = { renderVideo, benchmarkTick, setRenderSize, growColony, snapshot, probeGrowth, determinismTest, sampleStats, clock, waitFor, api };
+window.__replay = { renderVideo, benchmarkTick, setRenderSize, growColony, snapshot, probeGrowth, determinismTest, gpuDeterminismTest, recordSession, replayToVideo, sampleStats, clock, waitFor, api };
 log('offline harness ready; waiting for __cuttle');
 
 const postStatus = (status) => {
@@ -321,7 +497,40 @@ if (qs.get('auto') === '1') {
   try {
     await postStatus({ phase: 'ready' });
 
-    if (qs.get('determinism') === '1') {
+    if (qs.get('record') === '1') {
+      const preset = qs.get('preset');
+      if (preset) api().applySimulationPreset(preset);
+      const mod = qs.get('player') ? await import(`./scripts/${qs.get('player')}.js`) : null;
+      const player = mod ? mod.default(api, { W, H }) : null;
+      const result = await recordSession({
+        ticks: num('ticks', 900),
+        seed: num('seed', 0xC0FFEE),
+        player,
+        name: qs.get('name') || 'session.cvr',
+      });
+      await postStatus({ phase: 'done', result });
+
+    } else if (qs.get('replay')) {
+      const result = await replayToVideo({
+        file: qs.get('replay'),
+        width: W, height: H,
+        fps: num('fps', 30),
+        bpp: num('bpp', 0.12),
+        name: qs.get('name') || 'replay.mp4',
+        onProgress: (frame, total) => postStatus({ phase: 'replaying', frame, total }),
+      });
+      await postStatus({ phase: 'done', result });
+
+    } else if (qs.get('gpudet') === '1') {
+      const result = await gpuDeterminismTest({
+        ticks: num('ticks', 200),
+        runs: num('runs', 3),
+        growFirst: num('grow', 600),
+        onRun: (row) => postStatus({ phase: 'gpudet', row }),
+      });
+      await postStatus({ phase: 'done', result });
+
+    } else if (qs.get('determinism') === '1') {
       const result = await determinismTest({
         seed: num('seed', 12345),
         ticks: num('ticks', 400),
