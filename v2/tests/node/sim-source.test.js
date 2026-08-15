@@ -51,3 +51,9 @@ test('pass graph pins legacy ordering and density sensing stays nearest', async 
   assert.match(agents, /textureLoad\(field/);
   assert.doesNotMatch(agents, /textureSample/);
 });
+
+test('non-finite scan uses the portable IEEE-754 exponent test', async () => {
+  const source = await readFile(new URL('state-hash.wgsl', simUrl), 'utf8');
+  assert.match(source, /0x7f800000u/);
+  assert.doesNotMatch(source, /\bis(?:Nan|Inf|Finite)\s*\(/);
+});

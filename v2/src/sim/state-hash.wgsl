@@ -22,6 +22,11 @@ struct StateHash {
 @group(0) @binding(3) var field: texture_2d<f32>;
 @group(0) @binding(4) var<storage, read_write> stateHash: StateHash;
 
+fn isNonFinite(value: f32) -> bool {
+  // IEEE-754 infinities and NaNs share an all-ones exponent.
+  return (bitcast<u32>(value) & 0x7f800000u) == 0x7f800000u;
+}
+
 @compute @workgroup_size(${AGENT_WORKGROUP_SIZE})
 fn hashAgents(@builtin(global_invocation_id) invocation: vec3<u32>) {
   let agentIndex = invocation.x;
@@ -35,9 +40,8 @@ fn hashAgents(@builtin(global_invocation_id) invocation: vec3<u32>) {
   hash = pcgHash32(hash ^ agent.flags);
   atomicAdd(&stateHash.agentSum, hash);
   atomicXor(&stateHash.agentXor, rotateLeft32(hash, 13u));
-  if (any(isNan(agent.uvPos)) || any(isInf(agent.uvPos))
-      || isNan(agent.heading) || isInf(agent.heading)
-      || isNan(agent.reserve) || isInf(agent.reserve)) {
+  if (isNonFinite(agent.uvPos.x) || isNonFinite(agent.uvPos.y)
+      || isNonFinite(agent.heading) || isNonFinite(agent.reserve)) {
     atomicAdd(&stateHash.nonFinite, 1u);
   }
 }
@@ -51,5 +55,5 @@ fn hashField(@builtin(global_invocation_id) invocation: vec3<u32>) {
   let hash = pcgHash32(bitcast<u32>(value) ^ pcgHash32(index));
   atomicAdd(&stateHash.fieldSum, hash);
   atomicXor(&stateHash.fieldXor, rotateLeft32(hash, 7u));
-  if (isNan(value) || isInf(value)) { atomicAdd(&stateHash.nonFinite, 1u); }
+  if (isNonFinite(value)) { atomicAdd(&stateHash.nonFinite, 1u); }
 }
