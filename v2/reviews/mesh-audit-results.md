@@ -14,7 +14,7 @@
 | Vertices / triangles | 281,981 / 501,428 |
 | Charts (index-connectivity) | 1,233 |
 | Seam pairs (undirected → directional) | 30,034 → 60,068 |
-| Same-chart slit pairs | 3,592 — forming **570 connected curves**, largest 87 edges |
+| Same-chart slit pairs | 3,592 — **630 chart-local components** (the splitter's work units; M1-measured: 18 branching, 19 branch vertices, **0 loops**); 570 endpoint-grouped curves (diagnostic only — cross-chart merges fabricate apparent branches/loops), largest 87 edges |
 | Fold angles (between paired tris) | >60°: 3,718 · >80°: 1,318 · >89°: 147 (histogram in script output) |
 | Multi-chart vertices | 3-chart: 2,167 · 4-chart: 164 · 5-chart: 12 |
 | Corner angle defects (|defect| > 0.05 rad) | positive: 181 · negative: 1,358 · ~flat: 804 |

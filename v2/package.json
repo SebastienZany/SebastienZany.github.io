@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "bake:goldlut": "node tools/goldlut.mjs",
+    "bake:mesh": "node tools/bake-mesh.mjs",
     "fixtures": "node tools/fixtures.mjs",
     "test": "npm run test:node && npm run test:gpu",
     "test:node": "node --test tests/node/*.test.js",

@@ -21,11 +21,13 @@ fails outright with real gutters at 768; triage finding 3).
 1. **`tools/repack.mjs`** — chart repacking with guaranteed clearance:
    - **Slit handling first, per CHART-LOCAL component:** M1's 3,592 same-chart edge pairs form
      570 endpoint-connected curves, but endpoint grouping merges across charts — the correct
-     work unit is the **chart-local component: expect 630** (review #3: 53 endpoint-groups span
-     2–4 charts, **19 have degree-3 branch junctions, 5 are closed loops** — M1 must confirm).
-     Per component: decompose branched components into simple paths at junctions; closed loops
-     get one seed cut (making two endpoints) first; then extend each endpoint along mesh edges
-     to the chart boundary and split. A boundary-reaching path always exists in a connected
+     work unit is the **chart-local component: 630, M1-measured and test-locked** — and M1's
+     measurement corrected the round-3 metadata (M1 gate, BLOCKERS resolved): chart-locally
+     there are **18 branching components (19 branch vertices) and ZERO closed loops** — the "5
+     loops" existed only in the cross-chart endpoint grouping (570), which is diagnostics, not
+     the work-unit graph. So: decompose branched components into simple paths at junctions; no
+     loop seed-cut path is needed; then extend each endpoint along mesh edges to the chart
+     boundary and split. A boundary-reaching path always exists in a connected
      chart, so the splitter **must always succeed — there is no fallback** (display and
      diffusion have no resolver; an unsplit slit is a field cliff; the suite asserts zero).
      Splitting requires **vertex duplication along the cut**: the bake emits its own reindexed

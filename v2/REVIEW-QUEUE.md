@@ -30,6 +30,11 @@
 
 ## Resolved
 
+- **M1 accepted** (gate 2026-08-15, Track A): 6 commits; 27/27 node + 3/3 browser green from
+  Claude's shell; every audited count confirmed exactly; MESH1 locked
+  (sha256 dbf3f435…). Spec amendment at gate: slit work units are the 630 chart-local
+  components with **zero loops** (M2's loop machinery deleted; the round-3 "5 loops" were
+  endpoint-grouping artifacts).
 - **M3 accepted** (gate 2026-08-15): flat-torus sim fully green — 38/38 node + 17/17 GPU
   (determinism/snapshot double-run held). Two gate fix-cycles, both instructive: WGSL
   operator-mixing + reserved-keyword compile errors (unfindable in Codex's sandbox; now in the
