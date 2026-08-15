@@ -8,6 +8,11 @@ import {
   transposeInnerProducts,
 } from '../../src/atlas/fill.js';
 import { GUTTER_RECORD_OFFSET } from '../../tools/atlas-constants.mjs';
+import { fixtureBakeMesh } from '../../tools/fixture-pipeline.mjs';
+import { buildFixtureSet } from '../../tools/fixtures.mjs';
+import { rasterizeAtlas } from '../../tools/rasterize.mjs';
+import { repackAtlasWithTarget } from '../../tools/repack.mjs';
+import { splitChartLocalSlits } from '../../tools/slit-split.mjs';
 
 test('gutter gather and adjoint scatter obey conservation and transpose identity', () => {
   const gutter = {
@@ -76,4 +81,44 @@ test('diffusion ledger closes exactly after deposits, depletion, and clamp', () 
   assert.equal(result.ledger.deposits, 1);
   assert.ok(result.ledger.acceptedDepletion > 0);
   assert.ok(result.ledger.upperClampLoss > 0);
+});
+
+test('100-step fixture drift is bounded and a wrong diffusion tap fails the locked flux gate', () => {
+  // The locked 0.5% one-step bound includes the 0.4764% cone-corner fixture maximum. It is
+  // world-area weighted; a texel-count total would erase the chart-density stress in this test.
+  const maximumRelativeDrift = 0.005;
+  const fluxFaultTolerance = 1e-5;
+  for (const name of ['seam-quad', 'folded-quad-80', 'three-chart-corner']) {
+    const mesh = splitChartLocalSlits(fixtureBakeMesh(buildFixtureSet()[name]));
+    const repack = repackAtlasWithTarget(mesh, {
+      fieldSize: 128,
+      gutterTexels: 2,
+      directTapClampTexels: 1,
+      densityScale: 0.3,
+      role: 'fixture',
+    });
+    const raster = rasterizeAtlas(mesh, repack);
+    const atlas = {
+      fieldSize: repack.fieldSize,
+      authoritativeOwner: raster.authoritativeOwner,
+      gutter: raster.gutter,
+      chartTable: repack.chartTable,
+    };
+    let field = Float64Array.from(raster.authoritativeOwner, (owner, index) => (
+      owner ? Math.sin(index * 12.9898) * 0.5 + 0.5 : 0
+    ));
+    for (let step = 0; step < 100; step += 1) {
+      const result = diffuseWithLedger(field, atlas);
+      const relativeDrift = Math.abs(result.ledger.seamFlux) / Math.abs(result.ledger.T_prev);
+      assert.ok(relativeDrift < maximumRelativeDrift, `${name} step ${step}: ${relativeDrift}`);
+      assert.ok(Math.abs(result.ledger.residual) < 1e-12, name);
+      field = result.field;
+    }
+    const baseline = diffuseWithLedger(field, atlas);
+    const injected = diffuseWithLedger(field, atlas, { wrongTapOffset: 1 });
+    assert.ok(
+      Math.abs(injected.ledger.seamFlux - baseline.ledger.seamFlux) > fluxFaultTolerance,
+      `${name}: wrong-tap injection did not trip the flux gate`,
+    );
+  }
 });
