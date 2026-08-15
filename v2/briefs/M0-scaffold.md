@@ -13,7 +13,7 @@ scope / `__dev` patterns worth keeping).
    - Directories per PLAN §2 (empty `src/*` subdirs may hold a `README.md` one-liner).
    - `v2/.gitignore`: `node_modules/`, `test-results/`, `playwright-report/`, `.cache/`.
    - `v2/package.json`: `"private": true`, devDependency `@playwright/test` only. Scripts:
-     `test` (node suite then GPU suite), `test:node` → `node --test tests/node/`,
+     `test` (node suite then GPU suite), `test:node` → `node --test tests/node/*.test.js` (spec amended at the M0 gate: Node 24.13 treats a bare directory as a module path — BLOCKERS.md item 1, resolved),
      `test:gpu` → `playwright test`, `serve` → a tiny zero-dep static server
      (`node tools/serve.mjs`, ~40 lines, correct MIME for `.wgsl`/`.bin`, serves the **repo root**
      so `/v2/...` paths mirror production).

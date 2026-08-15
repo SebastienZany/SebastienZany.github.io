@@ -16,7 +16,7 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const WORKTREE = resolve(here, '../../..'); // repo worktree root
+const WORKTREE = args.worktree ? resolve(args.worktree) : resolve(here, '../../..'); // repo worktree root (override with --worktree for parallel streams)
 const LOG_DIR = resolve(here, 'dispatch-logs');
 mkdirSync(LOG_DIR, { recursive: true });
 
@@ -38,7 +38,9 @@ Working directory is the repo worktree root. Standing rules (non-negotiable):
 - Commit on the current branch in small steps with clear messages.
 - If reality contradicts the brief, STOP that thread of work and write v2/BLOCKERS.md with the
   specifics; finish what is unaffected.
-- Finish by running the brief's acceptance commands yourself and reporting honestly.`;
+- Run the node test suite yourself; the browser/GPU suite CANNOT launch Chrome inside your
+  sandbox — do not retry it; mark those acceptance items 'skipped (gate-run by Claude)' and move on.
+- Finish by running the runnable acceptance commands yourself and reporting honestly.`;
 
 const REPORT_SCHEMA = {
   type: 'object',

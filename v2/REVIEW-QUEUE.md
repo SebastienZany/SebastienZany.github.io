@@ -6,6 +6,12 @@
 
 ## Open
 
+- **[M0] iPhone probe now actionable** — M0 is merged and pushed; open
+  `https://bestiaryofvanishings.com/v2/probe.html` on the phone, run the 60 s rehearsal at 1024,
+  copy JSON, paste to Claude or into `v2/reference/probe-results.md`. Mac Safari at 1536 likewise
+  if convenient. *Provisional while pending:* conservative device assumptions stand. ~5 min.
+
+
 - **[M0] iPhone + Mac-Safari probe runs** — when M0 lands and is pushed, open
   `https://bestiaryofvanishings.com/v2/probe.html` on the phone and run the 60-second rehearsal
   at 1024; on Mac Safari, open the local page and run it at 1536. Tap "copy JSON" and paste both
@@ -24,4 +30,8 @@
 
 ## Resolved
 
-(nothing yet)
+- **M0 accepted** (gate review 2026-08-15, bound to the merge SHA recorded in git): 11 Codex
+  commits + 2 gate amendments (test-glob spec fix; Chrome probe results from Claude's shell —
+  Codex's sandbox cannot launch Chrome, so GPU suites are gate-run by Claude as standing
+  procedure). Node 21/21, GPU 2/2, hardware adapter apple/metal-3, all optional capabilities
+  present on desktop. Readability review: pass (CONVENTIONS/GLOSSARY exemplary).
