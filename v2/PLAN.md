@@ -575,6 +575,18 @@ v2 shell promoted to root, README notes. Legacy remains reachable.
   Claude review the diff (e.g. `/code-review`) before merging. Look gates (M5, M9) additionally
   need the artist's eye on real grown slime at 1536, zoomed in.
 - Claude cuts the next brief at each boundary (cheap, keeps briefs truthful).
+- **Async-review mode (artist request, 2026-08-15): nothing blocks except cutover.** Every
+  decision or inspection that belongs to the artist goes to `v2/REVIEW-QUEUE.md` as an item with
+  (a) what to look at, (b) the provisional decision Claude made and why, (c) the override path.
+  Work proceeds on the provisional call; a veto triggers a scoped redo — and only decisions with
+  cheap revert paths are provisionalized (M9 cutover remains a hard gate). Standing specifics:
+  the iPhone probe is de-gated (M2 proceeds on conservative device assumptions — fallback fill
+  path, no tier1 — which phone data can only relax; re-bake is one command); the M2 mobile
+  decision follows the pre-set policy "combined levers if measured post-split demand ≤ 85%,
+  else 1280" unless overridden; look gates (M5) queue screenshots + deployed URLs and later
+  feedback lands as shader/param tweaks, never architecture; v2-only commits are pushed to main
+  after Claude's gate review (verified to touch nothing outside v2/) so every milestone is
+  immediately phone-testable.
 
 ## 6. Risk register
 
