@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "bake:goldlut": "node tools/goldlut.mjs",
     "fixtures": "node tools/fixtures.mjs",
     "test": "npm run test:node && npm run test:gpu",
     "test:node": "node --test tests/node/*.test.js",
