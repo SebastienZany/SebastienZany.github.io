@@ -853,6 +853,19 @@ async function replayToVideo({
   // the simulation, which stamps oat food decay off performance.now().
   await armOffline();
   player.begin();
+
+  // The audio track must be DECLARED before output.start() — Mediabunny refuses
+  // to add a track afterwards — even though its samples arrive last.
+  const withAudio = qs.get('audio') !== '0';
+
+  // Hook audio BEFORE pressing Begin. requestIntroStart() plays the intro clip
+  // itself, synchronously, as part of the click — so with the recorder hooked
+  // afterwards that cue was emitted into a void and the finished film had no
+  // intro music at all, while every later cue (which happens inside the tick
+  // loop) came through fine.
+  const arec = withAudio ? createAudioRecorder({ api, simHz: recording.simHz }) : null;
+  arec?.hook();
+
   // A session recorded from the Begin click opened with NO agents and let the
   // intro seed the colony. The replay has to open the same way, or it starts
   // mid-life with the colony already present and the whole starting sequence —
@@ -862,10 +875,6 @@ async function replayToVideo({
     const begun = await pressBegin();
     log('replay pressed Begin', begun);
   }
-
-  // The audio track must be DECLARED before output.start() — Mediabunny refuses
-  // to add a track afterwards — even though its samples arrive last.
-  const withAudio = qs.get('audio') !== '0';
 
   // Composite the DOM overlays (story callouts, ending fade, countdown) into
   // each frame. They live in the DOM, so a raw canvas capture omits them
@@ -880,9 +889,6 @@ async function replayToVideo({
     fps, bpp, withAudio,
   });
   await enc.start();
-
-  const arec = withAudio ? createAudioRecorder({ api, simHz: recording.simHz }) : null;
-  arec?.hook();
 
   const timings = [];
   let resizeCorrections = 0;
