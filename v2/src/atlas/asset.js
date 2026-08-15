@@ -212,3 +212,120 @@ const CRC_TABLE = Uint32Array.from({ length: 256 }, (_, index) => {
   for (let bit = 0; bit < 8; bit += 1) value = (value >>> 1) ^ ((value & 1) ? 0xedb88320 : 0);
   return value >>> 0;
 });
+
+const ATLAS_SECTION_MAGIC = Uint8Array.of(0x41, 0x53, 0x45, 0x43, 0x32, 0, 0, 0);
+const ATLAS_SECTION_PREAMBLE_BYTES = 16;
+
+export const ATLAS_SECTION_VERSION = 2;
+
+export function parseAtlasSection(input) {
+  const bytes = alignedByteView(input);
+  requireCondition(bytes.byteLength >= ATLAS_SECTION_PREAMBLE_BYTES, 'ASEC2: truncated preamble');
+  for (let index = 0; index < ATLAS_SECTION_MAGIC.length; index += 1) {
+    requireCondition(bytes[index] === ATLAS_SECTION_MAGIC[index], 'ASEC2: invalid magic');
+  }
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  requireCondition(view.getUint32(8, true) === ATLAS_SECTION_VERSION, 'ASEC2: unsupported version');
+  const headerLength = view.getUint32(12, true);
+  requireCondition(ATLAS_SECTION_PREAMBLE_BYTES + headerLength <= bytes.byteLength, 'ASEC2: truncated header');
+  const header = JSON.parse(new TextDecoder().decode(bytes.subarray(
+    ATLAS_SECTION_PREAMBLE_BYTES,
+    ATLAS_SECTION_PREAMBLE_BYTES + headerLength,
+  )));
+  requireCondition(Array.isArray(header.arrays), 'ASEC2: missing array table');
+  const arrays = {};
+  for (const descriptor of header.arrays) {
+    const ArrayType = ARRAY_TYPES[descriptor.type];
+    requireCondition(ArrayType && typeof descriptor.name === 'string', 'ASEC2: invalid array descriptor');
+    requireCondition(descriptor.byteOffset % 8 === 0, `ASEC2: ${descriptor.name} is unaligned`);
+    requireCondition(
+      descriptor.byteOffset + descriptor.byteLength <= bytes.byteLength,
+      `ASEC2: ${descriptor.name} overruns section`,
+    );
+    requireCondition(
+      descriptor.byteLength === descriptor.length * ArrayType.BYTES_PER_ELEMENT,
+      `ASEC2: ${descriptor.name} length mismatch`,
+    );
+    requireCondition(!arrays[descriptor.name], `ASEC2: duplicate ${descriptor.name}`);
+    arrays[descriptor.name] = new ArrayType(
+      bytes.buffer,
+      bytes.byteOffset + descriptor.byteOffset,
+      descriptor.length,
+    );
+  }
+  return { metadata: header.metadata ?? {}, arrays, descriptors: header.arrays };
+}
+
+export async function loadAtlasManifest(manifestUrl, {
+  expectedRootHash,
+  expectedSchemaVersion,
+  fetchImpl = fetch,
+} = {}) {
+  const response = await fetchImpl(manifestUrl);
+  if (!response.ok) throw new Error(`Atlas manifest request failed (${response.status})`);
+  const manifest = await response.json();
+  const schemaVersion = expectedSchemaVersion ?? manifest.schemaVersion;
+  if (manifest.schemaVersion !== schemaVersion) {
+    throw new Error(`Atlas assets are incompatible: schema ${manifest.schemaVersion}, code expects ${schemaVersion}`);
+  }
+  const calculatedRoot = await sha256Hex(new TextEncoder().encode(stableStringify(manifestBinding(manifest))));
+  if (manifest.rootHash !== calculatedRoot) throw new Error('Atlas manifest is corrupt: root hash disagrees with its contents');
+  if (expectedRootHash && manifest.rootHash !== expectedRootHash) {
+    throw new Error('Atlas assets are incompatible with this build; refresh the page to clear cached files');
+  }
+  return manifest;
+}
+
+export async function loadAtlasSections(manifestUrl, options = {}) {
+  const manifest = await loadAtlasManifest(manifestUrl, options);
+  const sections = {};
+  for (const entry of manifest.sections) {
+    const response = await (options.fetchImpl ?? fetch)(new URL(entry.file, manifestUrl));
+    if (!response.ok) throw new Error(`Atlas section request failed for ${entry.name} (${response.status})`);
+    const compressed = new Uint8Array(await response.arrayBuffer());
+    const inflated = options.decompress
+      ? await options.decompress(compressed)
+      : await decompressGzip(compressed);
+    const bytes = inflated instanceof Uint8Array ? inflated : new Uint8Array(inflated);
+    const actualHash = await sha256Hex(bytes);
+    if (actualHash !== entry.sha256) throw new Error(`Atlas section hash mismatch: ${entry.name}`);
+    sections[entry.name] = parseAtlasSection(bytes);
+  }
+  return { manifest, sections };
+}
+
+export function stableStringify(value) {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+export function manifestBinding(manifest) {
+  return {
+    bakeUuid: manifest.bakeUuid,
+    schemaVersion: manifest.schemaVersion,
+    sections: manifest.sections,
+    targets: manifest.targets,
+  };
+}
+
+async function decompressGzip(bytes) {
+  if (typeof DecompressionStream !== 'function') throw new Error('This browser cannot decompress atlas gzip sections');
+  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+async function sha256Hex(bytes) {
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, '0')).join('');
+}
+
+const ARRAY_TYPES = Object.freeze({
+  Float32Array,
+  Uint32Array,
+  Uint16Array,
+  Uint8Array,
+  Int32Array,
+});
