@@ -44,6 +44,7 @@ export function splitChartLocalSlits(mesh) {
     cutEdgeKeys,
     fixtureName: mesh.fixtureName,
     fixtureSeamPairIndices: mesh.fixtureSeamPairIndices,
+    fixtureDeclaredChartCount: mesh.fixtureDeclaredChartCount,
     stats: {
       inputChartCount: mesh.chartCount,
       outputChartCount: charts.length,

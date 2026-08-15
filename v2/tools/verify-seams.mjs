@@ -5,6 +5,7 @@ import { gzipSync } from 'node:zlib';
 import { parseMeshAsset } from '../src/atlas/asset.js';
 import { DEFAULT_ATLAS_TARGETS, MAX_SECTION_BYTES } from './atlas-constants.mjs';
 import { buildBlockGraph } from './block-graph.mjs';
+import { verifyBlockGraph } from './block-graph-verification.mjs';
 import { buildBoundaryFrameIndex } from './boundary-index.mjs';
 import { verifyC1Reconstruction } from './c1-verification.mjs';
 import { measureCornerContinuity } from './corner-verification.mjs';
@@ -106,6 +107,7 @@ function verifyOneTarget(mesh, target, seed) {
   const raster = rasterizeAtlas(mesh, repack);
   const boundary = buildBoundaryFrameIndex(mesh, repack, frames, raster.authoritativeOwner);
   const graph = buildBlockGraph(mesh, repack, raster);
+  const blockVerification = verifyBlockGraph(mesh, repack, raster, graph);
   const coverage = verifyCoverage(mesh, repack, raster, COVERAGE_SAMPLES, seed);
   const stencils = verifyStencilTable(mesh, repack, raster);
   const transpose = verifyTransposeIdentity(raster);
@@ -121,7 +123,27 @@ function verifyOneTarget(mesh, target, seed) {
     mesh, repack, raster, boundary, frames, TRANSPORT_SAMPLES, seed ^ 0x7a6_5eab,
   );
   const corruption = verifyCorruptedDonorIsDetected(mesh, repack, raster);
-  return { repack, raster, frames, boundary, graph, coverage, stencils, transpose, smooth, sharp, affine, c1, corners, diffusion, impulse, transport, conditionedTransport, corruption };
+  return {
+    repack,
+    raster,
+    frames,
+    boundary,
+    graph,
+    blockVerification,
+    coverage,
+    stencils,
+    transpose,
+    smooth,
+    sharp,
+    affine,
+    c1,
+    corners,
+    diffusion,
+    impulse,
+    transport,
+    conditionedTransport,
+    corruption,
+  };
 }
 
 function applyCoreGates(metrics, label, failures, fixture) {
@@ -150,6 +172,12 @@ function applyCoreGates(metrics, label, failures, fixture) {
       `${label}: impulse spread has ${metrics.impulse.traceViolations} speed and `
       + `${metrics.impulse.ellipticityViolations} ellipticity violations`,
     );
+  }
+  if (metrics.blockVerification.distanceViolationCount) {
+    failures.push(`${label}: block graph has ${metrics.blockVerification.distanceViolationCount} exact-distance violations`);
+  }
+  if (metrics.blockVerification.continuityViolationCount) {
+    failures.push(`${label}: block interpolation has ${metrics.blockVerification.continuityViolationCount} continuity violations`);
   }
   if (metrics.conditionedTransport) {
     for (const [name, count] of [
@@ -201,11 +229,12 @@ function compactMetrics(metrics) {
     multipleFrameCandidates: countWhere(metrics.boundary.candidateCounts, (value) => value > 1),
     blockNodes: metrics.graph.nodeCount,
     blockEdges: metrics.graph.targets.length,
+    blockVerification: metrics.blockVerification,
   };
 }
 
 function buildReport(context) {
-  const fixtureRows = context.fixtures.map((row) => `| ${row.name} | ${row.fieldSize} | ${row.charts} | ${row.stencils.recordCount} | ${row.stencils.signedCount} | ${scientific(row.transpose.relativeError)} | ${row.transport.seamCount} | ${row.transport.conservativeFailureCount} |`).join('\n');
+  const fixtureRows = context.fixtures.map((row) => `| ${row.name} | ${row.fieldSize} | ${row.charts} | ${row.stencils.recordCount} | ${row.stencils.signedCount} | ${scientific(row.transpose.relativeError)} | ${row.transport.seamCount} | ${row.transport.conservativeFailureCount} | ${row.blockVerification.distanceViolationCount} / ${row.blockVerification.continuityViolationCount} |`).join('\n');
   return `# M2 seam invariant report
 
 CPU output of \`npm run verify:seams\`. Status: **${context.failures.length || context.pending.length ? 'not green' : 'green'}**.
@@ -214,9 +243,9 @@ their own measured bands, as required by the brief.
 
 ## Fixture matrix
 
-| Fixture | Size | Charts | Gutters | Signed degraded | Transpose rel. error | Seam walks | Conservative failures |
-|---|---:|---:|---:|---:|---:|---:|---:|
-${fixtureRows || '| _in progress_ | | | | | | | |'}
+| Fixture | Size | Charts | Gutters | Signed degraded | Transpose rel. error | Seam walks | Conservative failures | Block exact / continuity violations |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+${fixtureRows || '| _in progress_ | | | | | | | | |'}
 
 ${context.targets.map(realTargetReport).join('\n')}
 
@@ -271,6 +300,7 @@ function realTargetReport(row) {
 | Frame cap overflow / maximum candidates | ${formatInteger(row.frameOverflow)} / ${row.maximumFrameCandidates} |
 | Texels with >1 nearby seam curve (proxy, not multi-hop incidence) | ${formatInteger(row.multipleFrameCandidates)} |
 | Block graph nodes / directed edges | ${formatInteger(row.blockNodes)} / ${formatInteger(row.blockEdges)} |
+| Block interpolation samples / violations | ${formatInteger(row.blockVerification.continuitySampleCount)} / ${formatInteger(row.blockVerification.continuityViolationCount)} |
 
 Every conservative-failure texel from this run is listed in \`${row.failureFile}\`.
 Every failed geometrically conditioned walk is listed in \`${row.conditionedFailureFile}\`.
@@ -291,7 +321,6 @@ ${row.diffusion.worstGroups.slice(0, 10).map((group) => `| ${group.groupId} | ${
 
 function pendingInvariantList() {
   return [
-    'Block-graph distance error against exact mesh geodesics and interpolated block-boundary continuity.',
     'Exact multi-hop sensing incidence along sensor-disc chords (nearby-frame multiplicity is reported only as a proxy).',
     'Deployed-data quantized transpose/conservation proof, blocked by the missing signed donor encoding.',
   ];

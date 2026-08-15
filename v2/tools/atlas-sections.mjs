@@ -109,11 +109,22 @@ function encodeBlockNodes(nodes) {
   const nodeBlockCoords = new Uint16Array(nodes.length * 2);
   const nodeTexelCounts = new Uint32Array(nodes.length);
   const nodeWorldCenters = new Float32Array(nodes.length * 3);
+  const nodeRepresentativeTexels = new Uint32Array(nodes.length);
+  const nodeRepresentativeTriangles = new Uint32Array(nodes.length);
   nodes.forEach((node, index) => {
     nodeChartIds[index] = node.chartId;
     nodeBlockCoords.set([node.blockX, node.blockY], index * 2);
     nodeTexelCounts[index] = node.texelCount;
     nodeWorldCenters.set(node.worldCenter, index * 3);
+    nodeRepresentativeTexels[index] = node.representativeTexel;
+    nodeRepresentativeTriangles[index] = node.representativeTriangle;
   });
-  return { nodeChartIds, nodeBlockCoords, nodeTexelCounts, nodeWorldCenters };
+  return {
+    nodeChartIds,
+    nodeBlockCoords,
+    nodeTexelCounts,
+    nodeWorldCenters,
+    nodeRepresentativeTexels,
+    nodeRepresentativeTriangles,
+  };
 }

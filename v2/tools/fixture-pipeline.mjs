@@ -12,6 +12,7 @@ export function fixtureBakeMesh(fixture) {
   const segmentation = buildChartSegmentation(uv0, indices);
   const seams = extractSeamEdges(positions, uv0, indices, segmentation);
   const fixtureSeamPairIndices = declaredSeamPairIndices(fixture, positions, seams.seamPairs);
+  const fixtureDeclaredChartCount = Math.max(...fixture.triangleChartIds) + 1;
   return {
     positions,
     normals,
@@ -29,6 +30,7 @@ export function fixtureBakeMesh(fixture) {
     slitComponentCount: seams.slitComponents.length,
     fixtureName: fixture.name,
     fixtureSeamPairIndices,
+    fixtureDeclaredChartCount,
   };
 }
 
