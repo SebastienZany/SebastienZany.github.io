@@ -54,7 +54,10 @@ page.on('console', (m) => {
   }
 });
 
-const PLACE_FN = `async (count) => {
+// Strongest-slime candidates projected to screen; oats are placed with REAL
+// mouse clicks. Placing through the console API is exactly the shortcut that
+// let a broken recorder pass its tests while real players' clicks vanished.
+const CANDS_FN = `(maxCands) => {
   const c = window.__cuttle;
   const h2f = (h) => {
     const s = (h & 0x8000) ? -1 : 1, e = (h & 0x7c00) >> 10, f = h & 0x03ff;
@@ -68,29 +71,48 @@ const PLACE_FN = `async (count) => {
   const x0 = Math.max(0, Math.min(size - win, Math.round(b.x * size) - half));
   const y0 = Math.max(0, Math.min(size - win, Math.round(b.y * size) - half));
   const buf = new Uint16Array(win * win * 4);
-  const placed = [];
-  for (let k = 0; k < count; k++) {
-    let best = null;
-    try { c.renderer.readRenderTargetPixels(rt, x0, y0, win, win, buf); } catch (e) { break; }
-    for (let j = 0; j < win; j += 3) for (let i = 0; i < win; i += 3) {
-      const val = h2f(buf[(j * win + i) * 4]);
-      if (!(val > 0.004)) continue;
-      const u = (x0 + i) / size, v = (y0 + j) / size;
-      let ok = true;
-      for (const o of c.oats) {
-        if (!o.uv) continue;
-        const du = u - o.uv.x, dv = v - o.uv.y;
-        if (du * du + dv * dv < 0.053 * 0.053) { ok = false; break; }
-      }
-      if (ok && (!best || val > best.val)) best = { u, v, val };
+  try { c.renderer.readRenderTargetPixels(rt, x0, y0, win, win, buf); } catch (e) { return []; }
+  const raw = [];
+  for (let j = 0; j < win; j += 3) for (let i = 0; i < win; i += 3) {
+    const val = h2f(buf[(j * win + i) * 4]);
+    if (val > 0.004) raw.push({ u: (x0 + i) / size, v: (y0 + j) / size, val });
+  }
+  raw.sort((p, q2) => q2.val - p.val);
+  const picked = [];
+  for (const cand of raw) {
+    let ok = true;
+    for (const o of c.oats) {
+      if (!o.uv) continue;
+      const du = cand.u - o.uv.x, dv = cand.v - o.uv.y;
+      if (du * du + dv * dv < 0.053 * 0.053) { ok = false; break; }
     }
-    if (!best) break;
-    const before = c.oats.length;
-    c.addOat(best.u, best.v);
-    placed.push({ u: +best.u.toFixed(4), v: +best.v.toFixed(4), accepted: c.oats.length > before });
+    for (const p of picked) {
+      const du = cand.u - p.u, dv = cand.v - p.v;
+      if (du * du + dv * dv < 0.053 * 0.053) { ok = false; break; }
+    }
+    if (!ok) continue;
+    const s2 = c.projectWorldToScreen(c.uvToWorld({ x: cand.u, y: cand.v }));
+    if (!s2.inClip) continue;
+    picked.push({ u: +cand.u.toFixed(4), v: +cand.v.toFixed(4),
+                  sx: Math.round(s2.x), sy: Math.round(s2.y) });
+    if (picked.length >= maxCands) break;
+  }
+  return picked;
+}`;
+
+async function placeByRealClicks(want) {
+  const cands = await page.evaluate(`(${CANDS_FN})(24)`);
+  const placed = [];
+  for (const cand of cands) {
+    if (placed.length >= want) break;
+    const before = await page.evaluate(() => window.__cuttle.oats.length);
+    await page.mouse.click(cand.sx, cand.sy);
+    await page.waitForTimeout(180);
+    const after = await page.evaluate(() => window.__cuttle.oats.length);
+    if (after > before) placed.push({ ...cand, accepted: true });
   }
   return placed;
-}`;
+}
 
 // ---- 1. play a session under ?rec ----
 console.log(`[e2e] loading ${BASE}/?rec&seed=${SEED}`);
@@ -101,12 +123,18 @@ console.log('[e2e] pressing Begin');
 await page.click('#startButton');
 await page.waitForFunction(() => window.__rec.recording === true, null, { timeout: 5000 });
 
+// Both deliveries are downloads now: the .cvr banked the moment R is pressed,
+// then the finished .mp4. Collect everything.
+const downloads = [];
+page.on('download', (d) => downloads.push(d));
+
 let firstCalloutAtTick = null;
+let placed = [];
 for (let s = 1; s <= PLAY_SECONDS; s++) {
   await page.waitForTimeout(1000);
   if (s === PLACE_AT) {
-    const placed = await page.evaluate(`(${PLACE_FN})(5)`);
-    console.log(`[e2e] t=${s}s placed:`, JSON.stringify(placed));
+    placed = await placeByRealClicks(4);
+    console.log(`[e2e] t=${s}s placed by real clicks:`, JSON.stringify(placed));
   }
   if (s % 15 === 0 || s === PLAY_SECONDS) {
     const st = await page.evaluate(() => ({
@@ -123,8 +151,16 @@ for (let s = 1; s <= PLAY_SECONDS; s++) {
 const sessionInfo = await page.evaluate(() => ({
   tick: window.__rec.tick,
   triggered: window.__cuttle.oats.filter((o) => o.observation?.triggered).length,
+  // The trap this suite exists for: real clicks MUST be in the event log.
+  addOatEvents: window.__rec.toJSON().events.filter((e) => e.type === 'addOat'),
 }));
 if (!sessionInfo.triggered) console.log('[e2e] WARNING: no story callout earned this session — text cannot be verified in the film');
+if (placed.length && sessionInfo.addOatEvents.length < placed.length) {
+  console.error(`FAIL EARLY: ${placed.length} real-click placements but only `
+    + `${sessionInfo.addOatEvents.length} addOat events in the recording — the recorder is `
+    + 'missing real player input again. Aborting before wasting a render.');
+  process.exit(1);
+}
 
 // ---- 2. R opens the panel and freezes the world ----
 await page.keyboard.press('r');
@@ -140,12 +176,22 @@ if (frozen.simulateEnabled !== false || !frozen.paused) {
   process.exit(1);
 }
 
+// Pressing R must immediately bank the session: a recognizably-named .cvr
+// download, before the user chooses anything in the panel.
+let cvrDownload = null;
+for (let i = 0; i < 40 && !cvrDownload; i++) {
+  cvrDownload = downloads.find((d) => d.suggestedFilename().endsWith('.cvr')) ?? null;
+  if (!cvrDownload) await page.waitForTimeout(250);
+}
+const cvrName = cvrDownload?.suggestedFilename() ?? null;
+console.log('[e2e] banked .cvr:', cvrName);
+if (cvrDownload) await cvrDownload.saveAs(resolve(OUT_DIR, 'e2e-banked.cvr'));
+
 // Keep the test cheap: small output, 30fps. (The shipped default is 60.)
 await page.selectOption('#rp-res', '854x480');
 await page.selectOption('#rp-fps', '30');
 
 // ---- 3. Render: reload into ?render&auto=1, IndexedDB hand-off, download ----
-const downloadPromise = page.waitForEvent('download', { timeout: 900000 });
 await page.click('#rp-go');
 await page.waitForURL(/render/, { timeout: 30000 });
 console.log('[e2e] reloaded into render mode:', page.url());
@@ -180,10 +226,16 @@ console.log('[e2e] render result:', JSON.stringify({
 }, null, 1));
 
 // ---- 4. the download is the delivery on a static host ----
-const download = await downloadPromise;
+let mp4Download = null;
+for (let i = 0; i < 240 && !mp4Download; i++) {
+  mp4Download = downloads.find((d) => d.suggestedFilename().endsWith('.mp4')) ?? null;
+  if (!mp4Download) await page.waitForTimeout(500);
+}
+if (!mp4Download) { console.error('FAIL: no .mp4 download arrived'); process.exit(1); }
+const mp4Name = mp4Download.suggestedFilename();
 const mp4Path = resolve(OUT_DIR, 'e2e-live-flow.mp4');
-await download.saveAs(mp4Path);
-console.log('[e2e] downloaded to', mp4Path);
+await mp4Download.saveAs(mp4Path);
+console.log('[e2e] downloaded', mp4Name, '->', mp4Path);
 
 await browser.close();
 
@@ -211,6 +263,13 @@ ok('session earned a story callout', sessionInfo.triggered >= 1, `triggered=${se
 ok('overlay compositor painted callout frames',
   !!result.overlays && JSON.stringify(result.overlays) !== '{}', JSON.stringify(result.overlays));
 ok('no page errors across the whole flow', pageErrors.length === 0, JSON.stringify(pageErrors));
+ok('real-click placements recorded as addOat events',
+  placed.length > 0 && sessionInfo.addOatEvents.length >= placed.length,
+  `placed=${placed.length} events=${sessionInfo.addOatEvents.length}`);
+ok('R banked a recognizably-named .cvr immediately',
+  !!cvrName && /^bestiary-\d{4}-\d{2}-\d{2}-\d{4}-\d+t\.cvr$/.test(cvrName), String(cvrName));
+ok('rendered mp4 carries the same recognizable name',
+  /^bestiary-\d{4}-\d{2}-\d{2}-\d{4}-\d+t\.mp4$/.test(mp4Name), String(mp4Name));
 
 let failed = 0;
 console.log('\n---- E2E RESULTS ----');

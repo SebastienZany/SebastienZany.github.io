@@ -142,9 +142,45 @@ export function createRecorder({ api, clock, buildStamp = null }) {
     state.events.push({ tick: state.tick, phase, type, ...payload });
   }
 
-  /** Wrap the mutators that reach simulation state so their intents are recorded. */
+  /**
+   * Record every simulation mutation.
+   *
+   * The only reliable tap is main.js's own observer seam
+   * (setSimMutationObserver): the game's click handler and panel buttons call
+   * the internal functions directly, so wrapping the window.__cuttle
+   * references sees API calls ONLY and misses real play — a live session with
+   * player-placed oats recorded zero events, and its replay had no story text.
+   * The wrap fallback below stays solely for an older main.js without the seam.
+   */
   function hook() {
     const a = c();
+
+    if (a.setSimMutationObserver) {
+      a.setSimMutationObserver((type, m) => {
+        if (type === 'addOat' || type === 'addInitialOat') {
+          logEvent(type, {
+            uv: [m.uv[0], m.uv[1]],
+            worldPos: m.worldPos ? [q(m.worldPos.x, 6), q(m.worldPos.y, 6), q(m.worldPos.z, 6)] : null,
+            worldNormal: m.worldNormal ? [q(m.worldNormal.x, 6), q(m.worldNormal.y, 6), q(m.worldNormal.z, 6)] : null,
+            accepted: !!m.accepted,
+            oatsLength: m.oatsLength,
+          });
+        } else if (type === 'clearOats') {
+          logEvent('clearOats', { oatsBefore: m.oatsBefore });
+        } else if (type === 'initAgents') {
+          logEvent('initAgents', {});
+        } else if (type === 'resetSimulation') {
+          logEvent('resetSimulation', {
+            resetOats: !!m.resetOats,
+            spawnAgents: m.spawnAgents !== false,
+            resolvedOats: (m.resolvedOats ?? []).map((p) => (p ? [q(p[0], 6), q(p[1], 6)] : null)),
+            allocFrame: m.allocFrame ?? null,
+          });
+        }
+      });
+      state.unhooks.push(() => a.setSimMutationObserver(null));
+      return;
+    }
 
     const origAddOat = a.addOat;
     a.addOat = function wrappedAddOat(u, v, opts) {
@@ -267,8 +303,11 @@ export function createRecorder({ api, clock, buildStamp = null }) {
         // wall-clock seconds. Replay re-runs the same number of ticks at a fixed
         // step, which means it reproduces the same simulation progression but
         // its duration is totalTicks/simHz, not wallMs. Kept so the UI can show
-        // both honestly.
-        wallMs: Math.round(state.wallMs ?? 0),
+        // both honestly. Computed live while recording, so a mid-session
+        // snapshot (the R-press bank) carries real elapsed time too.
+        wallMs: Math.round(state.recording && state.wallStart != null
+          ? clock.realNow() - state.wallStart
+          : (state.wallMs ?? 0)),
         liveFps: state.wallMs ? +((state.tick / (state.wallMs / 1000)).toFixed(1)) : null,
         camera: state.camera,
         repel: state.repel,
@@ -374,11 +413,17 @@ export function createPlayer({ api, recording }) {
       for (const e of evAt.get(tick) ?? []) {
         if (e.type === 'addOat') {
           const before = a.oats.length;
+          // Real THREE.Vector3s, not plain {x,y,z}: addOat clones the world
+          // vectors it is given, and a JSON-shaped object has no .clone().
+          // Only real-click recordings carry worldPos, which is why every
+          // API-placed test recording replayed fine while a genuine session
+          // died here.
+          const V = a.THREE?.Vector3;
+          const vec = (arr) => (arr ? (V ? new V(arr[0], arr[1], arr[2])
+            : { x: arr[0], y: arr[1], z: arr[2] }) : undefined);
           a.addOat(e.uv[0], e.uv[1], e.worldPos ? {
-            worldPos: { x: e.worldPos[0], y: e.worldPos[1], z: e.worldPos[2] },
-            worldNormal: e.worldNormal
-              ? { x: e.worldNormal[0], y: e.worldNormal[1], z: e.worldNormal[2] }
-              : undefined,
+            worldPos: vec(e.worldPos),
+            worldNormal: vec(e.worldNormal),
           } : undefined);
           const accepted = a.oats.length > before;
           if (accepted !== e.accepted) {
@@ -386,6 +431,15 @@ export function createPlayer({ api, recording }) {
           }
         } else if (e.type === 'clearOats') {
           a.clearAllOats();
+        } else if (e.type === 'addInitialOat') {
+          // Re-run the game's own placement. It raycasts from the camera, and
+          // the recorded camera pose for this tick is already applied above,
+          // so the ray resolves to the same spot it did live.
+          a.addInitialOat?.();
+        } else if (e.type === 'initAgents') {
+          // The Seed button. Consumes the same RNG draws on both sides, so the
+          // stream stays aligned by induction.
+          a.initAgents?.();
         } else if (e.type === 'skipIntro') {
           // The game's own skip, via the API rather than a synthetic keydown —
           // a synthetic 's' would also latch the WASD camera-orbit handler with

@@ -15686,7 +15686,14 @@ async function onLoad(gltf) {
       strength: MOUSE_REPEL_STRENGTH,
     }),
     addOat,
+    addInitialOat,
+    initAgents,
     resetSimulation,
+    // The recorder's tap into the observer seam above. One observer at a time;
+    // pass null to detach.
+    setSimMutationObserver: (fn) => {
+      simMutationObserver = typeof fn === 'function' ? fn : null;
+    },
     listSimulationPresets,
     listRenderDisplayPresets,
     applySimulationPreset,
@@ -17190,7 +17197,73 @@ function isOatTooClose(uv, worldPos, radius, chartId) {
   return false;
 }
 
+// === recording observer seam ===
+// The session recorder must see every simulation mutation no matter which path
+// invoked it — the player's canvas click, a panel button, the console API, or
+// a harness script. Wrapping window.__cuttle references does NOT achieve that:
+// the game's own handlers call these functions directly, so an API-wrapping
+// recorder misses real play entirely (measured: a live session with placed
+// oats recorded zero events, and its replay had no story text). The observer
+// therefore fires inside the functions themselves.
+//
+// resetSimulation nests clearAllOats/addInitialOat/initAgents; its wrapper
+// suppresses the children so a recording carries one composite event rather
+// than doubled work on replay.
+let simMutationObserver = null;
+let simMutationSuppressDepth = 0;
+function notifySimMutation(type, payload) {
+  if (!simMutationObserver || simMutationSuppressDepth > 0) return;
+  try {
+    simMutationObserver(type, payload);
+  } catch (err) {
+    console.warn('sim mutation observer failed', err);
+  }
+}
+
 function addOat(x, y, opts = {}) {
+  const before = oats.length;
+  const result = addOatImpl(x, y, opts);
+  notifySimMutation(opts?.initial ? 'addInitialOat' : 'addOat', {
+    uv: [x, y],
+    worldPos: opts?.worldPos ? { x: opts.worldPos.x, y: opts.worldPos.y, z: opts.worldPos.z } : null,
+    worldNormal: opts?.worldNormal ? { x: opts.worldNormal.x, y: opts.worldNormal.y, z: opts.worldNormal.z } : null,
+    accepted: oats.length > before,
+    oatsLength: oats.length,
+  });
+  return result;
+}
+
+function clearAllOats() {
+  const oatsBefore = oats.length;
+  const result = clearAllOatsImpl();
+  notifySimMutation('clearOats', { oatsBefore });
+  return result;
+}
+
+function initAgents() {
+  const result = initAgentsImpl();
+  notifySimMutation('initAgents', {});
+  return result;
+}
+
+function resetSimulation(opts = {}) {
+  simMutationSuppressDepth++;
+  let result;
+  try {
+    result = resetSimulationImpl(opts);
+  } finally {
+    simMutationSuppressDepth--;
+  }
+  notifySimMutation('resetSimulation', {
+    resetOats: !!opts.resetOats,
+    spawnAgents: opts.spawnAgents !== false,
+    resolvedOats: oats.map((o) => (o.uv ? [o.uv.x, o.uv.y] : null)),
+    allocFrame: agentAllocationFrame,
+  });
+  return result;
+}
+
+function addOatImpl(x, y, opts = {}) {
   if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > 1 || y < 0 || y > 1) {
     console.warn('Rejected oat outside atlas bounds:', { x, y });
     return null;
@@ -17335,7 +17408,7 @@ function syncOatPowersFromParams() {
   oatDirty = true;
 }
 
-function clearAllOats() {
+function clearAllOatsImpl() {
   for (const o of oats) {
     disposeOatObservation(o.observation);
     if (o.sphere) {
@@ -17525,7 +17598,7 @@ function createAgentInitialData() {
   return { data, diagnostics, liveAgentIndices };
 }
 
-function initAgents() {
+function initAgentsImpl() {
   cancelEndingSequence({ stopSound: true });
   cancelInitialAgentSeeding();
   const { data, diagnostics } = createAgentInitialData();
@@ -17669,7 +17742,7 @@ function replayInitialAgentSeed({
   lastAgentAllocationOffset = 0;
 }
 
-function resetSimulation({ resetOats = false, spawnAgents = true } = {}) {
+function resetSimulationImpl({ resetOats = false, spawnAgents = true } = {}) {
   cancelEndingSequence({ stopSound: true });
   cancelInitialAgentSeeding();
   statsReadbackCooldownUntil = performance.now() + STATS_READBACK_RESET_COOLDOWN_MS;

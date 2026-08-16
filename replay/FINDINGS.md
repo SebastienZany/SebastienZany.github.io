@@ -261,8 +261,10 @@ reveal-mask edge while single entry-line glyphs slid beneath it — ty glides
   documented at the top of recorder.js). Structure reproduces; tendril detail
   does not.
 - Mid-session parameter changes through the game panel are not recorded.
-- The game's own Clear-oats button replays without re-adding the initial oat.
 - Pausing via the game panel is not recorded (the R panel's freeze is handled).
+- With the ending enabled (off by default), the ending's internal reset would
+  record as an event AND recur endogenously on replay — ending-enabled
+  sessions are not yet supported.
 - Oat food decay keeps running on the wall clock while the R panel is open, so
   resuming after a long panel visit shifts food slightly vs the replay.
 - Mediabunny loads from jsdelivr at render time — an offline machine can play
@@ -270,3 +272,30 @@ reveal-mask edge while single entry-line glyphs slid beneath it — ty glides
 - In-browser exports draw callout text sharp and smooth, but the box chrome
   (frost/stroke) is an approximation; page renders (render-page.mjs) remain
   the maximum-fidelity path.
+
+
+## Addendum, same night: the recorder was deaf to real players
+
+A visitor's live session came back with `"events": []` — their placed oats
+were never recorded, so the replay had no story text. The recorder wrapped
+`window.__cuttle.addOat`, but the game's own click handler calls the internal
+function directly; only console/API calls went through the wrap. Every gate
+had placed oats through the API — the one path the wrap could see — so the
+gates passed while real play was silently dropped.
+
+Fix: an observer seam inside main.js's own mutators (`notifySimMutation` in
+addOat / clearAllOats / initAgents / resetSimulation, with nested-composite
+suppression), which sees every caller. The recorder subscribes via
+`setSimMutationObserver`. Replay reconstructs THREE.Vector3s for the recorded
+raycast outputs — addOat clones them, and a JSON-shaped {x,y,z} has no
+.clone() (caught by the rebuilt gate, and by the user, in the same minute).
+
+Both gates now place oats with REAL canvas clicks (candidates projected via
+uvToWorld + projectWorldToScreen, then page.mouse.click): A/B 25/25, E2E
+14/14, including "real-click placements recorded as addOat events". Frames
+from the finished film show the story callouts earned by those clicks.
+
+Also from this round, at the user's request: pressing R immediately banks the
+session — the .cvr downloads and lands in IndexedDB before the panel offers
+any choices, named recognizably (bestiary-YYYY-MM-DD-HHMM-<ticks>t.cvr), and
+a render made from it carries the same name.

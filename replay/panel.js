@@ -60,6 +60,37 @@ export function installPanel({ recorder, api }) {
   const freeze = () => { window.__replayPaused = true; api().setSimulateEnabled?.(false); };
   const resume = () => { window.__replayPaused = false; api().setSimulateEnabled?.(true); };
 
+  // A recognizable, sortable name shared by the .cvr and any render made from
+  // it: bestiary-2026-08-16-0432-1236t
+  const recName = () => {
+    const d = new Date();
+    const p2 = (n) => String(n).padStart(2, '0');
+    return `bestiary-${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`
+      + `-${p2(d.getHours())}${p2(d.getMinutes())}-${recorder.tick}t`;
+  };
+
+  // Opening the panel immediately banks the session so far: the .cvr downloads
+  // AND lands in IndexedDB before the user chooses anything. A recording is
+  // minutes of a player's attention; it must never depend on the next click
+  // going well. Snapshot, not stop — recording continues if they go back.
+  let lastBankedTick = -1;
+  async function bankRecording() {
+    if (!recorder.tick || recorder.tick === lastBankedTick) return null;
+    lastBankedTick = recorder.tick;
+    const name = `${recName()}.cvr`;
+    const snapshot = JSON.stringify(recorder.toJSON());
+    try {
+      const { saveRecording, deliverFile } = await import('./store.js');
+      await saveRecording(name, JSON.parse(snapshot));
+      const save = await deliverFile(name, snapshot, 'application/json');
+      console.log('[rec] session banked:', name, save);
+      return name;
+    } catch (err) {
+      console.warn('[rec] failed to bank the session', err);
+      return null;
+    }
+  }
+
   const est = (w, h, fps, speed) => {
     // ~130-160ms/frame measured at 720p; scale by pixel count
     const frames = Math.ceil((recorder.tick / (60 * speed)) * fps);
@@ -153,9 +184,11 @@ export function installPanel({ recorder, api }) {
       const bpp = $('#rp-bpp').value;
 
       // Seal the recording synchronously, before any async work, so nothing
-      // can be appended after the cutoff.
+      // can be appended after the cutoff. The name matches the .cvr that was
+      // banked when the panel opened — the world is frozen, so the tick count
+      // (and therefore the name) cannot have moved since.
       const recording = recorder.stop();
-      const name = `session-${Date.now()}.cvr`;
+      const name = `${recName()}.cvr`;
       // IndexedDB, not the dev server: on the real site there is nothing to POST
       // to, so the reload would fetch a file that does not exist and the harness
       // would die parsing the host's HTML 404 page as JSON.
@@ -185,6 +218,9 @@ export function installPanel({ recorder, api }) {
     }
     open = true;
     freeze();
+    // Bank first, panel second — the download must not depend on anything the
+    // panel does afterwards.
+    bankRecording().catch(() => {});
     render();
   });
 

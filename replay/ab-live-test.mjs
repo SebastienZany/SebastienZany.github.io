@@ -35,9 +35,12 @@ const browser = await chromium.launch({
   args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--disable-gpu-vsync'],
 });
 
-// Strongest-slime oat placement, copied from liveCallout: read the smoothed
-// display field (half-float) around the initial oat and feed the frontier.
-const PLACE_FN = `async (count) => {
+// Strongest-slime candidates from liveCallout's readback, each projected to
+// SCREEN coordinates. The oats are then placed with REAL mouse clicks on the
+// canvas — the recorder once hooked only the console API, so tests that placed
+// oats through window.__cuttle.addOat passed while every real player's clicks
+// went unrecorded. Real input only, in every gate, forever.
+const CANDS_FN = `(maxCands) => {
   const c = window.__cuttle;
   const h2f = (h) => {
     const s = (h & 0x8000) ? -1 : 1, e = (h & 0x7c00) >> 10, f = h & 0x03ff;
@@ -51,30 +54,50 @@ const PLACE_FN = `async (count) => {
   const x0 = Math.max(0, Math.min(size - win, Math.round(b.x * size) - half));
   const y0 = Math.max(0, Math.min(size - win, Math.round(b.y * size) - half));
   const buf = new Uint16Array(win * win * 4);
-  const placed = [];
-  for (let k = 0; k < count; k++) {
-    let best = null;
-    try { c.renderer.readRenderTargetPixels(rt, x0, y0, win, win, buf); } catch (e) { break; }
-    for (let j = 0; j < win; j += 3) for (let i = 0; i < win; i += 3) {
-      const val = h2f(buf[(j * win + i) * 4]);
-      if (!(val > 0.004)) continue;
-      const u = (x0 + i) / size, v = (y0 + j) / size;
-      let ok = true;
-      for (const o of c.oats) {
-        if (!o.uv) continue;
-        const du = u - o.uv.x, dv = v - o.uv.y;
-        if (du * du + dv * dv < 0.053 * 0.053) { ok = false; break; }
-      }
-      if (ok && (!best || val > best.val)) best = { u, v, val };
+  try { c.renderer.readRenderTargetPixels(rt, x0, y0, win, win, buf); } catch (e) { return []; }
+  const raw = [];
+  for (let j = 0; j < win; j += 3) for (let i = 0; i < win; i += 3) {
+    const val = h2f(buf[(j * win + i) * 4]);
+    if (val > 0.004) raw.push({ u: (x0 + i) / size, v: (y0 + j) / size, val });
+  }
+  raw.sort((p, q2) => q2.val - p.val);
+  const picked = [];
+  for (const cand of raw) {
+    let ok = true;
+    for (const o of c.oats) {
+      if (!o.uv) continue;
+      const du = cand.u - o.uv.x, dv = cand.v - o.uv.y;
+      if (du * du + dv * dv < 0.053 * 0.053) { ok = false; break; }
     }
-    if (!best) break;
-    const before = c.oats.length;
-    c.addOat(best.u, best.v);
-    placed.push({ u: +best.u.toFixed(4), v: +best.v.toFixed(4), val: +best.val.toFixed(4),
-                  accepted: c.oats.length > before });
+    for (const p of picked) {
+      const du = cand.u - p.u, dv = cand.v - p.v;
+      if (du * du + dv * dv < 0.053 * 0.053) { ok = false; break; }
+    }
+    if (!ok) continue;
+    const s2 = c.projectWorldToScreen(c.uvToWorld({ x: cand.u, y: cand.v }));
+    if (!s2.inClip) continue;
+    picked.push({ u: +cand.u.toFixed(4), v: +cand.v.toFixed(4), val: +cand.val.toFixed(4),
+                  sx: Math.round(s2.x), sy: Math.round(s2.y) });
+    if (picked.length >= maxCands) break;
+  }
+  return picked;
+}`;
+
+// Click through the candidates like a player would, until `want` land.
+async function placeByRealClicks(page, want) {
+  const cands = await page.evaluate(`(${CANDS_FN})(24)`);
+  const placed = [];
+  for (const cand of cands) {
+    if (placed.length >= want) break;
+    const before = await page.evaluate(() => window.__cuttle.oats.length);
+    await page.mouse.click(cand.sx, cand.sy);
+    await page.waitForTimeout(180);
+    const after = await page.evaluate(() => window.__cuttle.oats.length);
+    placed.push({ ...cand, accepted: after > before });
+    if (after <= before) placed.pop();   // occluded or rejected — try the next
   }
   return placed;
-}`;
+}
 
 async function runArm(name, path) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 2 });
@@ -123,8 +146,8 @@ async function runArm(name, path) {
     });
     timeline.push({ s, ...row });
     if (s === PLACE_AT) {
-      placed = await page.evaluate(`(${PLACE_FN})(5)`);
-      console.log(`  [${name}] t=${s}s placed:`, JSON.stringify(placed));
+      placed = await placeByRealClicks(page, 4);
+      console.log(`  [${name}] t=${s}s placed by real clicks:`, JSON.stringify(placed));
     }
     if (s % 15 === 0) {
       console.log(`  [${name}] t=${s}s agents=${row.agents} oats=${row.oats} triggered=${row.triggered} callout=${row.calloutVisible} recTick=${row.recTick}`);
@@ -140,7 +163,7 @@ async function runArm(name, path) {
       rngSeed: j.rngSeed,
       dtRows: j.dtStream.length,
       camRows: j.camera.length,
-      events: j.events.map((e) => ({ tick: e.tick, type: e.type, accepted: e.accepted })),
+      events: j.events.map((e) => ({ tick: e.tick, type: e.type, accepted: e.accepted, worldPos: e.worldPos ?? null })),
       initialOats: j.initialOats,
       bytes: JSON.stringify(j).length,
     };
@@ -207,9 +230,16 @@ if (rec.recFinal) {
   ok('rec file: spawnAgents=false (from-Begin capture)', rec.recFinal.spawnAgents === false,
     `spawnAgents=${rec.recFinal.spawnAgents}`);
   ok('rec file: dt stream present', rec.recFinal.dtRows > 0, `dtRows=${rec.recFinal.dtRows}`);
-  ok('rec file: our oat placements were recorded',
-    rec.recFinal.events.filter((e) => e.type === 'addOat').length >= (rec.placed?.length ?? 99),
+  // THE regression this suite exists for: oats placed with real canvas
+  // clicks (not the console API) must land in the event log, with the
+  // raycast's resolved worldPos captured.
+  const recAdds = rec.recFinal.events.filter((e) => e.type === 'addOat');
+  ok('rec file: REAL-CLICK oat placements were recorded',
+    recAdds.length >= (rec.placed?.length ?? 99) && (rec.placed?.length ?? 0) > 0,
     JSON.stringify(rec.recFinal.events));
+  ok('rec file: recorded placements carry resolved worldPos',
+    recAdds.length > 0 && recAdds.every((e) => Array.isArray(e.worldPos) && e.worldPos.length === 3),
+    JSON.stringify(recAdds.map((e) => e.worldPos)));
   ok('rec file: recorder never reset the world (no tick-0 reset event)',
     !rec.recFinal.events.some((e) => e.type === 'resetSimulation'),
     JSON.stringify(rec.recFinal.events.filter((e) => e.type === 'resetSimulation')));
