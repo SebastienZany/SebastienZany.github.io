@@ -898,15 +898,23 @@ async function preparePageRender({
   const player = createPlayer({ api, recording });
   const total = recording.totalTicks;
 
-  const TICK_MS = 1000 / 60;
-  const MILLI = 1000;
+  // Wall-time axis, exactly as replayToVideo: the film runs at the pace the
+  // session was lived, and main.js re-derives (and re-clamps) sim dt from the
+  // virtual clock steps.
+  const UNIT = 10;                                // integer units per wall ms
   const cumT = new Float64Array(total + 1);
-  for (let i = 0; i < total; i++) cumT[i + 1] = cumT[i] + Math.round(player.dtAt(i) * MILLI);
-  const totalMilliTicks = cumT[total];
-  const simDurationMs = (totalMilliTicks / MILLI) * TICK_MS;
-  const frames = Math.max(1, Math.round((simDurationMs / speed / 1000) * fps));
-  const perFrameMilliTicks = (60 * MILLI * speed) / fps;
-  const targetT = (i) => Math.min(totalMilliTicks, i * perFrameMilliTicks + 0.5);
+  {
+    let cumFloat = 0;   // prefix-rounded — see replayToVideo's schedule note
+    for (let i = 0; i < total; i++) {
+      cumFloat += player.wallMsAt(i);
+      cumT[i + 1] = Math.round(cumFloat * UNIT);
+    }
+  }
+  const totalUnits = cumT[total];
+  const wallDurationMs = totalUnits / UNIT;
+  const simDurationMs = wallDurationMs; // reported duration IS the lived duration now
+  const frames = Math.max(1, Math.round((wallDurationMs / speed / 1000) * fps));
+  const targetT = (i) => Math.min(totalUnits, Math.round((i * 1000 * UNIT * speed) / fps));
 
   const sized = setRenderSize(width, height, ss);
   log('page-render', { width, height, ss, fps, frames, sized });
@@ -1102,7 +1110,7 @@ async function preparePageRender({
       while (cursor < total && cumT[cursor + 1] <= cutoff) {
         player.applyTick(cursor);
         arec.sample(cursor);
-        step(player.dtAt(cursor) * TICK_MS);
+        step(player.wallMsAt(cursor));
         cursor++;
       }
       // After the draw, so animations created during this tick are caught and
@@ -1122,7 +1130,7 @@ async function preparePageRender({
         totalTicks: cursor,
         simHz: recording.simHz,
         speed,
-        tickToSec: (tick) => (cumT[Math.min(Math.max(0, tick), total)] / MILLI) * TICK_MS / 1000,
+        tickToSec: (tick) => cumT[Math.min(Math.max(0, tick), total)] / UNIT / 1000,
         sampleRate: 48000,
         durationSeconds: frames / fps,
       });
@@ -1183,6 +1191,10 @@ function audioBufferToWav(buffer) {
 async function replayToVideo({
   file = 'session.cvr', width = 1280, height = 720, fps = 30, speed = 1,
   name = 'replay.mp4', bpp = 0.12, onProgress = null,
+  // Diagnostic tap: called once per output frame, after compositing and
+  // before the encoder snapshots, with (f, {glCanvas, outCanvas}). This is
+  // how the frost flicker was localised; costs nothing when unset.
+  onFrame = null,
   // Layout stays width x height; the frame is rendered ss times larger. See
   // setRenderSize — this is what keeps the story text from looking soft.
   ss = 2,
@@ -1192,49 +1204,52 @@ async function replayToVideo({
 
   const total = recording.totalTicks;
 
-  // Schedule on SIMULATED TIME, not tick count.
+  // Schedule on the session's WALL TIME — the pace the player lived.
   //
-  // One recorded tick is one live frame, and a live frame carries whatever dt
-  // the frame rate produced — rawDt ~2.0 at 30fps, clamped at FRAME_DT_CLAMP.
-  // The old schedule stepped every tick at a flat 1.0, which both halved the
-  // simulated time of a 30fps session and changed its physics, since simulate()
-  // applies field decay and diffusion once per CALL while metabolism scales with
-  // dt. So walk the recorded dt stream and give each tick back the dt it had.
+  // The previous axis was accumulated sim-dt, and sim dt is CLAMPED at
+  // FRAME_DT_CLAMP: on a 22fps machine each frame advances the sim 2.2 units
+  // while ~2.7 units of real time pass, so a film built on that axis played
+  // 1.16x faster than the session felt (measured on a real recording; the
+  // player noticed before the numbers did). Advancing the virtual clock by the
+  // recorded wall delta instead makes main.js re-derive — and re-clamp — the
+  // sim dt exactly as it did live: identical simulation, film at lived speed,
+  // and every wall-anchored subsystem (intro pacing, decay, reveals, audio
+  // scheduling) at the pace the player actually experienced.
   //
-  // Accumulate in INTEGER milli-ticks, not floating milliseconds.
-  //
-  // The obvious form — cumMs[i+1] = cumMs[i] + dt*16.6667, cutoff = i*1000/fps —
-  // compares an accumulated float SUM against a float PRODUCT. They drift apart
-  // by ~1e-9 relative, which is enough to land a frame on the wrong side of the
-  // comparison: that frame consumes zero ticks and is a duplicate of the last
-  // one, and the next consumes two and jumps. Measured on a 60fps render that
-  // should have been exactly 1 tick per frame: 1074 of 3603 frames were
-  // byte-identical duplicates (mpdecimate), so the film ran at ~42 effective fps
-  // with an irregular cadence. That is what read as choppy text — the motion
-  // itself was linear, it was being SAMPLED unevenly.
-  //
-  // dt is quantised to 3dp by the recorder, so dt*1000 is an exact integer and
-  // the running total is exact to 2^53. 60000/fps is likewise exact for every
-  // standard rate (60->1000, 30->2000, 24->2500), so the comparison is integer
-  // against integer and cannot drift. The 0.5 tolerance only absorbs a
-  // non-integral 60000/fps at an unusual frame rate.
-  const TICK_MS = 1000 / 60;                      // one dt unit, in ms
-  const MILLI = 1000;                             // milli-ticks per tick
-  const cumT = new Float64Array(total + 1);       // integer milli-ticks before tick i
-  for (let i = 0; i < total; i++) {
-    cumT[i + 1] = cumT[i] + Math.round(player.dtAt(i) * MILLI);
+  // Accumulate in INTEGER tenth-milliseconds. The recorder quantises wall
+  // deltas to 0.1ms, so the running total is exact to 2^53, and the per-frame
+  // cutoff is a deterministically ROUNDED PRODUCT rather than a float
+  // accumulation — the old float-sum-vs-product schedule drifted by ~1e-9,
+  // enough to land frames on the wrong side of the comparison, and 1074 of
+  // 3603 frames came out byte-identical duplicates (an effective ~42fps film
+  // whose irregular cadence read as choppy text).
+  const TICK_MS = 1000 / 60;                      // one sim-dt unit, in ms
+  const UNIT = 10;                                // integer units per wall ms
+  const cumT = new Float64Array(total + 1);       // integer 0.1ms units before tick i
+  let simUnitsTotal = 0;
+  {
+    // Round the RUNNING PREFIX, not each tick: per-tick rounding of a legacy
+    // 16.6667ms reconstruction drifts +0.033ms/tick (+7 duplicate frames per
+    // hour of ticks); prefix rounding bounds the error at half a unit total.
+    let cumFloat = 0;
+    for (let i = 0; i < total; i++) {
+      cumFloat += player.wallMsAt(i);
+      cumT[i + 1] = Math.round(cumFloat * UNIT);
+      simUnitsTotal += player.dtAt(i);
+    }
   }
-  const totalMilliTicks = cumT[total];
-  const simDurationMs = (totalMilliTicks / MILLI) * TICK_MS;
-  const outDurationMs = simDurationMs / speed;
+  const totalUnits = cumT[total];
+  const wallDurationMs = totalUnits / UNIT;
+  const simDurationMs = simUnitsTotal * TICK_MS;
+  const outDurationMs = wallDurationMs / speed;
   const frames = Math.max(1, Math.round((outDurationMs / 1000) * fps));
-  // Cutoff for output frame i, in the same integer milli-tick domain.
-  const perFrameMilliTicks = (60 * MILLI * speed) / fps;
-  const targetT = (i) => Math.min(totalMilliTicks, i * perFrameMilliTicks + 0.5);
+  // Cutoff for output frame i, in the same integer 0.1ms domain.
+  const targetT = (i) => Math.min(totalUnits, Math.round((i * 1000 * UNIT * speed) / fps));
   log(
-    `schedule: ${total} ticks = ${(simDurationMs / 1000).toFixed(2)}s simulated ` +
-    `(mean dt ${(simDurationMs / TICK_MS / Math.max(1, total)).toFixed(3)}), ` +
-    `${frames} frames @${fps}fps${player.hasDtStream ? '' : ' — NO dt stream, assuming 1.0'}`,
+    `schedule: ${total} ticks = ${(wallDurationMs / 1000).toFixed(2)}s lived ` +
+    `(${(simDurationMs / 1000).toFixed(2)}s simulated, mean dt ${(simUnitsTotal / Math.max(1, total)).toFixed(3)}), ` +
+    `${frames} frames @${fps}fps` +
+    `${player.hasWallStream ? '' : ' — legacy file: wall axis reconstructed by uniform stretch'}`,
   );
 
   const canvas = document.getElementById('sim');
@@ -1300,7 +1315,7 @@ async function replayToVideo({
       while (cursor < total && cumT[cursor + 1] <= cutoff) {
         player.applyTick(cursor);
         arec?.sample(cursor);      // absolute tick, not an index within the frame
-        step(player.dtAt(cursor) * TICK_MS);
+        step(player.wallMsAt(cursor));
         cursor++;
       }
       if (assertRenderSize(width, height, ss)) {
@@ -1316,6 +1331,7 @@ async function replayToVideo({
       }
       // Same JS task as the draw, for the reason encode.js documents.
       overlays?.composite(canvas, clock.virtualMs);
+      if (onFrame) await onFrame(f, { glCanvas: canvas, outCanvas: overlays ? overlays.canvas : canvas });
       await enc.addFrame(f);
       timings.push(clock.realNow() - t0);
       if (onProgress && f % 10 === 0) await onProgress(f, frames);
@@ -1338,7 +1354,7 @@ async function replayToVideo({
         // Ticks are not uniform in time — each carries the dt of the live frame
         // it came from — so a cue's media time is its cumulative simulated time,
         // not tick/simHz. Same schedule the video frames use.
-        tickToSec: (tick) => (cumT[Math.min(Math.max(0, tick), total)] / MILLI) * TICK_MS / 1000,
+        tickToSec: (tick) => cumT[Math.min(Math.max(0, tick), total)] / UNIT / 1000,
         sampleRate: 48000,
         durationSeconds: frames / fps,   // match the video exactly
       });
@@ -1365,8 +1381,9 @@ async function replayToVideo({
     source: file, frames, width: outW, height: outH, cssWidth: width, cssHeight: height, ss, fps, speed,
     recordedTicks: total, simulatedTicks: cursor,
     // What the session actually simulated, vs what a flat-1.0 replay would have.
+    livedSeconds: +(wallDurationMs / 1000).toFixed(2),
     simulatedSeconds: +(simDurationMs / 1000).toFixed(2),
-    meanRawDt: +(simDurationMs / TICK_MS / Math.max(1, total)).toFixed(3),
+    meanRawDt: +(simUnitsTotal / Math.max(1, total)).toFixed(3),
     usedDtStream: player.hasDtStream,
     bytes: buf.byteLength,
     meanMsPerFrame: +(warm.reduce((a, b) => a + b, 0) / Math.max(1, warm.length)).toFixed(2),

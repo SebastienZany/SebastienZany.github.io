@@ -1152,6 +1152,21 @@ export async function createOverlayCompositor({
     // computed facing/occlusion visibility (main.js:7881-7884). Either at 0
     // means there is nothing to paint.
     const calloutAlpha = num(style.opacity, 1);
+    // Alpha trace: one row per callout per frame, BEFORE any gate, so a
+    // one-frame dropout shows exactly which input dropped (the flicker of
+    // 2026-08-16 measured as single-frame frost losses; without this the
+    // compositor's inputs were invisible after the fact).
+    if (trace && trace.length < TRACE_MAX) {
+      trace.push({
+        id: entry.observation?.stableId ?? entry.observation?.id ?? null,
+        f: paintedFrames,
+        k: 'alpha',
+        op: +calloutAlpha.toFixed(3),
+        spatial: +cssVar(style, '--observation-spatial-opacity', 0).toFixed(3),
+        glass: +cssVar(style, '--observation-glass-opacity', 0).toFixed(3),
+        feather: +cssVar(style, '--observation-edge-feather-opacity', 1).toFixed(3),
+      });
+    }
     if (calloutAlpha <= 0.004) return;
     if (cssVar(style, '--observation-spatial-opacity', 0) <= 0.004) return;
 
@@ -1247,7 +1262,7 @@ export async function createOverlayCompositor({
   let failures = 0;
   let lastError = null;
   let paintedFrames = 0;
-  const TRACE_MAX = 4000;
+  const TRACE_MAX = 20000;
   let trace = [];
   /** Identify which oat a callout belongs to, for the motion trace. */
   function oatIndexOf(observation) {

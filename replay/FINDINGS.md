@@ -299,3 +299,46 @@ Also from this round, at the user's request: pressing R immediately banks the
 session — the .cvr downloads and lands in IndexedDB before the panel offers
 any choices, named recognizably (bestiary-YYYY-MM-DD-HHMM-<ticks>t.cvr), and
 a render made from it carries the same name.
+
+## Addendum 2, same night: flicker, Firefox, and the speed of lived time
+
+Three user reports against the deployed feature, each real, each measured:
+
+**"The text boxes are flickering."** In the encoded films, the callout region
+lost ~25% brightness for exactly one frame every 1-3s (Chrome); a probe
+sampling the WebGL canvas synchronously inside the render loop caught the
+mechanism: with preserveDrawingBuffer:false, a drawImage read of the GL canvas
+is only defined in an unbroken task after the draw, and the encoder's awaits
+interleave presents — after which the read is a lottery. Chrome lost it ~5
+times per 2227 frames (the compositor's frost blur then sampled a black
+backdrop and vanished); Firefox lost it EVERY OTHER FRAME (the user's film
+strobed at 30Hz, whole-frame luminance swinging up to 6x). Fix: the ?render
+boot now creates the context with preserveDrawingBuffer:true — the hedge the
+original plan specified. Measured after: 0 empty reads and 0 region dips over
+839 callout frames; the E2E gate now asserts zero single-frame dropouts on
+every run.
+
+**"The replay is faster than when I played it."** Correct: the film's time
+axis was accumulated SIM dt, which is clamped at FRAME_DT_CLAMP=2.2 — on the
+user's 22fps machine, 62% of frames sat at the clamp and their 51.3s session
+rendered as a 44.1s film (1.16x). The recorder now also stores per-frame WALL
+deltas (0.1ms, change-gated, capped at 1s so stalls read as hitches), and
+replay advances the virtual clock by THOSE, letting main.js re-derive — and
+re-clamp — sim dt exactly as live. Identical simulation, film at lived pace,
+intro/decay/reveal pacing and audio cue times on the lived axis. Legacy
+recordings reconstruct the axis by uniformly stretching to their recorded
+wallMs (right total length, approximate distribution). The E2E asserts film
+duration == lived duration ±2.5s.
+
+**Shipping the wall stream initially broke recording** — the sampler pushed to
+an uninitialised array, threw on tick 1, and the crash-resilience guard
+correctly degraded to the stock game… leaving a dead recording that 24 of 25
+gate assertions happily passed, because the game itself was perfect. The gate
+now listens for the recorder's own death warnings and fails on any. Resilience
+without a tripwire is how failures go quiet.
+
+Also fixed: the banked .cvr and the rendered .mp4 could differ by a minute in
+their timestamps (name recomputed after the user read the panel across a
+minute boundary) — the Render click now reuses the banked name. And
+replay/ff-smoke.mjs runs the whole flow on Playwright Firefox, ending in the
+strobe metric on the encoded film.

@@ -13,7 +13,7 @@
 //
 //   node replay/e2e-live-flow.mjs [url] [playSeconds]
 
-import { mkdirSync, existsSync } from 'node:fs';
+import { mkdirSync, existsSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 
@@ -91,7 +91,9 @@ const CANDS_FN = `(maxCands) => {
       if (du * du + dv * dv < 0.053 * 0.053) { ok = false; break; }
     }
     if (!ok) continue;
-    const s2 = c.projectWorldToScreen(c.uvToWorld({ x: cand.u, y: cand.v }));
+    const w = c.uvToWorld({ x: cand.u, y: cand.v });
+    if (!w) continue;   // slime glow just off a chart island — not clickable
+    const s2 = c.projectWorldToScreen(w);
     if (!s2.inClip) continue;
     picked.push({ u: +cand.u.toFixed(4), v: +cand.v.toFixed(4),
                   sx: Math.round(s2.x), sy: Math.round(s2.y) });
@@ -268,8 +270,44 @@ ok('real-click placements recorded as addOat events',
   `placed=${placed.length} events=${sessionInfo.addOatEvents.length}`);
 ok('R banked a recognizably-named .cvr immediately',
   !!cvrName && /^bestiary-\d{4}-\d{2}-\d{2}-\d{4}-\d+t\.cvr$/.test(cvrName), String(cvrName));
-ok('rendered mp4 carries the same recognizable name',
-  /^bestiary-\d{4}-\d{2}-\d{2}-\d{4}-\d+t\.mp4$/.test(mp4Name), String(mp4Name));
+ok('rendered mp4 carries the same recognizable name (identical stem)',
+  !!cvrName && mp4Name === cvrName.replace(/\.cvr$/, '.mp4'), `${cvrName} vs ${mp4Name}`);
+
+// The film must run at the pace the session was LIVED. The old axis was the
+// clamped sim dt, which played a 22fps session 1.16x fast — the player felt it
+// before any metric did.
+{
+  const banked = JSON.parse(readFileSync(resolve(OUT_DIR, 'e2e-banked.cvr'), 'utf8'));
+  const livedSec = (banked.wallMs ?? 0) / 1000;
+  ok('film duration matches LIVED session time (±2.5s)',
+    livedSec > 10 && Math.abs(dur - livedSec) < 2.5,
+    `film=${dur.toFixed(1)}s lived=${livedSec.toFixed(1)}s`);
+}
+
+// Temporal stability: no single-frame brightness dropouts in the callout era.
+// A preserveDrawingBuffer:false readback lottery once dropped the GL frame
+// ~5 times per 2000 frames in Chrome (one-frame frost flicker) and every
+// other frame in Firefox (a 30Hz strobe). Frames whose text/frost region dips
+// >18% against BOTH neighbours are the signature.
+{
+  const gray = execFileSync('ffmpeg', ['-v', 'quiet', '-ss', String(Math.max(0, dur - 25)),
+    '-i', mp4Path, '-vf', 'crop=540:430:680:40,format=gray', '-f', 'rawvideo', 'pipe:1'],
+  { maxBuffer: 1 << 30 });
+  const FRAME = 540 * 430;
+  const n = Math.floor(gray.length / FRAME);
+  const vals = new Array(n);
+  for (let i = 0; i < n; i++) {
+    let s = 0;
+    const base = i * FRAME;
+    for (let j = 0; j < FRAME; j += 7) s += gray[base + j];
+    vals[i] = s;
+  }
+  let dips = 0;
+  for (let i = 1; i < n - 1; i++) {
+    if (vals[i] < vals[i - 1] * 0.82 && vals[i] < vals[i + 1] * 0.82 && vals[i - 1] > FRAME / 7 * 8) dips++;
+  }
+  ok('no single-frame brightness dropouts in the last 25s', dips === 0, `dips=${dips} over ${n} frames`);
+}
 
 let failed = 0;
 console.log('\n---- E2E RESULTS ----');

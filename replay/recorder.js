@@ -36,6 +36,9 @@ export function createRecorder({ api, clock, buildStamp = null }) {
     repel: [],         // [tick, active, u, v, chartId] — change-gated
     dtStream: [],      // [tick, rawDt] — change-gated; see sample()
     lastDtKey: '',
+    wallDtStream: [],  // [tick, wallMs] — change-gated; the replay TIME AXIS
+    lastWallDtKey: '',
+    lastWallSampleAt: null,
     events: [],        // [{ tick, phase, type, ...payload }]
     lastCamKey: '',
     lastRepelKey: '',
@@ -119,6 +122,29 @@ export function createRecorder({ api, clock, buildStamp = null }) {
         state.dtStream.push([state.tick, dtKey]);
         state.lastDtKey = String(dtKey);
       }
+    }
+
+    // Per-frame WALL delta, separately. rawDt is clamped at FRAME_DT_CLAMP, so
+    // on a slow machine it under-counts real time: a 22fps session carries
+    // rawDt 2.2 while 2.7 frames' worth of wall time passed. A replay whose
+    // time axis is built from rawDt then plays 15-25% FASTER than the session
+    // felt — measured 1.16x on a real recording, and the player noticed before
+    // the numbers did. Replay instead advances the virtual clock by THIS wall
+    // delta and lets main.js re-derive (and re-clamp) the sim dt exactly as it
+    // did live: the simulation stays identical while film duration, intro
+    // pacing and audio all run at lived speed. Capped at 1s so a tab stall or
+    // a panel visit reads as a hitch, not minutes of frozen film.
+    {
+      const wallNow = clock.realNow();
+      if (state.lastWallSampleAt != null) {
+        const wallDt = Math.min(1000, Math.max(0.1, wallNow - state.lastWallSampleAt));
+        const wallKey = q(wallDt, 1);
+        if (String(wallKey) !== state.lastWallDtKey) {
+          state.wallDtStream.push([state.tick, wallKey]);
+          state.lastWallDtKey = String(wallKey);
+        }
+      }
+      state.lastWallSampleAt = wallNow;
     }
 
     const m = a.getMouseRepelState ? a.getMouseRepelState() : null;
@@ -248,6 +274,9 @@ export function createRecorder({ api, clock, buildStamp = null }) {
       state.camera = [];
       state.repel = [];
       state.dtStream = [];
+      state.wallDtStream = [];
+      state.lastWallDtKey = '';
+      state.lastWallSampleAt = null;
       state.events = [];
       state.lastCamKey = '';
       state.lastRepelKey = '';
@@ -278,6 +307,9 @@ export function createRecorder({ api, clock, buildStamp = null }) {
       state.camera = [];
       state.repel = [];
       state.dtStream = [];
+      state.wallDtStream = [];
+      state.lastWallDtKey = '';
+      state.lastWallSampleAt = null;
       state.events = [];
       state.lastCamKey = '';
       state.lastRepelKey = '';
@@ -312,6 +344,7 @@ export function createRecorder({ api, clock, buildStamp = null }) {
         camera: state.camera,
         repel: state.repel,
         dtStream: state.dtStream,
+        wallDtStream: state.wallDtStream,
         events: state.events,
       };
     },
@@ -361,6 +394,44 @@ export function createPlayer({ api, recording }) {
     }
   }
 
+  // Per-frame WALL milliseconds — the replay's TIME AXIS. Advancing the
+  // virtual clock by these lets main.js re-derive (and re-clamp) the sim dt
+  // exactly as it did live, so the film runs at lived speed while the
+  // simulation steps identically. Legacy recordings without the stream get the
+  // sim-dt axis uniformly stretched to the recorded wall duration: the total
+  // length is then right even though the distribution is approximate (the
+  // clamp discarded which frames were the slow ones).
+  const wallOf = new Float64Array(Math.max(1, recording.totalTicks ?? 0));
+  {
+    const rows = recording.wallDtStream ?? [];
+    if (rows.length) {
+      let cur = 1000 / 60;
+      let ri = 0;
+      for (let t = 0; t < wallOf.length; t++) {
+        while (ri < rows.length && rows[ri][0] <= t) { cur = rows[ri][1]; ri++; }
+        wallOf[t] = Number.isFinite(cur) && cur > 0 ? cur : 1000 / 60;
+      }
+    } else {
+      // Stretch only when the recording actually LIVED slower than the sim
+      // axis, whose signature is frames sitting AT the dt clamp. A harness
+      // recording steps offline at dt 1.0 while its wallMs measures COMPUTE
+      // time (mantle.cvr: 141s of wall for 60s of sim) — stretching that would
+      // more than double the film. No clamped frames, no stretch.
+      let simMs = 0;
+      let clamped = 0;
+      const clampAt = (recording.frameDtClamp ?? 2.2) - 0.01;
+      for (let t = 0; t < wallOf.length; t++) {
+        simMs += dtOf[t] * (1000 / 60);
+        if (dtOf[t] >= clampAt) clamped++;
+      }
+      const clampedShare = clamped / Math.max(1, wallOf.length);
+      const stretch = recording.wallMs > 0 && simMs > 0 && clampedShare >= 0.05
+        ? Math.min(1.5, Math.max(1, recording.wallMs / simMs))
+        : 1;
+      for (let t = 0; t < wallOf.length; t++) wallOf[t] = dtOf[t] * (1000 / 60) * stretch;
+    }
+  }
+
   let lastCam = null;
   const mismatches = [];
 
@@ -369,7 +440,10 @@ export function createPlayer({ api, recording }) {
 
     /** The dt (in 60Hz-frame units) that the live session's frame `tick` used. */
     dtAt(tick) { return dtOf[Math.min(Math.max(0, tick), dtOf.length - 1)] ?? 1; },
+    /** Real elapsed WALL ms of the live frame `tick` — the replay time axis. */
+    wallMsAt(tick) { return wallOf[Math.min(Math.max(0, tick), wallOf.length - 1)] ?? 1000 / 60; },
     get hasDtStream() { return !!recording.dtStream?.length; },
+    get hasWallStream() { return !!recording.wallDtStream?.length; },
     get fromBegin() { return recording.spawnAgents === false; },
 
     /** Restore the world to the recording's opening state. */

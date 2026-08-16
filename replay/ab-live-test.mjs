@@ -74,7 +74,9 @@ const CANDS_FN = `(maxCands) => {
       if (du * du + dv * dv < 0.053 * 0.053) { ok = false; break; }
     }
     if (!ok) continue;
-    const s2 = c.projectWorldToScreen(c.uvToWorld({ x: cand.u, y: cand.v }));
+    const w = c.uvToWorld({ x: cand.u, y: cand.v });
+    if (!w) continue;   // slime glow just off a chart island — not clickable
+    const s2 = c.projectWorldToScreen(w);
     if (!s2.inClip) continue;
     picked.push({ u: +cand.u.toFixed(4), v: +cand.v.toFixed(4), val: +cand.val.toFixed(4),
                   sx: Math.round(s2.x), sy: Math.round(s2.y) });
@@ -103,8 +105,20 @@ async function runArm(name, path) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 2 });
   const pageErrors = [];
   const consoleErrors = [];
+  const recorderDeaths = [];
   page.on('pageerror', (e) => pageErrors.push(String(e).slice(0, 200)));
-  page.on('console', (m) => { if (m.type() === 'error') consoleErrors.push(m.text().slice(0, 200)); });
+  page.on('console', (m) => {
+    const t = m.text();
+    if (m.type() === 'error') consoleErrors.push(t.slice(0, 200));
+    // The recorder degrades to the stock game on an internal failure — which
+    // is right for a visitor and catastrophic for this gate to miss: the game
+    // then passes every play assertion while the recording is dead. (Exactly
+    // how an uninitialised stream shipped: recTick froze at 1 and only one
+    // fps-shaped assertion caught it, by luck.)
+    if (/sampling failed|failed to arm|failed to start recording|mutation observer failed/.test(t)) {
+      recorderDeaths.push(t.slice(0, 250));
+    }
+  });
 
   await page.goto(BASE + path, { waitUntil: 'commit' });
   await page.waitForFunction(() => window.__cuttle && document.getElementById('startButton'), null, { timeout: 120000 });
@@ -162,6 +176,7 @@ async function runArm(name, path) {
       spawnAgents: j.spawnAgents,
       rngSeed: j.rngSeed,
       dtRows: j.dtStream.length,
+      wallRows: (j.wallDtStream ?? []).length,
       camRows: j.camera.length,
       events: j.events.map((e) => ({ tick: e.tick, type: e.type, accepted: e.accepted, worldPos: e.worldPos ?? null })),
       initialOats: j.initialOats,
@@ -177,7 +192,7 @@ async function runArm(name, path) {
     firstCalloutS: timeline.find((r) => r.calloutVisible)?.s ?? null,
     finalAgents: timeline.at(-1).agents,
     finalTriggered: timeline.at(-1).triggered,
-    pageErrors, consoleErrors,
+    pageErrors, consoleErrors, recorderDeaths,
   };
   await page.close();
   return out;
@@ -226,10 +241,14 @@ ok('seeding delay matches across arms (<2s apart)',
   ok('final population same order across arms (within 40%)',
     a > 0 && b > 0 && Math.abs(a - b) / Math.max(a, b) < 0.4, `plain=${a} rec=${b}`);
 }
+ok('recorder never self-disabled (no death warnings)', rec.recorderDeaths.length === 0,
+  JSON.stringify(rec.recorderDeaths));
 if (rec.recFinal) {
   ok('rec file: spawnAgents=false (from-Begin capture)', rec.recFinal.spawnAgents === false,
     `spawnAgents=${rec.recFinal.spawnAgents}`);
   ok('rec file: dt stream present', rec.recFinal.dtRows > 0, `dtRows=${rec.recFinal.dtRows}`);
+  ok('rec file: WALL stream present (lived-speed time axis)',
+    (rec.recFinal.wallRows ?? 0) > 0, `wallRows=${rec.recFinal.wallRows}`);
   // THE regression this suite exists for: oats placed with real canvas
   // clicks (not the console API) must land in the event log, with the
   // raycast's resolved worldPos captured.

@@ -7,7 +7,7 @@ import { MeshBVH, acceleratedRaycast } from 'three-mesh-bvh';
 // BUMP THIS (and the matching BUILD_VERSION in index.html) on every deploy.
 // index.html and main.js cache independently, so they carry the same value and
 // the bootstrap flags a mismatch — that means one of the two files is cached.
-const BUILD_VERSION = '2026-08-16-passive-recorder';
+const BUILD_VERSION = '2026-08-16-lived-time';
 
 // Load diagnostics hook installed by the inline bootstrap in index.html.
 // No-ops when absent so main.js keeps working standalone.
@@ -1112,7 +1112,15 @@ const renderer = new THREE.WebGLRenderer({
   canvas,
   antialias: false,
   alpha: false,
-  preserveDrawingBuffer: false,
+  // Live play never reads the buffer back, so false (the fast path). The
+  // offline render mode reads it every frame with drawImage, and a
+  // preserveDrawingBuffer:false buffer is only defined within an unbroken
+  // task after the draw — the render loop's encoder awaits interleave
+  // presents, after which a read is a lottery. Measured: ~5 empty reads per
+  // 2227 frames in Chrome (one-frame flicker in the film), every other frame
+  // empty in Firefox (a 30Hz strobe). Preserving costs a blit per frame,
+  // irrelevant offline.
+  preserveDrawingBuffer: new URLSearchParams(window.location.search).has('render'),
   powerPreference: 'high-performance',
 });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO));

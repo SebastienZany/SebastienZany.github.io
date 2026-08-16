@@ -74,10 +74,12 @@ export function installPanel({ recorder, api }) {
   // minutes of a player's attention; it must never depend on the next click
   // going well. Snapshot, not stop — recording continues if they go back.
   let lastBankedTick = -1;
+  let lastBankedName = null;
   async function bankRecording() {
     if (!recorder.tick || recorder.tick === lastBankedTick) return null;
     lastBankedTick = recorder.tick;
     const name = `${recName()}.cvr`;
+    lastBankedName = name;
     const snapshot = JSON.stringify(recorder.toJSON());
     try {
       const { saveRecording, deliverFile } = await import('./store.js');
@@ -92,10 +94,13 @@ export function installPanel({ recorder, api }) {
   }
 
   const est = (w, h, fps, speed) => {
-    // ~130-160ms/frame measured at 720p; scale by pixel count
-    const frames = Math.ceil((recorder.tick / (60 * speed)) * fps);
+    // Output length follows LIVED time now (the replay's axis is the recorded
+    // wall deltas), so estimate frames from wall seconds, not tick count.
+    // ~130-160ms/frame measured at 720p; scale by pixel count.
+    const wallSec = recorder.stats().wallSeconds ?? recorder.tick / 60;
+    const frames = Math.ceil((wallSec / speed) * fps);
     const msPerFrame = 130 * ((w * h) / (1280 * 720));
-    return { frames, minutes: +((frames * msPerFrame) / 60000).toFixed(1) };
+    return { frames, minutes: +((frames * msPerFrame) / 60000).toFixed(1), wallSec };
   };
 
   function close() {
@@ -161,17 +166,20 @@ export function installPanel({ recorder, api }) {
       const fps = Number($('#rp-fps').value);
       const speed = Number($('#rp-speed').value);
       const e = est(w, h, fps, speed);
-      // Replay runs the recorded ticks at a FIXED 60Hz, so the movie's length is
-      // totalTicks/60/speed regardless of how fast the session actually ran.
-      const outSec = (recorder.tick / 60 / speed).toFixed(1);
+      const outSec = (e.wallSec / speed).toFixed(1);
+      // AudioEncoder is effectively Chrome-only; elsewhere the export still
+      // works but comes out silent. Say so up front rather than after ten
+      // minutes of rendering.
+      const audioNote = typeof window.AudioEncoder === 'function'
+        ? ''
+        : ` <b>This browser cannot encode audio — the film will be silent; Chrome exports include the soundtrack.</b>`;
       note.innerHTML =
         `~<span class="replay-panel__stat">${e.frames}</span> frames &rarr; ` +
         `<span class="replay-panel__stat">${outSec}s</span> of video, ` +
         `estimated <span class="replay-panel__stat">~${e.minutes} min</span> to render. ` +
-        `Replay re-runs the recorded ticks at a fixed 60Hz, so output length is set by ` +
-        `tick count, not by how fast the session ran. Rendering reloads the page and ` +
-        `re-simulates — the live session ends here, and the result is visually faithful, ` +
-        `not pixel-identical.`;
+        `The film runs at the pace the session was played. Rendering reloads the page ` +
+        `and re-simulates — the live session ends here, and the result is visually ` +
+        `faithful, not pixel-identical.${audioNote}`;
     };
     for (const id of ['#rp-res', '#rp-fps', '#rp-speed']) $(id).addEventListener('change', refresh);
     refresh();
@@ -184,11 +192,13 @@ export function installPanel({ recorder, api }) {
       const bpp = $('#rp-bpp').value;
 
       // Seal the recording synchronously, before any async work, so nothing
-      // can be appended after the cutoff. The name matches the .cvr that was
-      // banked when the panel opened — the world is frozen, so the tick count
-      // (and therefore the name) cannot have moved since.
+      // can be appended after the cutoff. Reuse the banked name — recomputing
+      // it here once produced a .cvr/.mp4 pair one minute apart in their
+      // timestamps because the user read the panel across a minute boundary.
       const recording = recorder.stop();
-      const name = `${recName()}.cvr`;
+      const name = (lastBankedTick === recorder.tick && lastBankedName)
+        ? lastBankedName
+        : `${recName()}.cvr`;
       // IndexedDB, not the dev server: on the real site there is nothing to POST
       // to, so the reload would fetch a file that does not exist and the harness
       // would die parsing the host's HTML 404 page as JSON.
