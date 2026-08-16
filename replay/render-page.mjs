@@ -180,6 +180,7 @@ const write = (buf) => new Promise((res) => {
 // Benchmark aid: stop early without rendering the whole recording.
 const FRAME_LIMIT = process.env.FRAME_LIMIT ? Number(process.env.FRAME_LIMIT) : 0;
 const frameCount = FRAME_LIMIT ? Math.min(FRAME_LIMIT, info.frames) : info.frames;
+const traceRows = [];
 
 const started = Date.now();
 const cost = { advance: 0, shot: 0, write: 0, bytes: 0 };
@@ -203,20 +204,30 @@ for (let f = 0; f < frameCount; f++) {
   cost.write += Date.now() - t;
 
   // Read the animated value the page itself resolved, so "the animation steps"
-  // can be told apart from "the capture quantises".
+  // can be told apart from "the capture quantises". Written as JSONL next to the
+  // film so text-motion-report.mjs can compare INTENDED motion (Δty from the
+  // page) against MEASURED motion (pixel displacement in the encoded film) —
+  // the only honest form of the metric: a frame counts as frozen only when the
+  // page meant the text to move that frame.
   if (TRACE_FROM != null && f >= TRACE_FROM && f < TRACE_FROM + TRACE_LEN) {
     const tv = await page.evaluate(() => {
       const roll = document.querySelector('.observation-callout .observation-text-roll');
       if (!roll) return null;
       const m = new DOMMatrixReadOnly(getComputedStyle(roll).transform);
       const anim = roll.getAnimations?.()[0];
+      const vp = roll.closest('.observation-text-viewport');
+      const box = roll.closest('.observation-callout');
+      const r = vp ? vp.getBoundingClientRect() : null;
       return {
         ty: +m.f.toFixed(4),
         ct: anim ? +Number(anim.currentTime).toFixed(2) : null,
         state: anim ? anim.playState : null,
+        rect: r ? [+r.x.toFixed(1), +r.y.toFixed(1), +r.width.toFixed(1), +r.height.toFixed(1)] : null,
+        op: box ? +Number(getComputedStyle(box).opacity).toFixed(3) : null,
       };
     }).catch(() => null);
-    console.error(`[tr] f=${f} ${JSON.stringify(tv)}`);
+    traceRows.push({ f, ...(tv ?? { ty: null }) });
+    if (TRACE_LEN <= 60) console.error(`[tr] f=${f} ${JSON.stringify(tv)}`);
   }
   if (DIAG_EVERY && f % DIAG_EVERY === 0) {
     const dom = await page.evaluate(() => {
@@ -252,11 +263,15 @@ console.log(`\n[render] mode=${CAPTURE} cost/frame: advance ${(cost.advance / fr
   + `capture ${(cost.shot / frameCount).toFixed(1)}ms  write ${(cost.write / frameCount).toFixed(1)}ms  `
   + `| ${(cost.bytes / frameCount / 1024).toFixed(0)} KB/frame, ${(frameCount / secs).toFixed(2)} fps overall`);
 ff.stdin.end();
-console.log(`\n[render] mode=${CAPTURE} cost/frame: advance ${(cost.advance / frameCount).toFixed(1)}ms  `
-  + `capture ${(cost.shot / frameCount).toFixed(1)}ms  write ${(cost.write / frameCount).toFixed(1)}ms  `
-  + `| ${(cost.bytes / frameCount / 1024).toFixed(0)} KB/frame, ${(frameCount / secs).toFixed(2)} fps overall`);
 console.log('[render] frames done, waiting on ffmpeg…');
 await ffDone;
+
+if (traceRows.length) {
+  const { writeFileSync } = await import('node:fs');
+  const tracePath = outPath.replace(/\.mp4$/, '.trace.jsonl');
+  writeFileSync(tracePath, traceRows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+  console.log(`[render] wrote ${traceRows.length} trace rows to ${tracePath}`);
+}
 
 const audio = await page.evaluate((n) => window.__pr.finishAudio(n), wavName)
   .catch((e) => ({ error: String(e) }));

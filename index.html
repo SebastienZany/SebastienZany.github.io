@@ -24,7 +24,7 @@
       const t0 = performance.now();
       // Build stamp so a stale cached copy is obvious in the diagnostics report.
       // BUMP THIS (and the matching BUILD_VERSION in main.js) on every deploy.
-      const BUILD_VERSION = '2026-07-07-ptex-unify-agents';
+      const BUILD_VERSION = '2026-08-16-passive-recorder';
       const events = [];
       const state = { loaded: false, overlay: null, textEl: null, mainVersion: null };
       let previousRun = null;
@@ -863,22 +863,28 @@
       script.type = 'module';
       script.src = 'replay/offline.js';
       document.body.appendChild(script);
-    } else if (new URLSearchParams(location.search).has('rec')) {
-      // Live play with session recording on; press R to open the render panel.
-      //
-      // NOT the default boot path. record-boot.js calls recorder.start(), which
-      // calls resetSimulation({spawnAgents: true}) — that spawns the colony at
-      // boot instead of letting the intro seed it, so the seeding happens at the
-      // wrong time and the story callouts never trigger. Normal play must reach
-      // main.js untouched.
-      const script = document.createElement('script');
-      script.type = 'module';
-      script.src = 'replay/record-boot.js';
-      document.body.appendChild(script);
-    } else {
+    } else if (new URLSearchParams(location.search).has('norec')) {
+      // Escape hatch: boot main.js bare, with no recording layer at all.
       const script = document.createElement('script');
       script.type = 'module';
       script.src = 'main.js';
+      document.body.appendChild(script);
+    } else {
+      // Normal play, with session recording on — press R for the render panel.
+      //
+      // The recorder is PASSIVE: it never touches the world. Recording starts
+      // at the Begin click (seed + header captured in a capture-phase listener
+      // before the click's own handler runs), so play here is the stock game
+      // plus observation, and a recorder failure degrades to the stock game
+      // rather than a broken page. An earlier version reset the simulation at
+      // boot — colony spawned before the intro, seeding at the wrong time, no
+      // story callouts — which is why record-boot must never mutate anything.
+      // Gate before re-enabling any of that: replay/ab-live-test.mjs must pass
+      // (stock vs recording equivalence), and replay/e2e-live-flow.mjs must
+      // produce a valid MP4 on static-host semantics. Both passed 2026-08-16.
+      const script = document.createElement('script');
+      script.type = 'module';
+      script.src = 'replay/record-boot.js';
       document.body.appendChild(script);
     }
     </script>

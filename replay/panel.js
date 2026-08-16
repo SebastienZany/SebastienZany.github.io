@@ -51,6 +51,15 @@ export function installPanel({ recorder, api }) {
   let open = false;
   let root = null;
 
+  // R freezes the WORLD, not just the sampler. Freezing only the sampler (the
+  // old behaviour) let the game keep running under the panel while no ticks
+  // were being recorded — the recording and the world silently desynced for as
+  // long as the panel stayed open. simulateEnabled false + sampler paused stop
+  // both together; oat food decay still runs on the wall clock while frozen,
+  // which is a small, accepted infidelity of resuming after a panel visit.
+  const freeze = () => { window.__replayPaused = true; api().setSimulateEnabled?.(false); };
+  const resume = () => { window.__replayPaused = false; api().setSimulateEnabled?.(true); };
+
   const est = (w, h, fps, speed) => {
     // ~130-160ms/frame measured at 720p; scale by pixel count
     const frames = Math.ceil((recorder.tick / (60 * speed)) * fps);
@@ -87,8 +96,8 @@ export function installPanel({ recorder, api }) {
         <label>Frame rate
           <select id="rp-fps">
             <option value="24">24 fps</option>
-            <option value="30" selected>30 fps</option>
-            <option value="60">60 fps</option>
+            <option value="30">30 fps</option>
+            <option value="60" selected>60 fps</option>
           </select>
         </label>
         <label>Speed
@@ -136,7 +145,7 @@ export function installPanel({ recorder, api }) {
     for (const id of ['#rp-res', '#rp-fps', '#rp-speed']) $(id).addEventListener('change', refresh);
     refresh();
 
-    $('#rp-cancel').addEventListener('click', () => { close(); api().params && (window.__replayPaused = false); });
+    $('#rp-cancel').addEventListener('click', () => { close(); resume(); });
     $('#rp-go').addEventListener('click', async () => {
       const [w, h] = $('#rp-res').value.split('x').map(Number);
       const fps = $('#rp-fps').value;
@@ -168,9 +177,14 @@ export function installPanel({ recorder, api }) {
     const t = e.target;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
     e.preventDefault();
-    if (open) { close(); return; }
+    if (open) { close(); resume(); return; }
+    // Nothing to render before the Begin click — recording starts there.
+    if (!recorder.recording && !recorder.tick) {
+      console.log('[rec] no session yet — recording starts when Begin is clicked');
+      return;
+    }
     open = true;
-    window.__replayPaused = true;
+    freeze();
     render();
   });
 

@@ -221,6 +221,36 @@ export function createRecorder({ api, clock, buildStamp = null }) {
       return state.header;
     },
 
+    // Begin recording from the world AS IT IS, without touching it. This is the
+    // live-site path: start() forces a reset, which is correct for a scripted
+    // harness session but a regression on a visitor's page — it spawned the
+    // colony at boot, ahead of the intro. Called at the Begin click, before the
+    // click's own handler runs: the header then describes the pre-click world
+    // (start screen up, initial oat placed, no agents, nothing yet consumed
+    // from the seeded RNG), which is exactly the state player.begin()
+    // reconstructs with resetSimulation({resetOats: true, spawnAgents: false})
+    // before replay presses Begin itself.
+    startFromHere({ seed = (Math.random() * 2 ** 32) >>> 0 } = {}) {
+      state.wallStart = clock.realNow();
+      const a = c();
+      state.seed = seed >>> 0;
+      state.spawnAgents = false;
+      a.seedSimRng(state.seed);
+
+      state.recording = true;
+      state.tick = 0;
+      state.camera = [];
+      state.repel = [];
+      state.dtStream = [];
+      state.events = [];
+      state.lastCamKey = '';
+      state.lastRepelKey = '';
+      state.lastDtKey = '';
+      state.header = captureHeader();
+      hook();
+      return state.header;
+    },
+
     stop() {
       state.wallMs = clock.realNow() - (state.wallStart ?? clock.realNow());
       state.recording = false;
@@ -356,10 +386,21 @@ export function createPlayer({ api, recording }) {
           }
         } else if (e.type === 'clearOats') {
           a.clearAllOats();
+        } else if (e.type === 'skipIntro') {
+          // The game's own skip, via the API rather than a synthetic keydown —
+          // a synthetic 's' would also latch the WASD camera-orbit handler with
+          // no matching keyup. skipIntroSequence() is internally guarded, so a
+          // skip recorded when the intro was already done stays a no-op here
+          // exactly as it was live.
+          a.skipIntroSequence?.();
+        } else if (e.type === 'resetSimulation' && tick > 0) {
+          // A mid-session Reset. Replaying it keeps the RNG stream aligned: the
+          // reset itself consumes nothing, and any agent spawn it performs draws
+          // the same values on both sides by induction. The tick-0 guard keeps
+          // the OPENING reset out — begin() already established that state, and
+          // re-running it would double-consume the spawn draws.
+          a.resetSimulation({ resetOats: !!e.resetOats, spawnAgents: e.spawnAgents !== false });
         }
-        // resetSimulation is intentionally NOT replayed here: begin() already
-        // established the opening state, and re-running it mid-replay would
-        // re-seed agents and desync the whole run.
       }
     },
   };

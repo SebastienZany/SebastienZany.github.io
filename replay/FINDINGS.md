@@ -192,3 +192,81 @@ Session recording (M2), DOM overlay compositing into frames, and offline audio.
 The input track is hand-authored, in the same resolved-intent shape a real
 recording would replay — but nothing records a live session yet. Given the
 determinism result, that is the right place to have stopped.
+
+---
+
+# 2026-08-16 — passive recorder, live flow, and the text staircase, measured
+
+Everything below is measured on encoded output or a live page, not inferred.
+(Sections above predate the recorder and in-page UI and describe an earlier
+milestone; where they disagree with this section, this section is current.)
+
+## The live-site regression, and the fix
+
+Making record-boot the default boot called `recorder.start()` at page load,
+which ran `resetSimulation({spawnAgents: true})` — colony spawned before the
+intro, seeding at the wrong time, story callouts never firing, for every
+visitor. The recorder is now PASSIVE: it seeds the RNG and captures its header
+in a capture-phase listener on the Begin click and never mutates the world.
+`recorder.startFromHere()` is the live path; `recorder.start()` (which resets)
+is harness-only.
+
+Gate, run against a plain static server (GitHub Pages semantics),
+`replay/ab-live-test.mjs`: **24/24 PASS** — stock arm vs recording arm: seeding
+starts 16.3s vs 16.4s after Begin (Δ70 ms), population at t=42s within 1%,
+placed oats earn callouts in both, no page errors, and the recording proves
+passivity (starts at the Begin click, spawnAgents:false, no reset events).
+
+## End-to-end on static-host semantics
+
+`replay/e2e-live-flow.mjs`: **11/11 PASS** — play under recording → R freezes
+the world and opens the panel → Render reloads into `?render&auto=1` →
+IndexedDB hand-off (no dev server) → in-browser replay + WebCodecs encode →
+MP4 arrives as a download: h264 + aac, requested geometry and fps, duration
+matches the report ±1s, zero replay outcome mismatches, story callout present
+and composited. Extracted frames show the story text in EB Garamond with the
+reveal masks working.
+
+## The text staircase, finally measured honestly
+
+`replay/text-motion-report.mjs` joins INTENDED motion (the page's own per-frame
+roll transform + viewport rect, written by render-page.mjs as a trace JSONL)
+against MEASURED motion (row-profile cross-correlation on a crop of the encoded
+film). A frame counts as frozen only when the page meant the text to move.
+Hold frames act as a per-segment control: a crop that "moves" while box and
+scroll are both still is measuring the creature bleeding through the box, and
+that segment is excluded from the verdict.
+
+Full 3601-frame 2560×1440@60 films of the same recording (mantle.cvr),
+control-clean segments:
+
+| build | frozen when should move | staircase jumps |
+|---|---|---|
+| shipped fix (smoothtext + adoptscroll) | **9/1245 = 0.7%** | 16 (1.3%) |
+| raw baseline (RAW_SCROLL=1 SMOOTH_TEXT=0) | **798/1055 = 75.6%** | 221 (20.9%) |
+
+The raw film freezes three of every four frames the text should glide and
+discharges in ~1px jumps — the staircase. The shipped fix moves every frame it
+should, across the whole film, both callout segments, to the last second.
+
+The earlier "29/29 frozen at t=40s" alarm was the contamination this metric's
+control now catches: a fixed crop over the visible creature. The mask-band
+freeze at 35.5–37.8s (f2139–2157) was likewise the metric reading the static
+reveal-mask edge while single entry-line glyphs slid beneath it — ty glides
+0.112 px/frame there, verified by eye.
+
+## Honest limitations, still true
+
+- Replay is visually faithful, not bit-exact (additive float splat blending;
+  documented at the top of recorder.js). Structure reproduces; tendril detail
+  does not.
+- Mid-session parameter changes through the game panel are not recorded.
+- The game's own Clear-oats button replays without re-adding the initial oat.
+- Pausing via the game panel is not recorded (the R panel's freeze is handled).
+- Oat food decay keeps running on the wall clock while the R panel is open, so
+  resuming after a long panel visit shifts food slightly vs the replay.
+- Mediabunny loads from jsdelivr at render time — an offline machine can play
+  and record, but not export.
+- In-browser exports draw callout text sharp and smooth, but the box chrome
+  (frost/stroke) is an approximation; page renders (render-page.mjs) remain
+  the maximum-fidelity path.

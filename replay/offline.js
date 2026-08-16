@@ -1060,14 +1060,15 @@ async function preparePageRender({
     for (const anim of docAnims) {
       if (!animOrigin.has(anim)) {
         animOrigin.set(anim, virtualMs);
-        // Driving the scroll ourselves as a 2D translate (adoptScrollAnimation)
-        // was tried and REVERTED: measured on an isolated callout it produced
-        // byte-for-byte the same staircase as the original translate3d — 24/35
-        // vs 25/35 frozen frames, jumps of 0.93 vs 0.92 device px, both every
-        // fourth frame — while costing ~11 ms/frame in lost layer caching. The
-        // snapping is Chrome quantising VERTICAL TEXT to whole device pixels,
-        // which no transform formulation avoids. Kept behind ?adoptscroll=1 only
-        // so the negative result stays reproducible.
+        // adoptScroll alone WAS a no-op (24/35 vs 25/35 frozen — Chrome snaps
+        // vertical text on any composited layer, whatever drives the value).
+        // It became load-bearing once ?smoothtext added the two missing pieces:
+        // will-change:auto on the roll and rotate(0.02deg) on the viewport.
+        // Rotation forces Chrome to RESAMPLE instead of snap — but only if the
+        // roll is not its own layer, and an active WAAPI transform animation
+        // promotes it regardless of will-change. So the animation must be
+        // cancelled (this driver) AND the ancestor rotated; either alone
+        // measured as a no-op. render-page.mjs passes both by default.
         if (qs.get('adoptscroll') === '1' && adoptScrollAnimation(anim)) continue;
         try { anim.pause(); } catch { /* a finished animation rejects pause */ }
       }
@@ -1409,12 +1410,18 @@ async function snapshot(name = 'snapshot.png', { width = 640, height = 360 } = {
 window.__replay = { renderVideo, preparePageRender, benchmarkTick, setRenderSize, growColony, snapshot, probeGrowth, dtSweep, chargeSweep, liveRun, determinismTest, gpuDeterminismTest, recordSession, replayToVideo, sampleStats, clock, waitFor, api };
 log('offline harness ready; waiting for __cuttle');
 
+let statusPostDead = false;
 const postStatus = (status) => {
   window.__replayStatus = status;
+  // The POST target only exists on the dev server. On a static host every try
+  // would 4xx/501 into the console — once is diagnosis, hundreds is noise — so
+  // the first failure turns the reporting in-page-only (__replayStatus).
+  if (statusPostDead) return Promise.resolve();
   return fetch('/__save?name=status.json', {
     method: 'POST',
     body: JSON.stringify({ at: new Date().toISOString(), ...status }, null, 2),
-  }).catch(() => {});
+  }).then((r) => { if (!r.ok) statusPostDead = true; })
+    .catch(() => { statusPostDead = true; });
 };
 
 await postStatus({ phase: 'booting' });
