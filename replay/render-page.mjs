@@ -53,7 +53,13 @@ const url = `${BASE}/?render&dev&auto=1&pagerender=1&replay=${encodeURIComponent
   + `&w=${CSS_W}&h=${CSS_H}&fps=${fps}&ss=${ss}`
   + (process.env.RAW_SCROLL === '1' ? '&rawscroll=1' : '')
   + (process.env.NO_MESH === '1' ? '&nomesh=1' : '')
-  + (process.env.SMOOTH_TEXT === '0' ? '&smoothtext=0' : '');
+  + (process.env.SMOOTH_TEXT === '0' ? '&smoothtext=0' : '')
+  // Both halves are needed together: the rotation forces resampling, but only if
+  // the roll is not its own composited layer — and an ACTIVE WAAPI transform
+  // animation promotes it. adoptscroll cancels that animation and drives the same
+  // value as a plain inline transform, which is the shape the micro-benchmark
+  // proved. Either alone measured as a no-op.
+  + (process.env.ADOPT_SCROLL === '0' ? '' : '&adoptscroll=1');
 console.log(`[render] ${url}`);
 
 const browser = await chromium.launch({

@@ -15,11 +15,12 @@ import { createRecorder, createPlayer } from './recorder.js';
 import { createAudioRecorder, renderSessionAudio, installAudioProbe, describeAudioEvents } from './audio.js';
 import { createOverlayCompositor } from './overlays.js';
 import { pinViewportBeforeBoot } from './viewport.js';
+import { loadRecording, deliverFile } from './store.js';
 
 const qs = new URLSearchParams(location.search);
 const log = (...a) => { console.log('[replay]', ...a); };
 
-installClock();
+installClock({ pumpHidden: true });
 // Must precede main.js: the probe tags decoded buffers, and
 // scheduleSoundPackPreload decodes the whole pack during boot.
 if (qs.get('audio') !== '0') installAudioProbe();
@@ -830,8 +831,7 @@ async function recordSession({
 
   const recording = rec.stop();
   const json = JSON.stringify(recording);
-  const save = await fetch(`/__save?name=${encodeURIComponent(name)}`, { method: 'POST', body: json })
-    .then((r) => r.json());
+  const save = await deliverFile(name, json, 'application/json');
 
   return {
     name, save,
@@ -894,7 +894,7 @@ function describeObservations() {
 async function preparePageRender({
   file = 'session.cvr', width = 1280, height = 720, fps = 60, speed = 1, ss = 2,
 } = {}) {
-  const recording = await fetch(`/replay/out/${file}`).then((r) => r.json());
+  const recording = await loadRecording(file);
   const player = createPlayer({ api, recording });
   const total = recording.totalTicks;
 
@@ -915,24 +915,45 @@ async function preparePageRender({
   player.begin();
   if (qs.get('nomesh') === '1' && api().mesh) api().mesh.visible = false;
 
-  // Chrome snaps glyph origins to whole raster pixels VERTICALLY. The story
-  // scroll advances 0.11 css px per frame during its slow glide, so the text can
-  // only move once every ~4 frames — a ~13 Hz staircase that no transform
-  // formulation, frame rate, encoder setting or downscale changed.
+  // Defeat Chrome's vertical glyph snapping.
   //
-  // will-change: transform asks Chrome to rasterise the element ONCE and
-  // composite it with the transform applied, so a fractional offset is resolved
-  // by filtering the cached raster instead of re-rasterising snapped text. That
-  // is the only mechanism that can express sub-pixel vertical motion of text.
-  // Behind a flag because it trades a little sharpness for continuous motion.
-  // Opt-in, because it did NOT work: measured on an isolated callout, frozen
-  // frames were 26/35 with it and 26/35 without, jumps 0.91 vs 0.95 device px,
-  // both every fourth frame. Kept so the negative result stays reproducible.
-  if (qs.get('smoothtext') === '1') {
+  // Chrome snaps glyph origins to whole RASTER pixels vertically. The story
+  // scroll glides at 0.1118 css px/frame, so at ss=2 the text can only move once
+  // every ~4.5 frames — a ~13 Hz staircase, independent of output frame rate,
+  // encoder or downscale.
+  //
+  // Isolated micro-benchmark (replay/snap-probe.mjs), 24 frames at the artwork's
+  // own glide rate, counting frames where the rasterised text did not move:
+  //
+  //             ss=2    ss=4    ss=8   raster step
+  //   translateY 18/23  13/23   2/23     1.01 px
+  //   translate3d 18/23 13/23   2/23     1.01 px
+  //   will-change 18/23 13/23   2/23     1.01 px
+  //   filter layer 18/23 13/23  2/23     1.01 px
+  //   top          20/23 20/23 20/23     up to 6 px
+  //   rotate 0.02deg 0/23  0/23  0/23     0.27 px
+  //
+  // A tiny rotation makes the layer non-axis-aligned, and Chrome cannot pixel
+  // snap content it has to resample — so the text moves every single frame. The
+  // rotation has to sit on an ANCESTOR because the artwork's own animation owns
+  // the roll's transform; measured on the ancestor it is just as effective
+  // (0/23 at ss=2/4/8). 0.006deg is NOT enough (17/23 frozen) — the layer has to
+  // be meaningfully off-axis. At 0.02deg the skew across the 230px callout is
+  // 230*tan(0.02deg) = 0.08 px, i.e. invisible.
+  if (qs.get('smoothtext') !== '0') {
     const st = document.createElement('style');
+    // The scrolling text's viewport is .observation-text-viewport (main.js:7196),
+    // NOT .observation-text — an earlier attempt used the latter, matched
+    // nothing, and measured as "rotation does not help".
+    //
+    // will-change:transform is set on the roll by the stylesheet itself
+    // (styles.css:369-371), so it is permanently its own composited layer and
+    // snaps independently of any ancestor. It has to be overridden, the
+    // animation has to be cancelled (?adoptscroll), and only then does the
+    // ancestor rotation force resampling instead of snapping.
     st.textContent =
-      '.observation-text-roll{will-change:transform;}'
-      + '.observation-callout{will-change:transform,opacity;}';
+      '.observation-text-roll{will-change:auto!important;}'
+      + '.observation-text-viewport{transform:rotate(0.02deg);}';
     document.head.append(st);
   }
 
@@ -1165,7 +1186,7 @@ async function replayToVideo({
   // setRenderSize — this is what keeps the story text from looking soft.
   ss = 2,
 } = {}) {
-  const recording = await fetch(`/replay/out/${file}`).then((r) => r.json());
+  const recording = await loadRecording(file);
   const player = createPlayer({ api, recording });
 
   const total = recording.totalTicks;
@@ -1336,8 +1357,7 @@ async function replayToVideo({
   }
 
   const buf = await enc.finalize();
-  const save = await fetch(`/__save?name=${encodeURIComponent(name)}`, { method: 'POST', body: buf })
-    .then((r) => r.json());
+  const save = await deliverFile(name, buf, 'video/mp4');
 
   const warm = timings.slice(20);
   return {

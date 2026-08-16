@@ -147,7 +147,11 @@ export function installPanel({ recorder, api }) {
       // can be appended after the cutoff.
       const recording = recorder.stop();
       const name = `session-${Date.now()}.cvr`;
-      await fetch(`/__save?name=${name}`, { method: 'POST', body: JSON.stringify(recording) });
+      // IndexedDB, not the dev server: on the real site there is nothing to POST
+      // to, so the reload would fetch a file that does not exist and the harness
+      // would die parsing the host's HTML 404 page as JSON.
+      const { saveRecording } = await import('./store.js');
+      await saveRecording(name, recording);
 
       const p = new URLSearchParams({
         render: '', dev: '', auto: '1', replay: name,

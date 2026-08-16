@@ -854,12 +854,6 @@
     if (new URLSearchParams(location.search).has('safe')) {
       window.__diag?.log?.('safe-mode', 'main.js intentionally not loaded; see previous-run section below for the crashed run');
       window.__diag?.show?.();
-    } else if (new URLSearchParams(location.search).has('rec')) {
-      // Live play with session recording on; press R to open the render panel.
-      const script = document.createElement('script');
-      script.type = 'module';
-      script.src = 'replay/record-boot.js';
-      document.body.appendChild(script);
     } else if (new URLSearchParams(location.search).has('render')) {
       // Offline replay render mode (dev only). The replay harness installs its
       // virtual clock BEFORE main.js evaluates — main.js captures timestamps at
@@ -869,10 +863,21 @@
       script.type = 'module';
       script.src = 'replay/offline.js';
       document.body.appendChild(script);
-    } else {
+    } else if (new URLSearchParams(location.search).has('norec')) {
+      // Escape hatch: boot main.js bare, with no recording layer at all.
       const script = document.createElement('script');
       script.type = 'module';
       script.src = 'main.js';
+      document.body.appendChild(script);
+    } else {
+      // Normal play, with session recording on from the first frame so pressing
+      // R can always offer a render of what just happened. record-boot.js boots
+      // main.js itself; it only adds a per-frame sample of resolved intents and
+      // the R panel. The clock shim it installs keeps stock rAF semantics, so a
+      // backgrounded tab still stops.
+      const script = document.createElement('script');
+      script.type = 'module';
+      script.src = 'replay/record-boot.js';
       document.body.appendChild(script);
     }
     </script>

@@ -14,7 +14,7 @@ import { createRecorder } from './recorder.js';
 import { installPanel } from './panel.js';
 import { pinViewportBeforeBoot } from './viewport.js';
 
-installClock();
+installClock();  // stock rAF semantics — a backgrounded tab stops, as it should
 // Before main.js: boot raycasts through the camera to place the initial oat, and
 // a collapsed CSS box gives aspect 0 and a singular projection inverse, so the
 // ray misses and the food lands via a fallback. See viewport.js. Live play in a

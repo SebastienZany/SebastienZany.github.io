@@ -70,10 +70,16 @@ const scheduleHidden = (cb) => {
 // Route a live-mode callback the safe way: real rAF when visible, MessageChannel
 // when hidden. Used by both the rAF shim and exitOffline(), because handing a
 // callback to a real rAF in a hidden tab silently kills the frame loop.
+// Pumping a hidden tab is a HARNESS behaviour, not a site behaviour. Offline
+// renders need it because rAF never fires in a hidden tab and the boot would
+// stall forever; a visitor's backgrounded tab should keep stock rAF semantics
+// and stop simulating, rather than burn CPU behind their back.
+let pumpWhenHidden = false;
 const scheduleLive = (cb) =>
-  (document.visibilityState === 'hidden' ? scheduleHidden(cb) : realRaf(cb));
+  (pumpWhenHidden && document.visibilityState === 'hidden' ? scheduleHidden(cb) : realRaf(cb));
 
-export function installClock() {
+export function installClock({ pumpHidden = false } = {}) {
+  pumpWhenHidden = !!pumpHidden;
   if (state.installed) return clock;
   state.installed = true;
 
