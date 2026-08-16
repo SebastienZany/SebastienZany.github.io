@@ -17378,7 +17378,12 @@ function clearAgentRT(rt) {
 // marker jitter fires on rejected clicks, at a rate that depends on how the
 // player misclicks, and sharing a generator would let a stray click shift the
 // agent cloud on the next reset.
-let simRngState = 0x9e3779b9;
+// Seeded per load, NOT to a constant. A fixed default would make every visit
+// open on the identical agent cloud, which is a change to the piece — the
+// original used Math.random() here. Replay stays exactly reproducible because a
+// recording seeds this explicitly via seedSimRng() and stores the value as
+// rngSeed in its header, so the stream is a pure function of the recording.
+let simRngState = ((Math.random() * 2 ** 32) >>> 0) || 0x9e3779b9;
 function seedSimRng(seed) {
   simRngState = (seed >>> 0) || 0x9e3779b9;
 }

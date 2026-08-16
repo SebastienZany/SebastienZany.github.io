@@ -50,7 +50,10 @@ const wavPath = resolve('replay/out', wavName);
 mkdirSync(dirname(outPath), { recursive: true });
 
 const url = `${BASE}/?render&dev&auto=1&pagerender=1&replay=${encodeURIComponent(source)}`
-  + `&w=${CSS_W}&h=${CSS_H}&fps=${fps}&ss=${ss}`;
+  + `&w=${CSS_W}&h=${CSS_H}&fps=${fps}&ss=${ss}`
+  + (process.env.RAW_SCROLL === '1' ? '&rawscroll=1' : '')
+  + (process.env.NO_MESH === '1' ? '&nomesh=1' : '')
+  + (process.env.SMOOTH_TEXT === '0' ? '&smoothtext=0' : '');
 console.log(`[render] ${url}`);
 
 const browser = await chromium.launch({

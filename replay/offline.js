@@ -913,6 +913,28 @@ async function preparePageRender({
 
   await armOffline();
   player.begin();
+  if (qs.get('nomesh') === '1' && api().mesh) api().mesh.visible = false;
+
+  // Chrome snaps glyph origins to whole raster pixels VERTICALLY. The story
+  // scroll advances 0.11 css px per frame during its slow glide, so the text can
+  // only move once every ~4 frames — a ~13 Hz staircase that no transform
+  // formulation, frame rate, encoder setting or downscale changed.
+  //
+  // will-change: transform asks Chrome to rasterise the element ONCE and
+  // composite it with the transform applied, so a fractional offset is resolved
+  // by filtering the cached raster instead of re-rasterising snapped text. That
+  // is the only mechanism that can express sub-pixel vertical motion of text.
+  // Behind a flag because it trades a little sharpness for continuous motion.
+  // Opt-in, because it did NOT work: measured on an isolated callout, frozen
+  // frames were 26/35 with it and 26/35 without, jumps 0.91 vs 0.95 device px,
+  // both every fourth frame. Kept so the negative result stays reproducible.
+  if (qs.get('smoothtext') === '1') {
+    const st = document.createElement('style');
+    st.textContent =
+      '.observation-text-roll{will-change:transform;}'
+      + '.observation-callout{will-change:transform,opacity;}';
+    document.head.append(st);
+  }
 
   const arec = createAudioRecorder({ api, simHz: recording.simHz });
   arec.hook();
@@ -961,7 +983,15 @@ async function preparePageRender({
     return m ? Number.parseFloat(m[1]) : null;
   };
 
+  // Diagnostics: ?rawscroll=1 leaves the scroll on its original composited
+  // translate3d so the two paths can be A/B'd in one build, and ?nomesh=1 hides
+  // the creature so the text can be measured on black with nothing else moving
+  // in frame. Measuring the text over the animated mesh is what let earlier
+  // "improvements" look real when they were not.
+  const RAW_SCROLL = qs.get('rawscroll') === '1';
+
   function adoptScrollAnimation(anim) {
+    if (RAW_SCROLL) return false;
     let target = null;
     try { target = anim.effect?.target ?? null; } catch { return false; }
     if (!target?.classList?.contains('observation-text-roll')) return false;
@@ -1009,8 +1039,15 @@ async function preparePageRender({
     for (const anim of docAnims) {
       if (!animOrigin.has(anim)) {
         animOrigin.set(anim, virtualMs);
-        // Take the scroll off the compositor before anything else sees it.
-        if (adoptScrollAnimation(anim)) continue;
+        // Driving the scroll ourselves as a 2D translate (adoptScrollAnimation)
+        // was tried and REVERTED: measured on an isolated callout it produced
+        // byte-for-byte the same staircase as the original translate3d — 24/35
+        // vs 25/35 frozen frames, jumps of 0.93 vs 0.92 device px, both every
+        // fourth frame — while costing ~11 ms/frame in lost layer caching. The
+        // snapping is Chrome quantising VERTICAL TEXT to whole device pixels,
+        // which no transform formulation avoids. Kept behind ?adoptscroll=1 only
+        // so the negative result stays reproducible.
+        if (qs.get('adoptscroll') === '1' && adoptScrollAnimation(anim)) continue;
         try { anim.pause(); } catch { /* a finished animation rejects pause */ }
       }
       if (scrollDrivers.has(anim)) continue;
