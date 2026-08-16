@@ -863,21 +863,22 @@
       script.type = 'module';
       script.src = 'replay/offline.js';
       document.body.appendChild(script);
-    } else if (new URLSearchParams(location.search).has('norec')) {
-      // Escape hatch: boot main.js bare, with no recording layer at all.
-      const script = document.createElement('script');
-      script.type = 'module';
-      script.src = 'main.js';
-      document.body.appendChild(script);
-    } else {
-      // Normal play, with session recording on from the first frame so pressing
-      // R can always offer a render of what just happened. record-boot.js boots
-      // main.js itself; it only adds a per-frame sample of resolved intents and
-      // the R panel. The clock shim it installs keeps stock rAF semantics, so a
-      // backgrounded tab still stops.
+    } else if (new URLSearchParams(location.search).has('rec')) {
+      // Live play with session recording on; press R to open the render panel.
+      //
+      // NOT the default boot path. record-boot.js calls recorder.start(), which
+      // calls resetSimulation({spawnAgents: true}) — that spawns the colony at
+      // boot instead of letting the intro seed it, so the seeding happens at the
+      // wrong time and the story callouts never trigger. Normal play must reach
+      // main.js untouched.
       const script = document.createElement('script');
       script.type = 'module';
       script.src = 'replay/record-boot.js';
+      document.body.appendChild(script);
+    } else {
+      const script = document.createElement('script');
+      script.type = 'module';
+      script.src = 'main.js';
       document.body.appendChild(script);
     }
     </script>
