@@ -42,6 +42,7 @@ const CSS_W = Number(process.env.CSS_W ?? 1280);
 const CSS_H = Number(process.env.CSS_H ?? 720);
 const CRF = process.env.CRF ?? '16';
 const DIAG_EVERY = process.env.DIAG_EVERY ? Number(process.env.DIAG_EVERY) : 0;
+const TRACE_FROM = process.env.TRACE_FROM ? Number(process.env.TRACE_FROM) : null;
 
 const outPath = resolve('replay/out', outName);
 const wavName = outName.replace(/\.[^.]+$/, '') + '.wav';
@@ -191,6 +192,22 @@ for (let f = 0; f < frameCount; f++) {
   await write(png);
   cost.write += Date.now() - t;
 
+  // Read the animated value the page itself resolved, so "the animation steps"
+  // can be told apart from "the capture quantises".
+  if (TRACE_FROM != null && f >= TRACE_FROM && f < TRACE_FROM + 40) {
+    const tv = await page.evaluate(() => {
+      const roll = document.querySelector('.observation-callout .observation-text-roll');
+      if (!roll) return null;
+      const m = new DOMMatrixReadOnly(getComputedStyle(roll).transform);
+      const anim = roll.getAnimations?.()[0];
+      return {
+        ty: +m.f.toFixed(4),
+        ct: anim ? +Number(anim.currentTime).toFixed(2) : null,
+        state: anim ? anim.playState : null,
+      };
+    }).catch(() => null);
+    console.error(`[tr] f=${f} ${JSON.stringify(tv)}`);
+  }
   if (DIAG_EVERY && f % DIAG_EVERY === 0) {
     const dom = await page.evaluate(() => {
       const nodes = [...document.querySelectorAll('.observation-callout')];

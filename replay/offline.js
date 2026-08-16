@@ -932,6 +932,76 @@ async function preparePageRender({
   // animation is first seen within one tick of its creation, so treating that
   // moment as its origin is exact to a frame.
   const animOrigin = new WeakMap();
+
+  // The scroll animation must be taken off the compositor.
+  //
+  // main.js animates .observation-text-roll with translate3d (main.js:6884),
+  // which promotes it to its own compositing layer — and Chrome snaps a
+  // composited layer's position to WHOLE DEVICE PIXELS. The scroll advances
+  // 0.1118 css px/frame at 60fps, i.e. 0.22 device px at ss=2, so the layer sits
+  // still for four frames and then jumps a pixel. Measured in the page, the
+  // animated value is flawless (ty stepping exactly -0.1118 every frame,
+  // currentTime exactly +16.67ms); it is the RASTER that quantises, so the text
+  // crawls at ~15fps inside a 60fps film.
+  //
+  // Fix: cancel the animation, and drive the same value ourselves as a plain 2D
+  // translate in an inline style. A 2D transform on an unpromoted element is
+  // rasterised into its parent at sub-pixel precision. The keyframes are read
+  // straight off the effect and the easing is linear at both levels, so the
+  // piecewise lerp reproduces the artwork's own curve exactly — this replaces
+  // the animation's DRIVER, not its design, and Chrome still paints everything.
+  const scrollDrivers = new Map();
+  const parseTranslateY = (t) => {
+    if (!t) return null;
+    let m = /translate3d\(\s*[^,]+,\s*(-?[\d.eE+-]+)px/.exec(t);
+    if (m) return Number.parseFloat(m[1]);
+    m = /translateY\(\s*(-?[\d.eE+-]+)px/.exec(t);
+    if (m) return Number.parseFloat(m[1]);
+    m = /matrix\((?:[^,]+,){5}\s*(-?[\d.eE+-]+)\)/.exec(t);
+    return m ? Number.parseFloat(m[1]) : null;
+  };
+
+  function adoptScrollAnimation(anim) {
+    let target = null;
+    try { target = anim.effect?.target ?? null; } catch { return false; }
+    if (!target?.classList?.contains('observation-text-roll')) return false;
+    let kfs = [];
+    let duration = 0;
+    try {
+      kfs = anim.effect.getKeyframes() ?? [];
+      duration = Number(anim.effect.getTiming()?.duration) || 0;
+    } catch { return false; }
+    const points = kfs
+      .map((k) => ({ o: Number(k.computedOffset ?? k.offset ?? 0), y: parseTranslateY(k.transform) }))
+      .filter((pt) => Number.isFinite(pt.o) && Number.isFinite(pt.y));
+    if (points.length < 2 || duration <= 0) return false;
+    try { anim.cancel(); } catch { /* already gone */ }
+    scrollDrivers.set(anim, { el: target, points, duration });
+    return true;
+  }
+
+  function driveScroll(virtualMs) {
+    for (const [anim, d] of scrollDrivers) {
+      const origin = animOrigin.get(anim);
+      if (origin == null) continue;
+      const p = Math.max(0, Math.min(1, (virtualMs - origin) / d.duration));
+      const pts = d.points;
+      let y = pts[pts.length - 1].y;
+      for (let i = 1; i < pts.length; i++) {
+        if (p <= pts[i].o) {
+          const a = pts[i - 1];
+          const b = pts[i];
+          const span = b.o - a.o;
+          const t = span > 1e-9 ? (p - a.o) / span : 0;
+          y = a.y + (b.y - a.y) * t;
+          break;
+        }
+      }
+      // 2D, deliberately: translate3d would put it back on the compositor.
+      d.el.style.transform = `translateY(${y.toFixed(3)}px)`;
+    }
+  }
+
   function syncDomAnimations(virtualMs) {
     let docAnims;
     try { docAnims = document.getAnimations(); } catch { return 0; }
@@ -939,14 +1009,25 @@ async function preparePageRender({
     for (const anim of docAnims) {
       if (!animOrigin.has(anim)) {
         animOrigin.set(anim, virtualMs);
+        // Take the scroll off the compositor before anything else sees it.
+        if (adoptScrollAnimation(anim)) continue;
         try { anim.pause(); } catch { /* a finished animation rejects pause */ }
       }
+      if (scrollDrivers.has(anim)) continue;
       try {
         anim.currentTime = Math.max(0, virtualMs - animOrigin.get(anim));
         n++;
       } catch { /* read-only once finished */ }
     }
-    return n;
+    // Setting currentTime only marks the animation dirty. Chrome resolves
+    // animated values on its own rendering lifecycle, so without forcing a style
+    // recalculation here the captured frame can show a STALE animated value:
+    // measured on a 60fps render, the text held position for three frames then
+    // jumped ~0.7 device px — the scroll running at ~15fps inside a 60fps film.
+    // Reading a layout property flushes style and animation resolution.
+    driveScroll(virtualMs);
+    if (n) { try { void document.body.offsetHeight; } catch { /* ignore */ } }
+    return n + scrollDrivers.size;
   }
 
   let cursor = 0;
