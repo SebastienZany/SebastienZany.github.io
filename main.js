@@ -7973,6 +7973,11 @@ let surfaceCoverageBuildDiagnostics = {
   newlyCoveredTexels: 0,
 };
 let lastFrameTime = performance.now();
+// The dt the last frame actually advanced the simulation by, in 60Hz-frame
+// units. Exposed for session recording: one recorded tick is one live frame, and
+// live frames carry rawDt ~2.0 at 30fps, so a replay that assumes 1.0 simulates
+// half the session. Read-only; frame() is the only writer.
+let lastRawDt = 1;
 let fpsSmoothed = 60;
 let lastStatsRead = 0;
 let statsReadbackCooldownUntil = performance.now() + STATS_READBACK_RESET_COOLDOWN_MS;
@@ -15537,6 +15542,14 @@ async function onLoad(gltf) {
     setCameraAngles,
     replayInitialAgentSeed,
     skipIntroSequence,
+    // Rewind the start screen so the intro can be played again from a Begin
+    // click. Boot requests the intro on its own, and its timeline is anchored to
+    // whatever performance.now() read at that moment — so an offline recording,
+    // whose virtual clock starts much later, finds the intro already long
+    // complete and captures none of the starting sequence. Resetting first
+    // re-anchors the whole sequence onto the virtual clock. Touches only intro
+    // and start-screen state, never the simulation.
+    resetIntroSequenceToStartScreen,
     visualLayers: {
       get slimeVisible() {
         return slimeVisualVisible;
@@ -15655,6 +15668,16 @@ async function onLoad(gltf) {
     setAllOatObservationText,
     observationPlaceholderText: OBSERVATION_PLACEHOLDER_TEXT,
     loggedClicks,
+    // Replay writes the resolved tuple straight in, bypassing
+    // updateMouseRepelFromEvent's BVH raycast and its 45ms wall-clock throttle.
+    // This is the only per-frame input that reaches the simulation shader
+    // (pulled by setAgentUpdateUniforms), so it must be replayed exactly.
+    setMouseRepelState: ({ active = false, uv = null, chartId = 0 } = {}) => {
+      mouseRepelState.active = !!active;
+      if (uv) mouseRepelState.uv.set(uv.x, uv.y);
+      mouseRepelState.chartId = chartId;
+      return true;
+    },
     getMouseRepelState: () => ({
       active: mouseRepelState.active,
       uv: { x: mouseRepelState.uv.x, y: mouseRepelState.uv.y },
@@ -15787,6 +15810,62 @@ async function onLoad(gltf) {
     seedNow() {
       skipIntroSequence();
       replayInitialAgentSeed({ playSound: false });
+    },
+    seedSimRng,
+    getSimRngState,
+    // agentAllocationFrame seeds lastAgentAllocationOffset, which is a uniform
+    // on the agent compaction pass — so it decides where each agent lands in
+    // agentRT, and therefore the order the density splats are additively
+    // blended in. Float addition is not associative, so restoring simulation
+    // state without also restoring this counter produces a different field.
+    // It has to be part of any snapshot or recording header.
+    getAgentAllocationFrame: () => agentAllocationFrame,
+    setAgentAllocationFrame: (v) => { agentAllocationFrame = (v >>> 0); },
+    // The simulation is NOT step-size invariant: simulate() applies field decay
+    // and diffusion once per CALL while metabolism scales with dt, so replaying a
+    // recorded frame at the wrong dt changes the physics, not just the pacing.
+    // A recording therefore has to carry the dt of every frame it captured.
+    getFrameTiming: () => ({ rawDt: lastRawDt, clamp: FRAME_DT_CLAMP }),
+    // Where an oat placed at `uv` would put its story callout on screen. The
+    // callout is anchored to the oat's projected position, so a recording script
+    // that wants readable text has to know, before placing, whether the box will
+    // land over the creature or over empty space.
+    uvToWorld: (uv, target) => uvToWorld(uv, target ?? new THREE.Vector3()),
+    projectWorldToScreen: (worldPoint, w, h) => {
+      const r = projectWorldToScreen(worldPoint, w, h);
+      return { x: r.x, y: r.y, z: r.z, inClip: r.inClip };
+    },
+    // Resolved pause state. A paused frame still advances oat decay, seeding and
+    // the display chain and still writes oatRT/densityRT — it only skips
+    // simulate() — so this is "do not advance the field", not "freeze the world".
+    // Used by the offline renderer to redraw at a corrected canvas size without
+    // applying another diffuseField() decay to the field.
+    getSimulateEnabled: () => !paused,
+    setSimulateEnabled: (v) => { paused = !v; },
+    // Determinism probe: hash the authoritative simulation state. Covers more
+    // than fieldRT alone, because a divergence can exist in the agent buffer a
+    // while before it shows up in the field.
+    hashSimState: () => {
+      const fnv = (arr) => {
+        let h = 0x811c9dc5;
+        const view = new Uint32Array(arr.buffer, arr.byteOffset, arr.length);
+        for (let i = 0; i < view.length; i++) {
+          h ^= view[i];
+          h = Math.imul(h, 0x01000193) >>> 0;
+        }
+        return h >>> 0;
+      };
+      const field = readRTPixelsAsFloat(fieldRT.read, FIELD_SIZE, FIELD_SIZE);
+      const agents = readRTPixelsAsFloat(agentRT.read, AGENT_SIDE, AGENT_SIDE);
+      let fieldSum = 0;
+      for (let i = 0; i < field.length; i += 4) fieldSum += field[i];
+      return {
+        field: fnv(field),
+        agents: fnv(agents),
+        fieldSum: +fieldSum.toFixed(6),
+        rng: getSimRngState(),
+        allocFrame: agentAllocationFrame,
+      };
     },
     saveState: saveDevState,
     loadState: loadDevState,
@@ -17291,6 +17370,34 @@ function clearAgentRT(rt) {
   renderer.setRenderTarget(null);
 }
 
+// Seeded PRNG for the simulation stream (mulberry32). The initial agent cloud is
+// the only CPU-side randomness the simulation consumes, so seeding it is what
+// makes a run reproducible from a recording header.
+//
+// Deliberately a SEPARATE stream from visual and audio randomness: the visual
+// marker jitter fires on rejected clicks, at a rate that depends on how the
+// player misclicks, and sharing a generator would let a stray click shift the
+// agent cloud on the next reset.
+// Seeded per load, NOT to a constant. A fixed default would make every visit
+// open on the identical agent cloud, which is a change to the piece — the
+// original used Math.random() here. Replay stays exactly reproducible because a
+// recording seeds this explicitly via seedSimRng() and stores the value as
+// rngSeed in its header, so the stream is a pure function of the recording.
+let simRngState = ((Math.random() * 2 ** 32) >>> 0) || 0x9e3779b9;
+function seedSimRng(seed) {
+  simRngState = (seed >>> 0) || 0x9e3779b9;
+}
+function simRandom() {
+  simRngState = (simRngState + 0x6d2b79f5) | 0;
+  let t = simRngState;
+  t = Math.imul(t ^ (t >>> 15), t | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+function getSimRngState() {
+  return simRngState >>> 0;
+}
+
 function createAgentInitialData() {
   const data = new Float32Array(AGENT_CAPACITY * 4);
   const liveAgentIndices = [];
@@ -17339,8 +17446,8 @@ function createAgentInitialData() {
   }
 
   function sampleStandardNormalPair() {
-    const u1 = Math.max(Number.EPSILON, Math.random());
-    const u2 = Math.random();
+    const u1 = Math.max(Number.EPSILON, simRandom());
+    const u2 = simRandom();
     const radius = Math.sqrt(-2 * Math.log(u1));
     const angle = Math.PI * 2 * u2;
     return {
@@ -17363,8 +17470,8 @@ function createAgentInitialData() {
         };
         const status = validateSpawnUv(uv, expectedChart);
         if (status === 'valid') {
-          const angle = Math.random() * Math.PI * 2;
-          const reserve = 1.0 + Math.random() * 0.45;
+          const angle = simRandom() * Math.PI * 2;
+          const reserve = 1.0 + simRandom() * 0.45;
           placed = acceptAgent(i, uv, angle, reserve);
           if (placed) {
             diagnostics.localAccepted++;
@@ -17380,8 +17487,8 @@ function createAgentInitialData() {
     }
 
     if (!placed && oat) {
-      const angle = Math.random() * Math.PI * 2;
-      const reserve = 1.0 + Math.random() * 0.45;
+      const angle = simRandom() * Math.PI * 2;
+      const reserve = 1.0 + simRandom() * 0.45;
       placed = acceptAgent(i, { x: oat.uv.x, y: oat.uv.y }, angle, reserve);
       if (placed) {
         diagnostics.deterministicFallbackAccepted++;
@@ -17391,19 +17498,19 @@ function createAgentInitialData() {
 
     for (let attempt = 0; !oat && !placed && attempt < AGENT_INIT_GLOBAL_RETRIES; attempt++) {
       diagnostics.globalRetryAttempts++;
-      const uv = { x: Math.random(), y: Math.random() };
+      const uv = { x: simRandom(), y: simRandom() };
       if (validateSpawnUv(uv) !== 'valid') continue;
-      const angle = Math.random() * Math.PI * 2;
-      const reserve = 1.0 + Math.random() * 0.45;
+      const angle = simRandom() * Math.PI * 2;
+      const reserve = 1.0 + simRandom() * 0.45;
       placed = acceptAgent(i, uv, angle, reserve);
       if (placed) diagnostics.globalAccepted++;
     }
 
     if (!oat && !placed && spawnTexels.length > 0) {
-      const texel = spawnTexels[(i * 1103515245 + Math.floor(Math.random() * spawnTexels.length)) % spawnTexels.length];
+      const texel = spawnTexels[(i * 1103515245 + Math.floor(simRandom() * spawnTexels.length)) % spawnTexels.length];
       const uv = uvFromTexelIndex(texel);
-      const angle = Math.random() * Math.PI * 2;
-      const reserve = 1.0 + Math.random() * 0.45;
+      const angle = simRandom() * Math.PI * 2;
+      const reserve = 1.0 + simRandom() * 0.45;
       placed = acceptAgent(i, uv, angle, reserve);
       if (placed) diagnostics.deterministicFallbackAccepted++;
     }
@@ -18632,6 +18739,7 @@ function ensureWireframeOverlay() {
 function frame(now) {
   const rawDt = Math.min((now - lastFrameTime) / 16.6667, FRAME_DT_CLAMP);
   lastFrameTime = now;
+  lastRawDt = rawDt;
 
   updateStartScreenUi(now);
   updateIntroSequence(now);

@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>M0 mux test</title>
+<style>
+ body { font:13px/1.5 ui-monospace,Menlo,monospace; background:#0b0d0e; color:#dfe7e4; padding:20px; }
+ .row{padding:2px 0} .ok{color:#6ddf81}.bad{color:#ff6f6f}.dim{color:#7f8c89}
+ canvas{border:1px solid #232a2c;margin-top:10px}
+</style>
+</head>
+<body>
+<div id="out"></div>
+<canvas id="c" width="320" height="180"></canvas>
+<script type="module">
+import { createMp4Encoder } from './encode.js';
+const out = document.getElementById('out');
+const log = (m, c='') => { const d=document.createElement('div'); d.className='row '+c; d.textContent=m; out.append(d); console.log(m); };
+
+const canvas = document.getElementById('c');
+const gl = canvas.getContext('webgl2', { preserveDrawingBuffer:false, alpha:false, antialias:false });
+const FPS = 30, SECONDS = 2, TOTAL = FPS * SECONDS;
+
+try {
+  const t0 = performance.now();
+  const enc = await createMp4Encoder({ canvas, fps: FPS, withAudio: true });
+  log(`codec ${enc.videoCodec} @ ${(enc.videoBitrate/1e6).toFixed(2)} Mbps`, 'dim');
+  await enc.start();
+
+  for (let i = 0; i < TOTAL; i++) {
+    const p = i / TOTAL;
+    gl.viewport(0,0,canvas.width,canvas.height);
+    gl.clearColor(0.1 + 0.6*p, 0.2, 0.5 - 0.3*p, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.enable(gl.SCISSOR_TEST);
+    const bw = Math.floor(canvas.width * 0.18);
+    gl.scissor(Math.floor(p * (canvas.width - bw)), 40, bw, 100);
+    gl.clearColor(1, 0.85, 0.25, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.disable(gl.SCISSOR_TEST);
+    await enc.addFrame(i);
+  }
+  log(`video: ${enc.frames} frames`, 'ok');
+
+  // Late audio — exactly the ordering the real render uses.
+  const sr = 48000;
+  const oac = new OfflineAudioContext({ numberOfChannels:2, sampleRate:sr, length: sr*SECONDS });
+  const osc = oac.createOscillator(); const g = oac.createGain();
+  osc.frequency.setValueAtTime(220, 0);
+  osc.frequency.linearRampToValueAtTime(660, SECONDS);
+  g.gain.setValueAtTime(0.0001, 0);
+  g.gain.linearRampToValueAtTime(0.3, 0.1);
+  g.gain.linearRampToValueAtTime(0.0001, SECONDS);
+  osc.connect(g).connect(oac.destination); osc.start(0); osc.stop(SECONDS);
+  const rendered = await oac.startRendering();
+  log(`audio: ${rendered.duration.toFixed(3)}s @ ${rendered.sampleRate}Hz x${rendered.numberOfChannels}`, 'ok');
+  await enc.addAudio(rendered);
+
+  const buf = await enc.finalize();
+  const ms = performance.now() - t0;
+  log(`mp4: ${buf.byteLength} bytes in ${ms.toFixed(0)}ms`, 'ok');
+
+  const save = await fetch('/__save?name=mux-test.mp4', { method:'POST', body: buf }).then(r=>r.json());
+  log(`saved -> ${save.path} (${save.bytes} bytes)`, 'ok');
+  log('MUX_OK', 'ok');
+} catch (e) {
+  log(`FAILED: ${e && e.stack || e}`, 'bad');
+  window.__muxError = String(e && e.stack || e);
+}
+</script>
+</body>
+</html>
