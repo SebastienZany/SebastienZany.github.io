@@ -7,7 +7,7 @@ import { MeshBVH, acceleratedRaycast } from 'three-mesh-bvh';
 // BUMP THIS (and the matching BUILD_VERSION in index.html) on every deploy.
 // index.html and main.js cache independently, so they carry the same value and
 // the bootstrap flags a mismatch — that means one of the two files is cached.
-const BUILD_VERSION = '2026-08-16-lived-time';
+const BUILD_VERSION = '2026-08-23-idle-ending';
 
 // Load diagnostics hook installed by the inline bootstrap in index.html.
 // No-ops when absent so main.js keeps working standalone.
@@ -245,6 +245,7 @@ const INTRO_OAT_FADE_MS = INTRO_UI_FADE_MS;
 const INITIAL_AGENT_SEED_DURATION_MS = 3460;
 const INITIAL_AGENT_SEED_SOUND_LEAD_MS = 1000;
 const ENDING_TOTAL_RUNTIME_MS = 120000;
+const IDLE_ENDING_TIMEOUT_MS = 120000;
 const ENDING_CAMOUFLAGE_FADE_DELAY_MS = 7000;
 const ENDING_FALLBACK_FADE_MS = 3000;
 const INTRO_OAT_LAND_AT = 0.68;
@@ -539,6 +540,7 @@ const params = {
   useHeadingRotation: true,
   useOpticalZoom: false,
   endingTimeLimitEnabled: false,
+  endingIdleEnabled: true,
   statsReadbackEnabled: false,
   debugView: 'slime',
   performanceMode: 'quality',
@@ -5939,7 +5941,11 @@ function setEndingFadeOpacity(opacity) {
 
 function setEndingCountdownVisible(visible) {
   if (!endingCountdownLayer) return;
-  const shouldShow = Boolean(visible && params.endingTimeLimitEnabled);
+  const shouldShow = Boolean(
+    visible &&
+    endingSequenceState.trigger === 'time-limit' &&
+    params.endingTimeLimitEnabled
+  );
   endingCountdownLayer.style.opacity = shouldShow ? '1' : '0';
   endingCountdownLayer.setAttribute('aria-hidden', String(!shouldShow));
 }
@@ -6425,6 +6431,7 @@ function finishIntroSequence() {
 function cancelEndingSequence({ stopSound = false } = {}) {
   endingSequenceState.active = false;
   endingSequenceState.phase = 'idle';
+  endingSequenceState.trigger = 'none';
   endingSequenceState.sequenceId++;
   endingSequenceState.armedAt = 0;
   endingSequenceState.camouflageStartAt = 0;
@@ -6444,23 +6451,36 @@ function stopEndingSequenceSounds() {
   stopSoundCheckOneShot('game-complete');
 }
 
+function isEndingTriggerEnabled(trigger = endingSequenceState.trigger) {
+  if (trigger === 'time-limit') return params.endingTimeLimitEnabled;
+  if (trigger === 'idle') return params.endingIdleEnabled;
+  return false;
+}
+
 function isEndingSequenceSoundAllowed(sequenceId = endingSequenceState.sequenceId) {
-  return params.endingTimeLimitEnabled &&
+  return isEndingTriggerEnabled() &&
     endingSequenceState.active &&
     endingSequenceState.sequenceId === sequenceId;
 }
 
-function armEndingSequence(now = performance.now(), { fromNow = false } = {}) {
-  if (!params.endingTimeLimitEnabled) {
+function armEndingSequence(now = performance.now(), {
+  fromNow = false,
+  trigger = 'time-limit',
+} = {}) {
+  if (!isEndingTriggerEnabled(trigger)) {
     setEndingCountdownVisible(false);
     return false;
   }
-  if (endingSequenceState.active) return true;
+  if (endingSequenceState.active && endingSequenceState.trigger === trigger) return true;
+  if (endingSequenceState.active) cancelEndingSequence({ stopSound: true });
   endingSequenceState.active = true;
   endingSequenceState.phase = 'preparing';
+  endingSequenceState.trigger = trigger;
   endingSequenceState.sequenceId++;
   endingSequenceState.armedAt = now;
-  endingSequenceState.targetReturnAt = getEndingTargetReturnAt(now, { fromNow });
+  endingSequenceState.targetReturnAt = trigger === 'time-limit'
+    ? getEndingTargetReturnAt(now, { fromNow })
+    : 0;
   endingSequenceState.camouflageStartAt = 0;
   endingSequenceState.camouflageStartedAt = 0;
   endingSequenceState.camouflageDurationMs = 0;
@@ -6489,7 +6509,10 @@ function useFallbackEndingFade(now = performance.now(), targetReturnAt = endingS
 async function prepareEndingCamouflageSchedule(sequenceId) {
   if (!isEndingSequenceSoundAllowed(sequenceId)) return;
   const clip = getSoundClip('cuttlefish-camouflage');
-  const targetReturnAt = endingSequenceState.targetReturnAt || getEndingTargetReturnAt();
+  const trigger = endingSequenceState.trigger;
+  const targetReturnAt = trigger === 'time-limit'
+    ? endingSequenceState.targetReturnAt || getEndingTargetReturnAt()
+    : 0;
   if (!clip) {
     useFallbackEndingFade(performance.now(), targetReturnAt);
     return;
@@ -6501,10 +6524,14 @@ async function prepareEndingCamouflageSchedule(sequenceId) {
     const durationMs = Math.max(1, (buffer.duration ?? 0) * 1000);
     const fadeDelayMs = Math.min(ENDING_CAMOUFLAGE_FADE_DELAY_MS, Math.max(0, durationMs - 1));
     endingSequenceState.camouflageDurationMs = durationMs;
-    endingSequenceState.camouflageStartAt = targetReturnAt - durationMs;
+    endingSequenceState.camouflageStartAt = trigger === 'idle'
+      ? now
+      : targetReturnAt - durationMs;
     endingSequenceState.fadeStartAt = endingSequenceState.camouflageStartAt + fadeDelayMs;
-    endingSequenceState.endAt = targetReturnAt;
-    endingSequenceState.targetReturnAt = targetReturnAt;
+    endingSequenceState.endAt = trigger === 'idle'
+      ? endingSequenceState.camouflageStartAt + durationMs
+      : targetReturnAt;
+    endingSequenceState.targetReturnAt = endingSequenceState.endAt;
     endingSequenceState.phase = now >= endingSequenceState.camouflageStartAt
       ? 'camouflage-loading'
       : 'gameplay';
@@ -6551,7 +6578,7 @@ async function startEndingCamouflageSound(sequenceId) {
 }
 
 function completeEndingSequence(now = performance.now()) {
-  if (!params.endingTimeLimitEnabled) {
+  if (!isEndingTriggerEnabled()) {
     cancelEndingSequence({ stopSound: true });
     return false;
   }
@@ -6564,7 +6591,7 @@ function completeEndingSequence(now = performance.now()) {
 }
 
 function updateEndingSequence(now = performance.now()) {
-  if (!params.endingTimeLimitEnabled) {
+  if (!isEndingTriggerEnabled()) {
     if (endingSequenceState.active) {
       cancelEndingSequence({ stopSound: true });
     } else {
@@ -6606,8 +6633,49 @@ function updateEndingSequence(now = performance.now()) {
     }
   }
 
-  setEndingCountdownVisible(true);
-  syncEndingCountdownText(formatEndingCountdown(countdownTargetAt - now));
+  const showCountdown = endingSequenceState.trigger === 'time-limit';
+  setEndingCountdownVisible(showCountdown);
+  if (showCountdown) {
+    syncEndingCountdownText(formatEndingCountdown(countdownTargetAt - now));
+  }
+}
+
+function isEndingGameplayReady() {
+  return started &&
+    introSequenceState.completed &&
+    !initialAgentSeedState.active &&
+    !initialAgentSeedState.pending;
+}
+
+function noteEndingActivity(now = performance.now()) {
+  idleEndingState.lastActivityAt = now;
+  idleEndingState.triggeredAt = 0;
+  if (
+    endingSequenceState.active &&
+    endingSequenceState.trigger === 'idle'
+  ) {
+    cancelEndingSequence({ stopSound: true });
+  }
+}
+
+function updateIdleEnding(now = performance.now()) {
+  if (!params.endingIdleEnabled || params.endingTimeLimitEnabled) {
+    idleEndingState.tracking = false;
+    return;
+  }
+  if (!isEndingGameplayReady()) {
+    idleEndingState.tracking = false;
+    return;
+  }
+  if (!idleEndingState.tracking) {
+    idleEndingState.tracking = true;
+    idleEndingState.lastActivityAt = now;
+    return;
+  }
+  if (endingSequenceState.active) return;
+  if (now - idleEndingState.lastActivityAt < IDLE_ENDING_TIMEOUT_MS) return;
+  idleEndingState.triggeredAt = now;
+  armEndingSequence(now, { trigger: 'idle' });
 }
 
 function updateOatMarkerOcclusionOpacity(marker, target, now) {
@@ -8099,6 +8167,7 @@ const initialAgentSeedState = {
 const endingSequenceState = {
   active: false,
   phase: 'idle',
+  trigger: 'none',
   sequenceId: 0,
   armedAt: 0,
   camouflageStartAt: 0,
@@ -8109,6 +8178,18 @@ const endingSequenceState = {
   targetReturnAt: 0,
   lastCountdownText: '',
 };
+const idleEndingState = {
+  tracking: false,
+  lastActivityAt: performance.now(),
+  triggeredAt: 0,
+};
+
+for (const eventName of ['pointerdown', 'pointermove', 'click', 'wheel', 'keydown']) {
+  window.addEventListener(eventName, () => noteEndingActivity(), {
+    capture: true,
+    passive: true,
+  });
+}
 let lastTransitionCandidatePackingDiagnostics = {
   rawCandidateClaims: 0,
   rawCandidateTexels: 0,
@@ -15604,6 +15685,7 @@ async function onLoad(gltf) {
     getEndingSequenceState: () => ({
       active: endingSequenceState.active,
       phase: endingSequenceState.phase,
+      trigger: endingSequenceState.trigger,
       armedAt: endingSequenceState.armedAt,
       camouflageStartAt: endingSequenceState.camouflageStartAt,
       camouflageStartedAt: endingSequenceState.camouflageStartedAt,
@@ -15614,6 +15696,14 @@ async function onLoad(gltf) {
       countdownText: endingSequenceState.lastCountdownText,
       countdownEnabled: params.endingTimeLimitEnabled,
       timeLimitEnabled: params.endingTimeLimitEnabled,
+      idleEnabled: params.endingIdleEnabled,
+      idleTracking: idleEndingState.tracking,
+      idleTimeoutMs: IDLE_ENDING_TIMEOUT_MS,
+      idleLastActivityAt: idleEndingState.lastActivityAt,
+      idleTriggeredAt: idleEndingState.triggeredAt,
+      idleForMs: idleEndingState.tracking
+        ? Math.max(0, performance.now() - idleEndingState.lastActivityAt)
+        : 0,
       fadeOpacity: Number.parseFloat(endingFadeOverlay?.style.opacity || '0') || 0,
       now: performance.now(),
     }),
@@ -17710,7 +17800,8 @@ function updateInitialAgentSeeding(now) {
     lastAgentCreationDiagnostics = state.diagnostics;
     resetAgentHistory(visibleAgents);
     cancelInitialAgentSeeding();
-    armEndingSequence(now);
+    idleEndingState.tracking = false;
+    if (params.endingTimeLimitEnabled) armEndingSequence(now);
   }
   return wasActive;
 }
@@ -18636,18 +18727,31 @@ function initControls() {
   bindToggle('endingTimeLimitEnabled', 'endingTimeLimitEnabled', {
     onChange: () => {
       if (!params.endingTimeLimitEnabled) {
-        cancelEndingSequence({ stopSound: true });
+        if (endingSequenceState.trigger === 'time-limit') {
+          cancelEndingSequence({ stopSound: true });
+        }
+        idleEndingState.tracking = false;
         return;
       }
+      if (endingSequenceState.trigger === 'idle') {
+        cancelEndingSequence({ stopSound: true });
+      }
       if (
-        started &&
-        introSequenceState.completed &&
-        !initialAgentSeedState.active &&
-        !initialAgentSeedState.pending
+        isEndingGameplayReady()
       ) {
         armEndingSequence(performance.now(), { fromNow: true });
       } else {
         setEndingCountdownVisible(endingSequenceState.active);
+      }
+    },
+  });
+  bindToggle('endingIdleEnabled', 'endingIdleEnabled', {
+    onChange: () => {
+      idleEndingState.tracking = false;
+      idleEndingState.lastActivityAt = performance.now();
+      idleEndingState.triggeredAt = 0;
+      if (!params.endingIdleEnabled && endingSequenceState.trigger === 'idle') {
+        cancelEndingSequence({ stopSound: true });
       }
     },
   });
@@ -18843,6 +18947,7 @@ function frame(now) {
       renderDensity();
     }
     updateInitialAgentSeeding(now);
+    updateIdleEnding(now);
     updateEndingSequence(now);
     if (params.showAgentDots) renderAgentDensityOverlay();
     // Smoothing keeps converging (temporal blend) for a while after the field

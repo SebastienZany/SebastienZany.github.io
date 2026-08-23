@@ -24,7 +24,7 @@
       const t0 = performance.now();
       // Build stamp so a stale cached copy is obvious in the diagnostics report.
       // BUMP THIS (and the matching BUILD_VERSION in main.js) on every deploy.
-      const BUILD_VERSION = '2026-08-16-lived-time';
+      const BUILD_VERSION = '2026-08-23-idle-ending';
       const events = [];
       const state = { loaded: false, overlay: null, textEl: null, mainVersion: null };
       let previousRun = null;
@@ -722,6 +722,10 @@
               <label class="toggle-control">
                 <span>Time limit</span>
                 <input id="endingTimeLimitEnabled" type="checkbox">
+              </label>
+              <label class="toggle-control">
+                <span>Idle ending (2 min)</span>
+                <input id="endingIdleEnabled" type="checkbox" checked>
               </label>
               <label class="toggle-control">
                 <span>Oat glow</span>
