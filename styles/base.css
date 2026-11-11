@@ -1,0 +1,42 @@
+/* Page frame: a full-window canvas with a layer above it for DOM placed over the scene. */
+:root {
+  color-scheme: dark;
+  --font-story: 'EB Garamond', 'Iowan Old Style', Georgia, serif;
+  --font-ui: 'Inter', system-ui, -apple-system, sans-serif;
+  --page-background: #07090a;
+}
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--page-background);
+  color: #e8efec;
+  font-family: var(--font-ui);
+  font-size: 16px;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+#app {
+  position: fixed;
+  inset: 0;
+}
+
+#sim {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  /* The game handles every gesture on the canvas itself. */
+  touch-action: none;
+  cursor: default;
+  outline: none;
+}
+
+#overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}

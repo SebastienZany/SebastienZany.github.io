@@ -1,0 +1,42 @@
+/* The settings panel: hidden until P is pressed. */
+.panel {
+  position: absolute;
+  top: calc(12px + env(safe-area-inset-top));
+  left: calc(12px + env(safe-area-inset-left));
+  width: min(340px, calc(100vw - 24px));
+  max-height: calc(100vh - 24px);
+  overflow: auto;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(8, 12, 12, 0.72);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(190, 255, 236, 0.12);
+  font: 12px/1.4 var(--font-ui);
+  color: #d5e4de;
+  z-index: 30;
+}
+#app[data-panel-visible="false"] .panel { display: none; }
+
+.panel h2 {
+  margin: 10px 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #8fb3a6;
+}
+.panel h2:first-child { margin-top: 0; }
+.panel details { border-top: 1px solid rgba(190, 255, 236, 0.08); padding: 4px 0; }
+.panel summary { cursor: pointer; padding: 2px 0; font-weight: 600; }
+
+.panel-row {
+  display: grid;
+  grid-template-columns: 9.5em 1fr 3.6em;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+}
+.panel-row input[type="range"] { width: 100%; }
+.panel-row input[type="checkbox"], .panel-row input[type="color"], .panel-row select { justify-self: start; }
+.panel-value { text-align: right; font-variant-numeric: tabular-nums; color: #9fb8ae; }

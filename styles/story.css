@@ -1,0 +1,152 @@
+/* Story boxes: the frosted glass panels that rise above an oat and roll its
+   story through. Built and driven by src/game/stories/.
+
+   Three opacities are multiplied together, each set from script per box:
+     --story-glass-opacity    the box's own fade in and out over its life
+     --story-text-opacity     0 until the glass is in, then 1, then fading out
+     --story-spatial-opacity  dims the box when its oat turns away or is hidden */
+
+.story-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  /* Box z-indexes (depth sorting) stay inside this layer. */
+  isolation: isolate;
+
+  /* Look, set live from the "Story labels" settings (see params.js). */
+  --story-stroke-opacity: 0;
+  --story-corner-radius: 24px;
+  --story-edge-feather-outset: 42px;
+  --story-edge-feather-mask: 62.4px;
+  --story-edge-feather-opacity: 1;
+  --story-blur-radius: 7px;
+  --story-tint-rgb: 0, 0, 0;
+  --story-tint-opacity: 0.33;
+  --story-text-rgb: 255, 255, 255;
+
+  /* Height of the soft fade at the top and bottom of the text area. The
+     script reads this to know where the first line should appear. */
+  --story-text-fade: 28px;
+
+  /* The left-to-right line wipe, set once from stories.config.js. */
+  --story-line-mask: none;
+  --story-line-mask-size: 260% 100%;
+  --story-line-mask-start: 100% 0;
+
+  --story-glass-opacity: 0;
+  --story-text-opacity: 0;
+  --story-spatial-opacity: 0;
+}
+
+.story-box {
+  --story-stroke-alpha: calc(var(--story-stroke-opacity) * var(--story-glass-opacity) * var(--story-spatial-opacity));
+
+  position: absolute;
+  box-sizing: border-box;
+  /* Same numbers as STORY_BOX in stories.config.js: 230 x 126, 14px margins. */
+  width: min(230px, calc(100vw - 28px));
+  height: 126px;
+  padding: 10px 12px 11px;
+  border: 1.5px solid rgba(255, 255, 255, var(--story-stroke-alpha));
+  border-radius: var(--story-corner-radius);
+  font-family: var(--font-story, "EB Garamond", Garamond, "Times New Roman", serif);
+  isolation: isolate;
+  opacity: 0;
+  overflow: visible; /* the glass and the tail reach outside the box */
+  pointer-events: none;
+  transform: translateZ(0);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.story-box.is-visible {
+  opacity: 1;
+}
+
+/* The glass: a tinted, blurring layer larger than the box whose edges fade
+   out. The mask is on the blurring layer itself, because a backdrop blur
+   with only a soft-edged fill still ends in a hard line. */
+.story-box::before {
+  --story-feather-x: linear-gradient(to right, transparent, #000 var(--story-edge-feather-mask), #000 calc(100% - var(--story-edge-feather-mask)), transparent);
+  --story-feather-y: linear-gradient(to bottom, transparent, #000 var(--story-edge-feather-mask), #000 calc(100% - var(--story-edge-feather-mask)), transparent);
+
+  content: "";
+  position: absolute;
+  z-index: 0;
+  inset: calc(-1 * var(--story-edge-feather-outset));
+  border-radius: calc(var(--story-corner-radius) + var(--story-edge-feather-outset));
+  background: rgba(var(--story-tint-rgb), var(--story-tint-opacity));
+  backdrop-filter: blur(var(--story-blur-radius)) saturate(1.12);
+  -webkit-backdrop-filter: blur(var(--story-blur-radius)) saturate(1.12);
+  -webkit-mask-image: var(--story-feather-x), var(--story-feather-y);
+  -webkit-mask-composite: source-in;
+  mask-image: var(--story-feather-x), var(--story-feather-y);
+  mask-composite: intersect;
+  opacity: calc(var(--story-edge-feather-opacity) * var(--story-glass-opacity) * var(--story-spatial-opacity));
+  pointer-events: none;
+}
+
+/* The line from the box toward its oat. Script sets left, top, width and
+   rotation; it shares the border's opacity, which is 0 by default. */
+.story-tail {
+  position: absolute;
+  z-index: 2;
+  width: 0;
+  height: 1.5px;
+  background: rgba(255, 255, 255, var(--story-stroke-alpha));
+  opacity: 0;
+  pointer-events: none;
+  transform-origin: 0 50%;
+}
+
+.story-content {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  opacity: calc(var(--story-text-opacity) * var(--story-spatial-opacity));
+}
+
+/* The window the text rolls through, fading at its top and bottom edges. */
+.story-text {
+  --story-text-window: linear-gradient(to bottom, transparent, #000 var(--story-text-fade), #000 calc(100% - var(--story-text-fade)), transparent);
+
+  flex: 1 1 auto;
+  box-sizing: border-box;
+  min-height: 0;
+  margin: 0;
+  padding: 2px 5px 2px 0;
+  overflow: hidden;
+  color: rgba(var(--story-text-rgb), 0.88);
+  font-size: 1.17rem;
+  line-height: 1.35;
+  -webkit-mask-image: var(--story-text-window);
+  mask-image: var(--story-text-window);
+}
+
+/* All the lines; script slides this up as the story goes. */
+.story-roll {
+  display: block;
+  will-change: transform;
+}
+
+/* One wrapped line. It starts fully masked; script slides the mask to the
+   left to wipe the line in. */
+.story-line {
+  display: block;
+  min-height: 1.35em;
+  overflow: hidden;
+  white-space: nowrap;
+  -webkit-mask-image: var(--story-line-mask);
+  mask-image: var(--story-line-mask);
+  -webkit-mask-size: var(--story-line-mask-size);
+  mask-size: var(--story-line-mask-size);
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: var(--story-line-mask-start);
+  mask-position: var(--story-line-mask-start);
+  will-change: mask-position, -webkit-mask-position;
+}

@@ -1,0 +1,204 @@
+/*
+ * Start screen, ending fade and countdown readouts (owned by src/game/flow).
+ *
+ * Almost nothing here animates: every opacity on these elements is written
+ * each frame by the flow module, so the fades stay locked to the intro
+ * sound's clock. The stylesheet only sets the resting layout and look.
+ *
+ * Stacking inside #app: ending fade (8) < countdown (9) < start screen (10).
+ */
+
+/* ---- start screen ------------------------------------------------------ */
+
+.start-screen {
+  position: absolute;
+  z-index: 10;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  background: #000;
+  opacity: 1;
+  /* Until the intro lets go, the black screen swallows clicks and drags so
+     nobody plants an oat or turns the camera behind it. */
+  pointer-events: auto;
+}
+
+/* The screen is fading out over the scene: let input through to the canvas. */
+.start-screen.is-running {
+  pointer-events: none;
+}
+
+.start-screen.is-complete {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* Title, intro line and action are stacked at fixed offsets inside this box,
+   so one fading out never shifts the others. */
+.start-screen-stage {
+  position: relative;
+  width: min(720px, calc(100vw - 48px));
+  height: clamp(170px, 30vh, 240px);
+  text-align: center;
+}
+
+.start-screen-title,
+.start-screen-intro-line {
+  position: absolute;
+  right: 0;
+  left: 0;
+  margin: 0;
+  color: rgba(255, 255, 255, 0.9);
+  font-family: var(--font-story, "EB Garamond", Garamond, "Times New Roman", serif);
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  line-height: 1.25;
+}
+
+.start-screen-title {
+  top: 0;
+  font-size: clamp(1.25rem, 4.6vw, 2.6rem);
+}
+
+.start-screen-intro-line {
+  top: clamp(70px, 12vh, 102px);
+  min-height: 1.25em;
+  opacity: 0; /* appears only after Begin */
+  font-size: clamp(0.86rem, 2.5vw, 1.16rem);
+  text-transform: lowercase;
+}
+
+.start-screen-intro-dots {
+  display: inline-flex;
+  gap: 0.18em;
+  margin-left: 0.24em;
+}
+
+.start-screen-intro-dot {
+  opacity: 0;
+}
+
+/* "loading..." and the Begin button share one grid cell: they cross-fade in
+   place. */
+.start-screen-action {
+  position: absolute;
+  top: clamp(126px, 21vh, 172px);
+  right: 0;
+  left: 0;
+  display: grid;
+  place-items: center;
+  min-height: 38px;
+}
+
+.start-screen-status,
+.start-button {
+  grid-area: 1 / 1;
+  width: 104px;
+  min-height: 38px;
+  font-family: var(--font-story, "EB Garamond", Garamond, "Times New Roman", serif);
+  font-size: 0.82rem;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: lowercase;
+}
+
+.start-screen-status {
+  display: grid;
+  place-items: center;
+  margin: 0;
+  color: rgba(255, 255, 255, 0.82);
+  pointer-events: none;
+}
+
+/* A fatal load error replaces "loading..." and needs room for a sentence. */
+.start-screen-status.error {
+  width: min(520px, calc(100vw - 48px));
+  color: var(--red, #ff6f6f);
+  line-height: 1.45;
+  text-align: center;
+}
+
+/* The button's fill, border, glow and text colour are drawn from script (the
+   hover and click glow are timed animations), so every browser default that
+   would fight that is switched off here. */
+.start-button {
+  position: relative;
+  z-index: 1;
+  appearance: none;
+  -webkit-appearance: none;
+  padding: 10px 18px;
+  border: 1px solid rgba(255, 255, 255, 0.62);
+  border-radius: 0;
+  background: transparent;
+  color: #fff;
+  cursor: pointer;
+  opacity: 0;
+  outline: none;
+  pointer-events: none; /* script enables it once the button is visible enough */
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-fill-color: currentColor;
+}
+
+.start-button:focus,
+.start-button:focus-visible {
+  outline: none;
+}
+
+.start-button:active {
+  transform: none;
+}
+
+.start-button:disabled,
+.start-screen.is-armed .start-button {
+  pointer-events: none;
+}
+
+/* Both have an explicit display above, which would otherwise beat [hidden]. */
+.start-button[hidden],
+.start-screen-status[hidden] {
+  display: none;
+}
+
+/* ---- ending ------------------------------------------------------------ */
+
+.ending-fade {
+  position: absolute;
+  z-index: 8;
+  inset: 0;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ending-countdown-layer {
+  position: absolute;
+  z-index: 9;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Two faint clocks in the bottom corners (time-limit ending only). */
+.ending-countdown {
+  position: absolute;
+  bottom: 10px;
+  color: rgba(238, 245, 242, 0.24);
+  font-family: var(--font-ui, Inter, ui-sans-serif, system-ui, sans-serif);
+  font-size: 0.48rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-shadow: 0 0 8px rgba(255, 255, 255, 0.12);
+}
+
+.ending-countdown.left {
+  left: 10px;
+}
+
+.ending-countdown.right {
+  right: 10px;
+}
