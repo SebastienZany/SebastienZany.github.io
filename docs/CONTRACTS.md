@@ -1,4 +1,4 @@
-# A Bestiary of Vanishings — rewrite contracts
+# A Bestiary of Vanishings — conventions and interfaces
 
 This is a rewrite of the older version of the game in this repository's history (last at
 commit `2622cd1`), written to be read. That old `main.js` (20k lines) was the only source
@@ -10,7 +10,8 @@ the behaviour written fresh.
 ## Shape of the program
 
 ```
-index.html          shell: diagnostics bootstrap, import map, static start-screen markup
+index.html          the page: build stamp, import map, static start-screen markup
+shell/              plain scripts that run before the game: diagnostics log, freshness check and boot
 styles/*.css        one stylesheet per UI surface
 assets/             model, normal map, gold film tensor, stories.json, sounds/*.wav
 src/main.js         boot: load assets, build modules, run the frame loop
@@ -20,7 +21,8 @@ src/slime/          the organism. `model.js` documents the SlimeModel interface;
 src/render/         camera, lights, slime film material, gold body, oat markers
 src/game/           game mechanics: oats, stories, intro/ending flow, input
 src/audio/          WebAudio engine
-src/ui/             DOM surfaces (panel, story boxes)
+src/ui/             the settings panel
+tests/              browser checks (see README.md)
 ```
 
 The one architectural rule: **game mechanics and rendering never reach inside a slime
@@ -141,15 +143,22 @@ createFlow(ctx, hooks) -> {
   update(now),              // every frame
   skipIntro(now),
   introSpritePosition(),    // Vector3 | null: where the falling intro oat is (audio follows it)
-  setEndingEnabled(on),
+  setEndingEnabled(on),     // the time-limit ending (off by default)
+  setIdleEndingEnabled(on), // the idle ending: two minutes without input (on by default)
+  noteActivity(now),        // count something other than a pointer/wheel/key event as player activity
+  colonyReseeded(now, grownAtMs),  // the game re-seeded outside the intro
+  debugState(),             // snapshot for dev hooks and tests
   dispose(),
 }
 hooks = {
-  getInitialOat() -> oat,              // the landing target of the intro oat
-  seedColony(now, { durationMs }),     // start growing the colony at the initial oat
-  resetWorld(now),                     // ending restart: clear slime and oats, re-place the initial oat
+  getInitialOat() -> oat | null,       // the landing target of the intro oat
+  seedColony(now, { durationMs }),     // start growing the colony at the initial oat, and start the tumble loop
+  resetWorld(now),                     // ending restart: clear slime, oats and stories, re-place the initial oat
 }
 ```
+
+The flow listens for input on `window` itself to run the idle ending. Its two toggles
+are also exported as a `paramSchema`; the panel calls the two setters.
 
 ### Stories and oat markers (`src/game/stories/index.js`, `src/render/oat-markers.js`)
 
@@ -164,13 +173,24 @@ createStories(ctx, hooks) -> {
   onOatPlaced(oat, now), onOatRemoved(oat),
   update(now),                         // polls coverage, runs story boxes
   setEnabled(on), reset(), dispose(),
+  params,                              // live "Story labels" settings (schema exported by the module)
 }
 hooks = {
   markers,                              // the createOatMarkers instance
   coverageNear(uvs) -> Promise<number[]>,  // slime coverage score near each atlas point
   onStoryTextStarted(oat, now),         // the game starts that oat's food decay here
+  getTextColor() -> '#rrggbb',          // optional: story text colour (the slime's body colour)
+  params,                               // optional: use this settings object instead of the defaults
 }
 ```
+
+The initial oat gets no marker and no story. Call `markers.update(now)` and
+`stories.update(now)` after the camera has moved for the frame and before rendering.
+
+### Slime model (`src/slime/model.js`)
+
+The interface, with its documentation, is the `SlimeModel` typedef in that file. Models
+are created with `{ gpu, surface, diag, sizeScale }`.
 
 ## paramSchema
 
@@ -189,10 +209,10 @@ export const paramSchema = [
 export function defaultParams() { /* -> { key: default, ... } from the schema */ }
 ```
 
-## What each module's NOTES.md must contain
+## Module notes
 
-Next to your module, write `NOTES.md` listing: the old-game behaviours you reproduced
-(one line each, with the old function names you verified them against), anything you
-deliberately left out and why, any place the old code contradicted the earlier attempts'
-notes, anything you are unsure of, and every hook or `ctx` field you needed beyond this
-contract.
+The audio, flow and stories modules each have a `NOTES.md` next to them listing: the
+old-game behaviours reproduced (with the old function names they were verified against),
+what was deliberately left out and why, what is still unsure, and what the module needs
+from its caller. When a module changes, change its notes in the same commit; a note that
+no longer matches the code is worse than no note.

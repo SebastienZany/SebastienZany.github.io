@@ -1,9 +1,10 @@
 # Flow: notes
 
-Start screen, intro, ending, restart. Verified against `physarum-17/main.js` at commit
+Start screen, intro, ending, restart. Verified against the old `main.js` in this repository's history, as of commit
 `045672c` ("Add idle-triggered ending"), plus its `index.html` and `styles.css`.
-Not run in a browser: checked with `node --check` and `node src/game/flow/smoke-test.mjs`
-(fake clock, fake DOM, stub audio, stub `three`).
+Logic test: `node src/game/flow/smoke-test.mjs` (fake clock, fake DOM, stub audio, stub
+`three`). In the browser the flow is exercised by `tests/play.mjs` (Begin, intro, seeding)
+and `tests/idle-ending.mjs` (idle ending and restart).
 
 ## Files
 
@@ -53,7 +54,7 @@ Not run in a browser: checked with `node --check` and `node src/game/flow/smoke-
 - Oat: target, start at NDC y 1.55 over the target, fallback start 2.8 world up, pose maths, 18-step bisection for the top-edge lead, additive sprite with depth test off and renderOrder 20, per-pixel sRGB glow texture (`getIntroOatTargetPosition`, `getIntroOatStartPosition`, `getIntroOatSpriteScale`, `getIntroOatTopEdgeLeadMs`, `maybeBeginIntroSequence`, `updateIntroSequence`, `makeOatGlowSprite`, `makeRadialGlowTexture`).
 - Env loop at C+5500 (`startIntroEnvAudio`); seed sound 1000 before the end, played at the finish instead if it had not been (`updateIntroSequence`, `finishIntroSequence`, `replayInitialAgentSeed`).
 - Skip: allowed once ready and until the colony is seeded, also from the start screen before Begin; stops `intro` (80 ms fade), starts the env loop, finishes at once; the "click time" becomes the skip time (`skipIntroSequence`).
-- `?dev`: `setReady` hides the screen (`display:none`) and skips (end of `init`, `DEV_MODE`).
+- `?dev`: `setReady` hides the screen (`display:none`) and skips (end of `init`, `DEV_MODE`). A later ending shows it again: `returnToBegin` clears that `display`.
 - Ending arming, schedule, fallback fade, fade curve, countdown text and its target, restart (`armEndingSequence`, `prepareEndingCamouflageSchedule`, `startEndingCamouflageSound`, `useFallbackEndingFade`, `updateEndingSequence`, `completeEndingSequence`, `formatEndingCountdown`).
 - Restart order: ending cancelled and `cuttlefish-camouflage` stopped (80 ms) -> `hooks.resetWorld(now)` -> `stopEnvLoop({ fadeMs: 2500 })` -> `stopTumbleLoop({ fadeMs: 1200 })` -> intro state cleared -> start screen back, opaque, Begin fully visible and clickable immediately (`completeEndingSequence`, `resetIntroSequenceToStartScreen`).
 - Toggle side effects (`bindToggle('endingTimeLimitEnabled')`, `bindToggle('endingIdleEnabled')`).
@@ -77,7 +78,7 @@ The old intro and ending move the camera nowhere, and the restart does not reset
 - The old ending phase `camouflage-loading` is gone: `playOneShot` is synchronous, so the phase was instantaneous.
 - The old warning when intro.wav started more than 250 ms off schedule is dropped: the audio contract does not report the real start time.
 - `game-complete` was only ever stopped, never played, in the old game. Not referenced.
-- The ambience clip is not preloaded by the flow at Begin (the old code called `initEnvAudio`); the contract has no name for it. See below.
+- The ambience clip is not preloaded by the flow at Begin (the old code called `initEnvAudio`). `src/game/game.js` preloads it in the background as soon as the start screen is ready.
 - Loading progress text: the old status always read `loading...` (progress went to the diag log only). Kept; the flow has no progress API.
 - Old `fail()` also opened the diagnostics overlay and wrote a panel status line: the shell's business.
 
@@ -95,8 +96,8 @@ The old intro and ending move the camera nowhere, and the restart does not reset
 - `playOneShot(name, { atMs })` with `atMs` in the past must start immediately (the old code clamped). The time-limit ending relies on it when less than one clip length remains.
 - `?dev` and `S` on the start screen call `startEnvLoop()` and `playOneShot()` before or without a Begin click. `skipIntro` calls `unlockFromGesture()` (S is a key gesture); the `?dev` path cannot.
 - A second Begin after a restart does not stop a still-sounding `intro.wav` from the first run; neither did the old game.
-- z-indexes (ending fade 8, countdown 9, start screen 10) are the old ones; whether story boxes in `#overlay` sit below 8 depends on `base.css`.
-- `start-screen.css` uses `--font-story`, `--font-ui`, `--red` with fallbacks; `base.css` should define them.
+- z-indexes (ending fade 8, countdown 9, start screen 10) are the old ones. `#overlay` (story boxes) has no z-index in `base.css`, so it sits below all three.
+- `start-screen.css` uses `--font-story`, `--font-ui`, `--red` with fallbacks; `base.css` defines the two fonts and not `--red`, so the error colour is the fallback.
 
 ## Needed beyond the contract
 
@@ -107,7 +108,7 @@ Nothing extra is required from `ctx` or `hooks`. Assumptions and additions:
 - `hooks.resetWorld(now)` = old `resetSimulation({ resetOats: true, spawnAgents: false })`: clear slime and every oat and story, re-place the initial oat, seed nothing.
 - `hooks.getInitialOat()` may return `null` before the oat exists; the fall waits for it.
 - The integrator's `S` handler (old `handleIntroSkipKeydown`): key `s`, no alt/ctrl/meta, not a repeat, not in an editable field -> `flow.skipIntro(performance.now())`. Returns `true` if it skipped.
-- Optional, to save bandwidth-critical seconds: `audio.preload` of the ambience when Begin is pressed.
+- `src/game/game.js` preloads `slime-fuse` and `intro` before calling `setReady` (waiting at most 4 s), then the ambience and the story reveal sound in the background.
 
 Extra members on the object `createFlow` returns:
 

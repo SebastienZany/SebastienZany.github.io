@@ -1,6 +1,6 @@
 # Audio engine notes
 
-Verified against `physarum-17/main.js` only. Old function names are in backticks.
+Verified against the old `main.js` (in this repository's history, last at commit `2622cd1`) only. Old function names are in backticks.
 
 ## Files
 
@@ -64,7 +64,7 @@ Verified against `physarum-17/main.js` only. Old function names are in backticks
 
 ## Unsure / not verified
 
-- Nothing was listened to. The smoke test checks wiring and scheduling arithmetic against a fake context, not sound, and not real `getOutputTimestamp` behaviour on iOS.
+- The smoke test checks wiring and scheduling arithmetic against a fake context. The artist has since listened to the deployed game on desktop and on an iPhone 13 Pro Max and reported that sound works (2026-11-10); nobody has compared levels or timing against the old game by measurement, and real `getOutputTimestamp` behaviour on iOS was not examined beyond that.
 - `playOneShot`'s `volume` is treated as an absolute gain replacing the clip default, clamped to `0..maxGain`. The old game never passed a per-play volume, so this meaning is a guess.
 - Listener "up" is the camera's world-matrix Y column. The old code rotated `camera.up` by the camera quaternion, which is the same thing only while `camera.up` is (0, 1, 0) and the camera has no rotated parent.
 

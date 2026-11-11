@@ -18,7 +18,8 @@ open http://127.0.0.1:8319/
 ```
 
 Useful URLs: `?dev` (skip the start screen and intro), `?slime=mould` (a different
-organism), `?mobile=1` (the phone profile), `?diag=1` (diagnostics report),
+organism), `?mobile=1` (the phone profile), `?likephone` (pretend the GPU has an
+iPhone's limits), `?field=N` (slime atlas resolution), `?diag=1` (diagnostics report),
 `?safe=1` (report only; load nothing). In the game: `P` settings panel, `S` skip
 the intro, `M` story boxes on/off, `1` / `2` slime / gold layers, arrow keys orbit,
 Shift slows the camera.
@@ -73,8 +74,9 @@ of the body that gets few texels can only carry coarse slime.
 ## Checks
 
 They drive the real game in headless Chrome and need Playwright
-(`PLAYWRIGHT_PATH=/path/to/playwright/index.mjs` if it is not installed here) and a
-server on port 8319.
+(`PLAYWRIGHT_PATH=/path/to/playwright/index.mjs` if it is not installed here). By
+default they open `http://127.0.0.1:8319/`, so serve this folder on port 8319 first, or
+pass another URL (the live site works too) as shown by each script's usage line.
 
 | Command | What it checks |
 |---|---|
@@ -83,4 +85,6 @@ server on port 8319.
 | `node tests/surface-checks.mjs` | Slime crosses the atlas's cut; nothing lives off the body |
 | `node tests/story-depth.mjs` | Two overlapping story boxes hand over gradually when the camera swaps their depth order |
 | `node tests/idle-ending.mjs` | Two idle minutes end the game and reset it (takes 3 min) |
-| `node src/audio/smoke-test.mjs` etc. | Each delegated module's own logic test, in Node |
+| `node tests/story-perf.mjs` | Frame times with several overlapping story boxes while the camera orbits |
+| `node tests/look-probe.mjs`, `limb-probe.mjs`, `panel-shot.mjs` | Screenshots for judging by eye: look layers one at a time, slime at the base of the tentacles, the settings panel |
+| `node src/audio/smoke-test.mjs`, `src/game/flow/smoke-test.mjs`, `src/game/stories/smoke-test.mjs` | Logic tests of those three modules, in Node, with no browser |

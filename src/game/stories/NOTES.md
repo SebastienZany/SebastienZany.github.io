@@ -1,11 +1,14 @@
 # Stories and oat markers: notes
 
 Covers `src/game/stories/`, `styles/story.css` and `src/render/oat-markers.js`.
-Everything below was checked against `physarum-17/main.js`, `index.html` and
-`styles.css`; old function names are in brackets.
+Everything below was checked against the old `main.js`, `index.html` and
+`styles.css` (in this repository's history, last at commit `2622cd1`); old function
+names are in brackets.
 
 Run the test: `node src/game/stories/smoke-test.mjs` (library hand-out, trigger
-polling with a fake clock, timeline numbers, wrapping, placement, CSS vars).
+polling with a fake clock, timeline numbers, wrapping, placement, CSS vars). In the
+browser: `tests/play.mjs` (an oat's story appears) and `tests/story-depth.mjs`
+(overlapping boxes hand over gradually).
 Not run in a browser: nothing else of the game existed when this was written.
 
 ## What the old coverage score computes (for `hooks.coverageNear`)
@@ -83,7 +86,8 @@ Placement, every frame [updateOatAnnotations, updateObservationTail, getTailAnch
 - Box 230 x 126 px (narrower if the screen is under 258 px), centred above the
   oat's screen position by `max(8, tailLengthVh * viewport height)`, clamped to
   14 px screen margins. Hidden if the oat projects outside clip z.
-- z-index = `round((1 - depth01) * 100000)`: nearer oats on top.
+- z-index = `round((1 - depth01) * 100000)`: nearer oats on top. Applied to the box's
+  glass and to its text separately (see "Differences" below).
 - Opacity = lifecycle x facing `smoothstep(dot, -0.14, 0.2)` x occlusion.
   Occlusion: ray test via `surface.isOccluded(camera.position, oat.point)`,
   re-tested every `120 + (n * 19) % 120` ms (n = nth story oat), skipped and
@@ -104,6 +108,7 @@ Settings [params, syncObservationCssVars, index.html "Story Labels"]
 | tintColor | observationTintColor | colour, #000000 | --story-tint-rgb |
 | tintOpacity | observationTintOpacity | 0..0.5, 0.33 | --story-tint-opacity |
 | triggerThreshold | observationSlimeTriggerThreshold | 0..1 step 0.01, 0.05 | none |
+| depthSoftnessWorld | (new) | 0.02..3 step 0.02, 0.6 | none (depth softening) |
 
 Variables are set on the `.story-layer` element (the old code set them on
 `<html>`). Text colour `--story-text-rgb` followed the old `slimeBaseColor`
@@ -149,6 +154,16 @@ Oat markers [makeRadialGlowTexture, makeOatGlowSprite, createOatGlowMarker, upda
 - Font-arrival re-layout only restarts a box that is still performing. The old
   condition would also have replayed a finished story.
 - The old code kept an invisible sprite for the initial oat; here none is made.
+- Overlapping boxes. In the old code each box was one element whose frosted glass
+  (a backdrop blur) covered whatever was behind it, other boxes' words included, so
+  two boxes swapping depth order popped. Here a box is two elements: its glass, in a
+  `.story-glasses` layer beneath every box's text, and its text, in `.story-texts`.
+  Glass therefore never frosts another box's words. Instead `depth-softening.js`
+  computes, per box, how obscured it is by nearer boxes it overlaps: 0 when level with
+  them in depth, rising to 1 once it is `depthSoftnessWorld` behind and 40% covered.
+  `story-box.js` `setObscured` turns that into a blur of up to `blurRadiusPx` and a
+  dimming of up to `tintOpacity` on the box's text. Added 2026-11-10 at the artist's
+  request.
 
 ## Contradictions with the earlier checklist
 
@@ -178,10 +193,8 @@ Oat markers [makeRadialGlowTexture, makeOatGlowSprite, createOatGlowMarker, upda
 
 ## Unsure
 
-- Sound level: the old clip table gave `cuttlefish-reveal` a gain of 0.5. No
-  `volume` is passed to `playOneShot`, assuming the audio module holds per-clip
-  gains. If it does not, pass `{ volume: 0.5 }` in `index.js` `trigger()`.
-- Font metrics depend on the shell: the root font size (old: 16 px) and a
-  `--font-story` variable (story.css falls back to the old font stack).
+- Text blur on phones: the depth softening changes a CSS blur on text every frame
+  while boxes overlap and the camera moves. Measured on a desktop it costs nothing
+  visible (60 fps with five boxes); it has not been measured on a phone.
 - `coverageNear` latency: the old readback usually landed a frame or two after
   the request. A much slower implementation slows triggering in proportion.

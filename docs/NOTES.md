@@ -10,11 +10,12 @@ lists where the rewrite knowingly differs, and what it does not include.
   distance, food reach and so on in atlas (UV) units, so its behaviour depended on how
   the mesh was unwrapped and needed retuning for each mesh. Here those are world
   distances, converted through the surface's metric. The numbers are the old ones
-  converted at the old mesh's average of 19.483 world units per atlas unit, so on
-  average the colony behaves the same. Locally it differs wherever the unwrap is denser
-  or sparser than average: on the current mesh the opening colony is about 1.2 times
-  wider than in the old game, because that part of the body has more texels than
-  average and the old game therefore drew it smaller.
+  converted at the old mesh's average of 19.483 world units per atlas unit, so at
+  slime size 1 the colony behaves the same on average. Locally it differs wherever the
+  unwrap is denser or sparser than average: measured at slime size 1, the opening colony
+  was about 1.2 times wider than in the old game, because that part of the body has more
+  texels than average and the old game therefore drew it smaller. (The game now runs at
+  slime size 0.5; see the next point.)
 - **The slime is half the old size relative to the body** (`SLIME_SIZE = 0.5` in
   `src/config.js`, set on 2026-11-10 at the artist's request). One number scales every
   slime-related distance together, oats' reach and spacing included. Set it to 1 for
@@ -51,16 +52,25 @@ lists where the rewrite knowingly differs, and what it does not include.
   readout, and the simulation/look preset menus. The settings panel has every slider;
   the defaults are the old "Default" simulation preset and "Pearl bright" look.
 - Population control (off by default in the old game), optical zoom (off by default),
-  the agent-dots and wireframe views, and the many seam debug views.
+  the option to tint the slime film with the gold data (off by default), the agent-dots
+  view and its `3` key, the wireframe view, and the many seam debug views.
+- The old URL flags `?smoothfield`, `?legacyglow`, `?bakeExport`, `?ptex`, `?rec`,
+  `?norec` and `?render`, and the old `window.__cuttle` console API (`window.__game`
+  is its smaller replacement).
 - Dev save/load of simulation state, `?rafshim`, and the triple-tap corner gesture that
   opened the panel on phones.
 
-## Not verified
+## What has and has not been verified (as of 2026-11-10)
 
-- Sound has only been exercised with a stubbed audio system and in headless Chrome
-  (no errors). Nobody has listened to it.
-- No real phone has run it. The phone profile and the no-float-blend / no-float-filter
-  code paths run in desktop Chrome (`?mobile=1&likephone`).
+- The checks in `tests/` pass against the deployed site: boot, the opening as a visitor,
+  crossing the atlas's cut, the idle ending, and story boxes handing over.
+- The artist has confirmed that sound works and that the game runs on an iPhone 13 Pro
+  Max. Nothing was measured on the phone (frame rate, memory).
+- Unattended running: three consecutive Begin-to-idle-restart cycles on the live site
+  came back clean with flat memory. Hours of cycles have not been run.
 - The look was compared with the old game by eye on screenshots of similar moments,
   not pixel by pixel: the two simulations are not step-for-step identical, so there is
   no identical frame to compare.
+- Limbs: the current mesh (Shen v24) gives the tentacles and tail horns almost no texels,
+  so slime cannot grow along them; they light up as a flat sheen when slime reaches
+  their base. This needs a re-unwrapped mesh, not a code change.
