@@ -7,7 +7,7 @@ import { MeshBVH, acceleratedRaycast } from 'three-mesh-bvh';
 // BUMP THIS (and the matching BUILD_VERSION in index.html) on every deploy.
 // index.html and main.js cache independently, so they carry the same value and
 // the bootstrap flags a mismatch — that means one of the two files is cached.
-const BUILD_VERSION = '2026-11-10-fresh-load';
+const BUILD_VERSION = '2026-11-10-orbit-30-below';
 
 // Load diagnostics hook installed by the inline bootstrap in index.html.
 // No-ops when absent so main.js keeps working standalone.
@@ -1233,10 +1233,10 @@ controls.rotateSpeed = CAMERA_ORBIT_ROTATE_SPEED;
 controls.zoomSpeed = CAMERA_ORBIT_ZOOM_SPEED;
 controls.minDistance = 0.8 * WORLD_LINEAR_SCALE;
 controls.maxDistance = 5.6 * WORLD_LINEAR_SCALE;
-// Orbit from straight overhead down to 60 degrees below the horizon, so the
+// Orbit from straight overhead down to 30 degrees below the horizon, so the
 // camera can peek under the body without flipping over the bottom pole.
 controls.minPolarAngle = 0;
-controls.maxPolarAngle = THREE.MathUtils.degToRad(150);
+controls.maxPolarAngle = THREE.MathUtils.degToRad(120);
 controls.target.copy(initialCameraPose.target);
 controls.update();
 controls.enableZoom = !params.useOpticalZoom;
