@@ -7,7 +7,7 @@ import { MeshBVH, acceleratedRaycast } from 'three-mesh-bvh';
 // BUMP THIS (and the matching BUILD_VERSION in index.html) on every deploy.
 // index.html and main.js cache independently, so they carry the same value and
 // the bootstrap flags a mismatch — that means one of the two files is cached.
-const BUILD_VERSION = '2026-08-23-idle-ending';
+const BUILD_VERSION = '2026-11-10-shen-v24';
 
 // Load diagnostics hook installed by the inline bootstrap in index.html.
 // No-ops when absent so main.js keeps working standalone.
@@ -183,7 +183,14 @@ const MOUSE_REPEL_RADIUS_UV = 0.07 / 3;
 const MOUSE_REPEL_STRENGTH = 3.0;
 const MOUSE_REPEL_RAYCAST_INTERVAL_MS = 45;
 const INITIAL_AGENT_SPAWN_SIGMA = DEFAULT_OAT_RADIUS * 0.45;
-const GLB_PATH = 'luyvwj-fwgyww.glb';
+const GLB_PATH = 'shen-v24-med.glb';
+// Tangent-space normal map baked from the high-res sculpt (OpenGL convention,
+// authored against the sculpt's original UVs). The GLB carries those original
+// UVs as its second UV set (uv1); its first set (uv) is the same chart shrunk
+// about the atlas centre so the simulation's UV-unit tuning keeps the surface
+// density it had on the previous mesh.
+const SURFACE_NORMAL_MAP_PATH = 'shen-v24-normal-med.jpg';
+const SURFACE_NORMAL_MAP_STRENGTH = 1.0;
 const GOLD_WAFER_LOOKUP_PATH = 'material%20data/thicker_au_rgb_thickness_angle_tensor.json';
 const GOLD_WAFER_BODY_ENV_EQUIRECT_WIDTH = 512;
 const GOLD_WAFER_BODY_ENV_EQUIRECT_HEIGHT = 256;
@@ -3993,13 +4000,16 @@ const slimeVertex = `
 // same field data as their 3D neighbours instead of rendering a black hole.
 // See buildRenderUvFallbackAttribute.
 in vec2 a_renderUv;
+in vec2 uv1;
 out vec2 v_uv;
+out vec2 v_surfaceNormalUv;
 out vec3 v_worldPos;
 out vec3 v_worldNormal;
 out vec3 v_viewPos;
 out vec3 v_viewNormal;
 void main() {
   v_uv = a_renderUv;
+  v_surfaceNormalUv = uv1;
   vec4 worldPos = modelMatrix * vec4(position, 1.0);
   vec4 viewPos = modelViewMatrix * vec4(position, 1.0);
   v_worldPos = worldPos.xyz;
@@ -4013,11 +4023,14 @@ void main() {
 const slimeFragment = `
 precision highp float;
 in vec2 v_uv;
+in vec2 v_surfaceNormalUv;
 in vec3 v_worldPos;
 in vec3 v_worldNormal;
 in vec3 v_viewPos;
 in vec3 v_viewNormal;
 out vec4 outColor;
+uniform sampler2D u_surfaceNormalMap;
+uniform float u_surfaceNormalStrength;
 uniform sampler2D u_food;
 uniform sampler2D u_agentDensity;
 uniform sampler2D u_agentDensityOverlay;
@@ -4269,6 +4282,20 @@ void main() {
     vec3 up = abs(N0.y) < 0.999 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
     T = normalize(cross(up, N0));
     B = normalize(cross(N0, T));
+  }
+
+  // Sculpted surface detail: bend the geometric normal by the baked normal map
+  // before the slime bump is layered on top. The map is OpenGL-convention (+G
+  // toward increasing V with V up); B here follows the glTF V axis (down the
+  // image), hence the minus sign on the green channel.
+  if (u_surfaceNormalStrength > 0.0) {
+    vec3 nm = texture(u_surfaceNormalMap, v_surfaceNormalUv).xyz * 2.0 - 1.0;
+    nm.xy *= u_surfaceNormalStrength;
+    float tLen = length(T);
+    float bLen = length(B);
+    if (tLen > 1e-6 && bLen > 1e-6) {
+      N0 = normalize((T / tLen) * nm.x - (B / bLen) * nm.y + N0 * nm.z);
+    }
   }
 
   vec3 viewDir = normalize(u_cameraPos - v_worldPos);
@@ -5514,6 +5541,32 @@ async function loadGoldWaferFilmLookup() {
   }
 }
 
+// The normal map only applies once its image has arrived and the loaded mesh
+// actually carries the second UV set it was authored against.
+let surfaceNormalTextureReady = false;
+const surfaceNormalTexture = new THREE.TextureLoader().load(
+  SURFACE_NORMAL_MAP_PATH,
+  () => {
+    surfaceNormalTextureReady = true;
+    diagLog('normalMap', 'loaded');
+    if (slimeMaterial?.uniforms?.u_surfaceNormalStrength) {
+      slimeMaterial.uniforms.u_surfaceNormalStrength.value = getSurfaceNormalStrength();
+    }
+  },
+  undefined,
+  (err) => {
+    console.warn(`Failed to load ${SURFACE_NORMAL_MAP_PATH}; rendering without sculpt detail.`, err);
+    diagLog('normalMap', 'failed to load');
+  },
+);
+surfaceNormalTexture.flipY = false;
+surfaceNormalTexture.colorSpace = THREE.NoColorSpace;
+surfaceNormalTexture.anisotropy = 8;
+
+function getSurfaceNormalStrength() {
+  return surfaceNormalTextureReady && mesh?.geometry?.attributes?.uv1 ? SURFACE_NORMAL_MAP_STRENGTH : 0;
+}
+
 function buildSlimeMaterial() {
   return new THREE.ShaderMaterial({
     glslVersion: THREE.GLSL3,
@@ -5523,6 +5576,8 @@ function buildSlimeMaterial() {
     defines: {
     },
     uniforms: {
+      u_surfaceNormalMap: { value: surfaceNormalTexture },
+      u_surfaceNormalStrength: { value: getSurfaceNormalStrength() },
 	      u_food: { value: renderSampleViewRT.read.texture },
 	      u_agentDensity: { value: densityRT.texture },
 	      u_agentDensityOverlay: { value: agentDensityOverlayRT.texture },
