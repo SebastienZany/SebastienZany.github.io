@@ -1,12 +1,11 @@
 # A Bestiary of Vanishings — rewrite contracts
 
-This is the same game as the one in `../physarum-17` (live at bestiaryofvanishings.com),
-written to be read. The old `main.js` (20k lines) and the running old game are the ONLY
-source of truth for behaviour. Notes left in `physarum-16`, `physarum-17/v2` and
-`physarum-18` by earlier rewrite attempts may be wrong: use them at most as an index of
-where to look, and verify against the old code before relying on anything they say.
-Never copy code from them, and never copy code from the old `main.js` either: read it
-for behaviour and constants, then write the behaviour fresh.
+This is a rewrite of the older version of the game in this repository's history (last at
+commit `2622cd1`), written to be read. That old `main.js` (20k lines) was the only source
+of truth for behaviour while this was written. Notes left by earlier, abandoned rewrite
+attempts were often wrong and were used only as an index of where to look. No code was
+copied from them or from the old `main.js`: it was read for behaviour and constants, and
+the behaviour written fresh.
 
 ## Shape of the program
 

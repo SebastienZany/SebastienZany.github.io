@@ -1,6 +1,7 @@
 # How this differs from the old game
 
-The old game (`../physarum-17/main.js`) was the reference for behaviour. This file
+The old game (`main.js` in this repository's history, last at commit `2622cd1`) was the
+reference for behaviour. This file
 lists where the rewrite knowingly differs, and what it does not include.
 
 ## Deliberate differences

@@ -1,10 +1,12 @@
 # A Bestiary of Vanishings
 
-The same game as `../physarum-17` (bestiaryofvanishings.com), rewritten to be read.
+The game at bestiaryofvanishings.com.
 A slime mould grows over a sculpted body; the player feeds it oats; where it reaches
 an oat, a story surfaces.
 
-Not deployed. The live site is still the old code.
+This is a rewrite, made in November 2026, of an older 20,000-line version. The old
+version is in this repository's history (last commit `2622cd1`). Pushing `main` deploys;
+bump `window.__BUILD_VERSION` at the top of `index.html` when you do.
 
 ## Run it
 
@@ -80,5 +82,4 @@ server on port 8319.
 | `node tests/play.mjs` | The opening as a visitor: Begin, intro, an oat, its story |
 | `node tests/surface-checks.mjs` | Slime crosses the atlas's cut; nothing lives off the body |
 | `node tests/idle-ending.mjs` | Two idle minutes end the game and reset it (takes 3 min) |
-| `node tests/compare-legacy.mjs` | Colony statistics side by side with the old game (needs it served on 8317) |
 | `node src/audio/smoke-test.mjs` etc. | Each delegated module's own logic test, in Node |
