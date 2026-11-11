@@ -1,12 +1,14 @@
 // Shared helper for the browser checks: opens the game in headless Chrome.
 // Needs Playwright; point PLAYWRIGHT_PATH at its index.mjs if it is not installed here.
-export async function openGame(url, { width = 1280, height = 800, quiet = false } = {}) {
+export async function openGame(url, { width = 1280, height = 800, quiet = false, deviceScaleFactor = 1 } = {}) {
   const { chromium } = await import(process.env.PLAYWRIGHT_PATH ?? 'playwright');
   const browser = await chromium.launch({
     channel: 'chrome', headless: true,
-    args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'],
+    // UNCAPPED=1 lets frames run faster than the display, to measure headroom.
+    args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist',
+      ...(process.env.UNCAPPED ? ['--disable-frame-rate-limit', '--disable-gpu-vsync'] : [])],
   });
-  const page = await (await browser.newContext({ viewport: { width, height } })).newPage();
+  const page = await (await browser.newContext({ viewport: { width, height }, deviceScaleFactor })).newPage();
   const problems = [];
   page.on('pageerror', (error) => problems.push(`pageerror: ${String(error).slice(0, 500)}`));
   page.on('console', (message) => {

@@ -18,6 +18,7 @@ import { paramSchema, defaultParams, cssVarsFor } from './params.js';
 import { createStoryLibrary } from './story-library.js';
 import { createTriggerPoller } from './trigger-poller.js';
 import { createStoryBox } from './story-box.js';
+import { obscuredAmounts } from './depth-softening.js';
 import { createSpotVisibility } from './spot-visibility.js';
 import { createGraphemeSplitter } from './text-layout.js';
 
@@ -38,6 +39,12 @@ export function createStories(ctx, hooks) {
   layer.style.setProperty('--story-line-mask', LINE_WIPE.maskImage);
   layer.style.setProperty('--story-line-mask-size', `${(LINE_WIPE.maskScale * 100).toFixed(0)}% 100%`);
   layer.style.setProperty('--story-line-mask-start', `${LINE_WIPE.startPositionPercent}% 0`);
+  // All glass panes sit beneath all text (see story-box.js).
+  const glassLayer = document.createElement('div');
+  glassLayer.className = 'story-glasses';
+  const textLayer = document.createElement('div');
+  textLayer.className = 'story-texts';
+  layer.append(glassLayer, textLayer);
   ctx.dom.overlay.append(layer);
 
   const measureContext = document.createElement('canvas').getContext('2d');
@@ -64,7 +71,8 @@ export function createStories(ctx, hooks) {
       const recheckPhaseMs =
         (storyOatCount * BOX_VISIBILITY.recheckPhaseStepMs) % BOX_VISIBILITY.occlusionRecheckMs;
       entry.box = createStoryBox({
-        layer,
+        layer: textLayer,
+        glassLayer,
         oat,
         visibility: createSpotVisibility({ point: oat.point, normal: oat.normal, recheckPhaseMs, now }),
         measureContext,
@@ -137,6 +145,12 @@ export function createStories(ctx, hooks) {
       if (due) startText(entry, now);
       entry.box.update(now, frame);
     }
+
+    // Blur and dim each box by how far it is behind a nearer one it overlaps.
+    const onScreen = entries.filter((entry) => entry.box?.getPlacement());
+    const amounts = obscuredAmounts(onScreen.map((entry) => entry.box.getPlacement()), params.depthSoftnessWorld ?? 0.6);
+    const glassLook = { blurRadiusPx: Math.max(0, params.blurRadiusPx ?? 7), tintOpacity: Math.max(0, Math.min(1, params.tintOpacity ?? 0.33)) };
+    onScreen.forEach((entry, i) => entry.box.setObscured(amounts[i], glassLook));
   }
 
   // Settings are read live: push them to CSS whenever one has changed.

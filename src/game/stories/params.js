@@ -21,6 +21,8 @@ export const paramSchema = [
       help: 'Color of the softly feathered story box blur.' },
     { key: 'tintOpacity', label: 'Tint strength', type: 'range', min: 0, max: 0.5, step: 0.01, default: 0.33,
       help: 'Opacity of the story box tint; the blur stays feathered at zero border opacity.' },
+    { key: 'depthSoftnessWorld', label: 'Depth softness', type: 'range', min: 0.02, max: 3, step: 0.02, default: 0.6,
+      help: 'How far behind another story box (in world units) a box must be before that box fully frosts it. Larger = a more gradual hand-over when boxes swap depth.' },
     { key: 'triggerThreshold', label: 'Story trigger', type: 'range', min: 0, max: 1, step: 0.01, default: 0.05,
       help: 'Local slime amount needed before an oat starts its story box animation.' },
   ] },

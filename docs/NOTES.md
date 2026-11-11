@@ -36,6 +36,10 @@ lists where the rewrite knowingly differs, and what it does not include.
   earlier than in the old game.
 - **The sculpt's normal map is applied to the gold body as well as the slime film.**
   The old game (as of the day the Shen v24 mesh went in) applied it to the film only.
+- **Overlapping story boxes hand over gradually.** In the old game the nearer box's
+  glass frosted the farther box's words at full strength, so two boxes swapping depth
+  order popped. Now all glass sits beneath all text, and a box's words are blurred and
+  dimmed by how far it is behind a nearer box it overlaps ("Depth softness" setting).
 - **Freshness.** The boot script re-checks every module with the server before running
   it, by walking the import graph; no list of files to maintain.
 - **A second organism** (`?slime=mould`) exists as a template; the old game had one.

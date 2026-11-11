@@ -81,5 +81,6 @@ server on port 8319.
 | `node tests/smoke.mjs` | The game boots, seeds a colony, and the colony lives |
 | `node tests/play.mjs` | The opening as a visitor: Begin, intro, an oat, its story |
 | `node tests/surface-checks.mjs` | Slime crosses the atlas's cut; nothing lives off the body |
+| `node tests/story-depth.mjs` | Two overlapping story boxes hand over gradually when the camera swaps their depth order |
 | `node tests/idle-ending.mjs` | Two idle minutes end the game and reset it (takes 3 min) |
 | `node src/audio/smoke-test.mjs` etc. | Each delegated module's own logic test, in Node |

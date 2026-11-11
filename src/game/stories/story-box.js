@@ -16,12 +16,20 @@ import {
   wipePositionPercent,
 } from './story-timeline.js';
 
-// layer: the element boxes are added to.
+// A box is two elements at the same place: the glass (in glassLayer, beneath
+// every box's text) and the text. Keeping all glass under all text means a
+// nearer box's glass frosts the scene but never another box's words; how much
+// a box behind another is blurred is set separately, by setObscured().
+//
+// layer: the element the text parts are added to. glassLayer: for the glass.
 // oat: its `point` is where the box points at.
 // visibility: a createSpotVisibility instance for the oat.
 // measureContext: a Canvas2D context used to measure text widths.
 // splitGraphemes: from createGraphemeSplitter().
-export function createStoryBox({ layer, oat, visibility, measureContext, splitGraphemes }) {
+export function createStoryBox({ layer, glassLayer, oat, visibility, measureContext, splitGraphemes }) {
+  const glass = document.createElement('div');
+  glass.className = 'story-glass';
+  glassLayer.append(glass);
   const box = document.createElement('article');
   box.className = 'story-box';
   const tail = document.createElement('div');
@@ -36,6 +44,8 @@ export function createStoryBox({ layer, oat, visibility, measureContext, splitGr
   layer.append(box);
 
   const boxStyle = createStyleWriter(box);
+  const glassStyle = createStyleWriter(glass);
+  const contentStyle = createStyleWriter(content);
   const tailStyle = createStyleWriter(tail);
   const projected = oat.point.clone(); // scratch for projecting to the screen
 
@@ -47,6 +57,8 @@ export function createStoryBox({ layer, oat, visibility, measureContext, splitGr
   let lineStyles = [];
   let firstUnfinishedLine = 0; // lines before this are fully revealed
   let shown = false;
+  // Where the box is this frame, for depth softening; null while hidden.
+  let placement = null;
 
   function startText(storyText, now) {
     text = String(storyText ?? '');
@@ -124,11 +136,22 @@ export function createStoryBox({ layer, oat, visibility, measureContext, splitGr
     boxStyle.set('--story-glass-opacity', envelope.glass.toFixed(3));
     boxStyle.set('--story-text-opacity', envelope.text.toFixed(3));
     boxStyle.set('--story-spatial-opacity', spatialOpacity.toFixed(3));
+    glassStyle.set('left', `${rect.left.toFixed(1)}px`);
+    glassStyle.set('top', `${rect.top.toFixed(1)}px`);
+    glassStyle.set('--story-glass-opacity', envelope.glass.toFixed(3));
+    glassStyle.set('--story-spatial-opacity', spatialOpacity.toFixed(3));
     // Boxes of nearer oats are drawn over boxes of farther ones.
     const depth01 = Math.max(0, Math.min(1, (projected.z + 1) / 2));
-    boxStyle.set('zIndex', String(Math.round((1 - depth01) * STORY_BOX.zIndexRange)));
+    const zIndex = String(Math.round((1 - depth01) * STORY_BOX.zIndexRange));
+    boxStyle.set('zIndex', zIndex);
+    glassStyle.set('zIndex', zIndex);
     if (!shown) box.classList.add('is-visible');
     shown = true;
+    placement = {
+      rect,
+      distanceWorld: camera.position.distanceTo(oat.point),
+      presence: envelope.glass * spatialOpacity,
+    };
 
     placeTail(tailFor(rect, anchorPx));
   }
@@ -163,13 +186,24 @@ export function createStoryBox({ layer, oat, visibility, measureContext, splitGr
   function hide() {
     if (shown) box.classList.remove('is-visible');
     shown = false;
+    placement = null;
     boxStyle.set('opacity', '0');
     boxStyle.set('--story-spatial-opacity', '0');
+    glassStyle.set('--story-spatial-opacity', '0');
     tailStyle.set('opacity', '0');
+  }
+
+  // amount: 0 = clear, 1 = fully behind another box's glass (see
+  // depth-softening.js). The words are blurred and dimmed as that glass would.
+  function setObscured(amount, { blurRadiusPx, tintOpacity }) {
+    const blurPx = amount * blurRadiusPx;
+    contentStyle.set('filter', blurPx < 0.05 ? 'none' : `blur(${blurPx.toFixed(2)}px)`);
+    contentStyle.set('--story-obscured-opacity', (1 - amount * tintOpacity).toFixed(3));
   }
 
   function dispose() {
     box.remove();
+    glass.remove();
   }
 
   return {
@@ -178,6 +212,8 @@ export function createStoryBox({ layer, oat, visibility, measureContext, splitGr
     isPerforming,
     isAttached: () => box.isConnected,
     update,
+    getPlacement: () => placement,
+    setObscured,
     hide,
     dispose,
   };

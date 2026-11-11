@@ -65,9 +65,29 @@
 }
 
 /* The glass: a tinted, blurring layer larger than the box whose edges fade
-   out. The mask is on the blurring layer itself, because a backdrop blur
+   out. It is its own element, in a layer beneath every box's text, so one
+   box's glass frosts the scene but never another box's words (how much a box
+   behind another is blurred is set from script; see depth-softening.js). The mask is on the blurring layer itself, because a backdrop blur
    with only a soft-edged fill still ends in a hard line. */
-.story-box::before {
+.story-glasses,
+.story-texts {
+  position: absolute;
+  inset: 0;
+}
+/* Each is its own stacking context, so the depth order (z-index) of boxes is
+   kept within glass and within text, and all text stays above all glass. */
+.story-glasses { z-index: 0; }
+.story-texts { z-index: 1; }
+
+.story-glass {
+  position: absolute;
+  /* Same rectangle as its .story-box. */
+  width: min(230px, calc(100vw - 28px));
+  height: 126px;
+  pointer-events: none;
+}
+
+.story-glass::before {
   --story-feather-x: linear-gradient(to right, transparent, #000 var(--story-edge-feather-mask), #000 calc(100% - var(--story-edge-feather-mask)), transparent);
   --story-feather-y: linear-gradient(to bottom, transparent, #000 var(--story-edge-feather-mask), #000 calc(100% - var(--story-edge-feather-mask)), transparent);
 
@@ -107,7 +127,9 @@
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  opacity: calc(var(--story-text-opacity) * var(--story-spatial-opacity));
+  /* --story-obscured-opacity and a blur filter are set from script when the
+     box is behind another (depth-softening.js). */
+  opacity: calc(var(--story-text-opacity) * var(--story-spatial-opacity) * var(--story-obscured-opacity, 1));
 }
 
 /* The window the text rolls through, fading at its top and bottom edges. */
