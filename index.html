@@ -8,7 +8,13 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css">
+    <script>
+    // The one build stamp for this page. BUMP THIS (and the matching
+    // BUILD_VERSION in main.js) on every deploy. The stylesheet URL carries it
+    // so a new deploy can never be paired with a cached old stylesheet.
+    window.__BUILD_VERSION = '2026-11-10-fresh-load';
+    document.write(`<link rel="stylesheet" href="styles.css?v=${window.__BUILD_VERSION}">`);
+    </script>
     <script>
     // Load diagnostics. Runs before the module script so it can report
     // environments where main.js never executes (no import-map support,
@@ -23,8 +29,8 @@
     (() => {
       const t0 = performance.now();
       // Build stamp so a stale cached copy is obvious in the diagnostics report.
-      // BUMP THIS (and the matching BUILD_VERSION in main.js) on every deploy.
-      const BUILD_VERSION = '2026-11-10-orbit-under';
+      // Set once, at the top of this file.
+      const BUILD_VERSION = window.__BUILD_VERSION;
       const events = [];
       const state = { loaded: false, overlay: null, textEl: null, mainVersion: null };
       let previousRun = null;
@@ -204,7 +210,27 @@
         checkMainVersion(mainVersion) {
           state.mainVersion = mainVersion;
           if (mainVersion !== BUILD_VERSION) {
-            log('version-mismatch', `index.html=${BUILD_VERSION} main.js=${mainVersion} — one file is cached; hard-reload`);
+            log('version-mismatch', `index.html=${BUILD_VERSION} main.js=${mainVersion} — one file is cached`);
+            // Self-heal: the boot preflight below keeps the scripts current, so
+            // a mismatch means THIS page came from the cache. Refetch both past
+            // the cache and reload. Once per pair of stamps per tab, so stamps
+            // that genuinely disagree on the server cannot cause a reload loop.
+            const healKey = `cuttle-heal:${BUILD_VERSION}:${mainVersion}`;
+            let alreadyTried = true;
+            try {
+              alreadyTried = sessionStorage.getItem(healKey) === '1';
+              sessionStorage.setItem(healKey, '1');
+            } catch {}
+            if (!alreadyTried) {
+              log('version-heal', 'refetching index.html and main.js past the cache, then reloading');
+              persist();
+              Promise.allSettled([
+                fetch(location.href, { cache: 'reload' }).then((r) => r.arrayBuffer()),
+                fetch('main.js', { cache: 'reload' }).then((r) => r.arrayBuffer()),
+              ]).then(() => location.reload());
+            } else {
+              log('version-heal', 'already tried once in this tab; the two stamps disagree on the server');
+            }
           }
         },
         markLoaded() {
@@ -855,6 +881,38 @@
     // occurred") can still open this page and read the PREVIOUS run's last
     // events (persisted to localStorage every 250ms) to see how far the dying
     // load got. The diagnostics overlay opens automatically.
+    // Freshness preflight. The host lets browsers reuse a cached file for ten
+    // minutes without asking, so right after a deploy a visitor could pair the
+    // new page with old scripts. Before booting, ask the server about each
+    // local module (a conditional request: an unchanged file answers "304" with
+    // no body) so the module loader that follows always finds current copies.
+    // Boot proceeds regardless after a short timeout, e.g. when offline.
+    // Keep this list in step with the static imports under replay/.
+    const APP_MODULES = [
+      'main.js',
+      'replay/record-boot.js', 'replay/clock.js', 'replay/recorder.js',
+      'replay/panel.js', 'replay/viewport.js', 'replay/store.js',
+    ];
+    const OFFLINE_RENDER_MODULES = ['replay/offline.js', 'replay/encode.js', 'replay/audio.js', 'replay/overlays.js'];
+    function bootModule(src, urls) {
+      let booted = false;
+      const boot = () => {
+        if (booted) return;
+        booted = true;
+        const script = document.createElement('script');
+        script.type = 'module';
+        script.src = src;
+        document.body.appendChild(script);
+      };
+      const startedAt = performance.now();
+      Promise.allSettled(urls.map((url) => fetch(url, { cache: 'no-cache' }).then((r) => r.arrayBuffer())))
+        .then((results) => {
+          const failed = results.filter((r) => r.status === 'rejected').length;
+          window.__diag?.log?.('preflight', `${urls.length - failed}/${urls.length} modules checked in ${Math.round(performance.now() - startedAt)}ms`);
+          boot();
+        });
+      setTimeout(boot, 3000);
+    }
     if (new URLSearchParams(location.search).has('safe')) {
       window.__diag?.log?.('safe-mode', 'main.js intentionally not loaded; see previous-run section below for the crashed run');
       window.__diag?.show?.();
@@ -863,16 +921,10 @@
       // virtual clock BEFORE main.js evaluates — main.js captures timestamps at
       // module scope, so the shim has to be in place first — then boots the game
       // itself. See replay/offline.js.
-      const script = document.createElement('script');
-      script.type = 'module';
-      script.src = 'replay/offline.js';
-      document.body.appendChild(script);
+      bootModule('replay/offline.js', [...APP_MODULES, ...OFFLINE_RENDER_MODULES]);
     } else if (new URLSearchParams(location.search).has('norec')) {
       // Escape hatch: boot main.js bare, with no recording layer at all.
-      const script = document.createElement('script');
-      script.type = 'module';
-      script.src = 'main.js';
-      document.body.appendChild(script);
+      bootModule('main.js', ['main.js']);
     } else {
       // Normal play, with session recording on — press R for the render panel.
       //
@@ -886,10 +938,7 @@
       // Gate before re-enabling any of that: replay/ab-live-test.mjs must pass
       // (stock vs recording equivalence), and replay/e2e-live-flow.mjs must
       // produce a valid MP4 on static-host semantics. Both passed 2026-08-16.
-      const script = document.createElement('script');
-      script.type = 'module';
-      script.src = 'replay/record-boot.js';
-      document.body.appendChild(script);
+      bootModule('replay/record-boot.js', APP_MODULES);
     }
     </script>
   </body>

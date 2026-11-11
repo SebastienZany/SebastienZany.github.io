@@ -7,7 +7,7 @@ import { MeshBVH, acceleratedRaycast } from 'three-mesh-bvh';
 // BUMP THIS (and the matching BUILD_VERSION in index.html) on every deploy.
 // index.html and main.js cache independently, so they carry the same value and
 // the bootstrap flags a mismatch — that means one of the two files is cached.
-const BUILD_VERSION = '2026-11-10-orbit-under';
+const BUILD_VERSION = '2026-11-10-fresh-load';
 
 // Load diagnostics hook installed by the inline bootstrap in index.html.
 // No-ops when absent so main.js keeps working standalone.
@@ -191,6 +191,9 @@ const GLB_PATH = 'shen-v24-med.glb';
 // density it had on the previous mesh.
 const SURFACE_NORMAL_MAP_PATH = 'shen-v24-normal-med.jpg';
 const SURFACE_NORMAL_MAP_STRENGTH = 1.0;
+// Model assets are requested with the build stamp so a deploy that replaces one
+// under the same filename is never paired with a cached older copy.
+const versionedAssetUrl = (path) => `${path}?v=${encodeURIComponent(BUILD_VERSION)}`;
 const GOLD_WAFER_LOOKUP_PATH = 'material%20data/thicker_au_rgb_thickness_angle_tensor.json';
 const GOLD_WAFER_BODY_ENV_EQUIRECT_WIDTH = 512;
 const GOLD_WAFER_BODY_ENV_EQUIRECT_HEIGHT = 256;
@@ -5546,7 +5549,7 @@ async function loadGoldWaferFilmLookup() {
 // actually carries the second UV set it was authored against.
 let surfaceNormalTextureReady = false;
 const surfaceNormalTexture = new THREE.TextureLoader().load(
-  SURFACE_NORMAL_MAP_PATH,
+  versionedAssetUrl(SURFACE_NORMAL_MAP_PATH),
   () => {
     surfaceNormalTextureReady = true;
     diagLog('normalMap', 'loaded');
@@ -15415,7 +15418,7 @@ async function exportSeamBake() {
 
 diagLog('glb', `fetching ${GLB_PATH}`);
 new GLTFLoader().load(
-  GLB_PATH,
+  versionedAssetUrl(GLB_PATH),
   (gltf) => {
     diagLog('glb', 'downloaded and parsed');
     Promise.resolve()
